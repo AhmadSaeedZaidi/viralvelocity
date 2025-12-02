@@ -1,6 +1,15 @@
-from sqlalchemy import Column, String, BigInteger, DateTime, PrimaryKeyConstraint, Text, text
-from sqlalchemy.sql import func
 from database import Base, engine
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    PrimaryKeyConstraint,
+    String,
+    Text,
+    text,
+)
+from sqlalchemy.sql import func
+
 
 class VideoStat(Base):
     """
@@ -48,7 +57,9 @@ def init_db():
         
         # 2. Enable TimescaleDB Hypertable magic
         with engine.connect() as conn:
-            conn.execute(text("SELECT create_hypertable('video_stats', 'time', if_not_exists => TRUE);"))
+            conn.execute(text(
+                "SELECT create_hypertable('video_stats','time',if_not_exists => TRUE);"
+            ))
             conn.commit()
             print("Database initialized and Hypertable ready.")
     except Exception as e:

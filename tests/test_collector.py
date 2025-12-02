@@ -1,5 +1,7 @@
 import datetime
+
 from collector.models import VideoStat
+
 
 def test_video_link_generation():
     """

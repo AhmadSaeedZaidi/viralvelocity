@@ -1,7 +1,8 @@
-import os
 import datetime
-from googleapiclient.discovery import build
+import os
+
 from database import SessionLocal
+from googleapiclient.discovery import build
 from models import VideoStat, init_db
 
 # --- CONFIGURATION ---
@@ -18,7 +19,7 @@ def get_youtube_data():
     """
     Connects to YouTube API and fetches stats + metadata.
     """
-    print(f"Connecting to YouTube API...")
+    print("Connecting to YouTube API...")
     youtube = build("youtube", "v3", developerKey=API_KEY)
     
     # Fetch 'statistics' (views) and 'snippet' (title, thumbnails)
@@ -43,7 +44,10 @@ def get_youtube_data():
         # Fetch the best available thumbnail
         thumbnails = snippet.get("thumbnails", {})
         # Try 'high' (480x360), fallback to 'default' (120x90)
-        thumb_url = thumbnails.get("high", {}).get("url") or thumbnails.get("default", {}).get("url")
+        thumb_url = (
+            thumbnails.get("high", {}).get("url") 
+            or thumbnails.get("default", {}).get("url")
+        )
 
         video_snapshot = VideoStat(
             time=current_time,
