@@ -1,0 +1,35 @@
+name: CI - Lint & Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  quality-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install All Dependencies
+        # Installs EVERYTHING needed for testing (Collector + ML + Test tools)
+        run: |
+          pip install --upgrade pip
+          pip install ruff pytest
+          if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
+          if [ -f ml_pipeline/requirements.txt ]; then pip install -r ml_pipeline/requirements.txt; fi
+
+      - name: Run Linter (Ruff)
+        # Checks for messy code / bad imports
+        run: ruff check .
+
+      - name: Run Tests (Pytest)
+        # Runs the logic checks in your tests/ folder
+        run: pytest

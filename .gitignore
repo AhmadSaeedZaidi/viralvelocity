@@ -83,6 +83,7 @@ yarn-error.log*
 # --- IDEs & Editors ---
 .vscode/
 .idea/
+.github/chatmodes/
 *.swp
 *.swo
 .DS_Store
