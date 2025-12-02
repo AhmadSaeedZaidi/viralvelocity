@@ -24,7 +24,7 @@ jobs:
           pip install --upgrade pip
           pip install ruff pytest
           if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
-          if [ -f ml_pipeline/requirements.txt ]; then pip install -r ml_pipeline/requirements.txt; fi
+#          if [ -f ml_pipeline/requirements.txt ]; then pip install -r ml_pipeline/requirements.txt; fi
 
       - name: Run Linter (Ruff)
         # Checks for messy code / bad imports
