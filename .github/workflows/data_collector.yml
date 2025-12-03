@@ -23,4 +23,6 @@ jobs:
           docker run --rm \
             --env YOUTUBE_API_KEY="${{ secrets.YOUTUBE_API_KEY }}" \
             --env DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            --env PREFECT_API_KEY="${{ secrets.PREFECT_API_KEY }}" \
+            --env PREFECT_API_URL="${{ secrets.PREFECT_API_URL }}" \
             vv-collector

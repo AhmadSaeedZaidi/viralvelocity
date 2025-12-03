@@ -2,6 +2,7 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
+    Integer,
     PrimaryKeyConstraint,
     String,
     Text,
@@ -15,24 +16,31 @@ from collector.database import Base, engine
 class VideoStat(Base):
     """
     Represents a snapshot of a video's performance at a specific time.
+    Updated to include Rich Metadata for ML Clustering and Regression.
     """
     __tablename__ = "video_stats"
 
-    # Composite Primary Key: Video ID + Timestamp (Required for TimescaleDB)
+    # --- Composite Primary Key ---
     time = Column(DateTime(timezone=True), default=func.now(), nullable=False)
     video_id = Column(String, nullable=False)
     
-    # --- Statistics (The Numbers) ---
+    # --- Statistics (Target Variables) ---
     views = Column(BigInteger, nullable=False)
     likes = Column(BigInteger, nullable=False)
     comments = Column(BigInteger, nullable=False)
     
-    # --- Metadata (The Text) ---
+    # --- Text Metadata (NLP Features) ---
     title = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     tags = Column(Text, nullable=True)
     
-    # --- UI Assets (The Visuals) ---
+    # --- Rich Metadata (New ML Features) ---
+    category_id = Column(String, nullable=True)      
+    duration_seconds = Column(Integer, nullable=True)
+    definition = Column(String, nullable=True)     
+    published_at = Column(DateTime(timezone=True), nullable=True) 
+    
+    # --- UI Assets ---
     thumbnail_url = Column(String, nullable=True)
 
     # Explicit Primary Key Constraint
@@ -44,24 +52,29 @@ class VideoStat(Base):
     def video_link(self):
         """
         Generates the YouTube link on the fly.
-        Usage in frontend: video_object.video_link
         """
         return f"https://www.youtube.com/watch?v={self.video_id}"
 
 def init_db():
     """
-    Creates the table and converts it to a Hypertable if it doesn't exist.
+    Creates tables, enables Hypertable, and sets Retention Policy.
     """
     try:
-        # 1. Create the standard table schema
+        # 1. Create standard table schema
         Base.metadata.create_all(bind=engine)
         
-        # 2. Enable TimescaleDB Hypertable magic
         with engine.connect() as conn:
-            conn.execute(text(
-                "SELECT create_hypertable('video_stats','time',if_not_exists => TRUE);"
-            ))
+            # 2. Enable TimescaleDB Hypertable
+            conn.execute(text(("SELECT create_hypertable('video_stats', "
+                               "'time', if_not_exists => TRUE);")))
+            
+            # 3. Enable Auto-Cleanup (Retention Policy)
+            # This deletes data older than 30 days automatically
+            conn.execute(text(("SELECT add_retention_policy('video_stats', "
+                               "INTERVAL '30 days', if_not_exists => TRUE);")))
+            
             conn.commit()
-            print("Database initialized and Hypertable ready.")
+            print("Database initialized: Hypertable + Retention Policy active.")
+            
     except Exception as e:
         print(f"Database Init Error: {e}")
