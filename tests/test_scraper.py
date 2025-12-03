@@ -1,11 +1,12 @@
-import sys
 import os
-from unittest.mock import patch, MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
 # Fix path import
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from collector.yt_scraper import get_youtube_data
+
 
 @patch("collector.yt_scraper.build")
 def test_get_youtube_data_parsing(mock_build):
@@ -46,8 +47,9 @@ def test_get_youtube_data_parsing(mock_build):
     }
 
     # Inject the fake response
-    mock_service.videos.return_value.list.return_value.execute.return_value = fake_response
-
+    mock_service.videos.return_value.list.return_value.execute.return_value = (
+        fake_response
+    )
     # 3. Run the scraper logic
     # Use .fn to bypass the Prefect @task engine for Unit Testing.
     results = get_youtube_data.fn(["video_123"])

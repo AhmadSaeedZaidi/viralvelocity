@@ -1,11 +1,12 @@
-import sys
-import os
 import datetime
+import os
+import sys
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from collector.models import VideoStat
+
 
 def test_video_link_generation():
     """
