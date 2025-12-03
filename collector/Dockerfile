@@ -1,21 +1,23 @@
-# 1. Use a slim Python image (lightweight & fast)
 FROM python:3.11-slim
 
-# 2. Prevent Python from writing .pyc files (useless in containers)
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# 3. Set the working directory container
+# 1. Set the working directory container
 WORKDIR /app
 
-# 4. Copy requirements first (Docker caches this layer!)
-COPY requirements.txt .
+# 2. Copy requirements first (Docker caches this layer!)
+COPY requirements.txt ./collector/requirements.txt
 
-# 5. Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# 3. Install dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --default-timeout=200 -r collector/requirements.txt
 
-# 6. Copy the source code
-COPY . .
+# 4. Copy the source code
+COPY . ./collector
 
-# 7. Default command: Run the scraper
-CMD ["python", "yt_scraper.py"]
+# 5. Set the working directory to the app folder
+ENV PYTHONPATH=/app
+
+# 6. Default command: Run the scraper
+CMD ["python", "./collector/yt_scraper.py"]

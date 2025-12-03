@@ -4,7 +4,6 @@ on:
   schedule:
     # Run every 6 hours (UTC times: 00:00, 06:00, 12:00, 18:00)
     - cron: '0 */6 * * *'
-  # Allows manual triggering from GitHub UI
   workflow_dispatch:
 
 jobs:
@@ -14,17 +13,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+      # 1. Build the Docker Image
+      - name: Build Collector Image
+        run: docker build -t vv-collector ./collector
 
-      - name: Install Collector Dependencies
-        run: pip install -r collector/requirements.txt
-
-      - name: Run Collector Script
-        env:
-          # Pulls secrets from your Repo Settings
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python collector/yt_scraper.py
+      # 2. Run the Container
+      - name: Run Collector Container
+        run: |
+          docker run --rm \
+            --env YOUTUBE_API_KEY="${{ secrets.YOUTUBE_API_KEY }}" \
+            --env DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            vv-collector
