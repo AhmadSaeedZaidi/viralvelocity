@@ -1,9 +1,10 @@
 import datetime
 import os
 
-from database import SessionLocal
 from googleapiclient.discovery import build
-from models import VideoStat, init_db
+
+from collector.database import SessionLocal
+from collector.models import VideoStat, init_db
 
 # --- CONFIGURATION ---
 API_KEY = os.environ.get("YOUTUBE_API_KEY")

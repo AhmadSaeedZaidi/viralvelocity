@@ -22,7 +22,7 @@ jobs:
         # Installs EVERYTHING needed for testing (Collector + ML + Test tools)
         run: |
           pip install --upgrade pip
-          pip install ruff pytest
+          pip install ruff pytest pytest-env
           if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
 #          if [ -f ml_pipeline/requirements.txt ]; then pip install -r ml_pipeline/requirements.txt; fi
 

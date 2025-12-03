@@ -1,4 +1,3 @@
-from database import Base, engine
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -9,6 +8,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.sql import func
+
+from collector.database import Base, engine
 
 
 class VideoStat(Base):
@@ -45,7 +46,7 @@ class VideoStat(Base):
         Generates the YouTube link on the fly.
         Usage in frontend: video_object.video_link
         """
-        return f"[https://www.youtube.com/watch?v=](https://www.youtube.com/watch?v=){self.video_id}"
+        return f"https://www.youtube.com/watch?v={self.video_id}"
 
 def init_db():
     """

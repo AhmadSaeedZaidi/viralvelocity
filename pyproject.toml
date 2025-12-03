@@ -15,3 +15,9 @@ testpaths = [
     "tests",
 ]
 python_files = "test_*.py"
+
+# Environment Variables for Testing
+env = [
+    "DATABASE_URL=sqlite:///:memory:",
+    "YOUTUBE_API_KEY=dummy_test_key"
+]
