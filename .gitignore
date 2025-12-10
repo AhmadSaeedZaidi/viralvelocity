@@ -101,3 +101,7 @@ temp_downloads/
 # If you use SQLite locally for testing
 *.sqlite3
 *.db
+
+
+# --- Misc ---
+*.sh

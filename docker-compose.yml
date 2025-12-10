@@ -1,22 +1,30 @@
 version: '3.8'
 
 services:
-  # Local Database for Testing
-  db:
-    image: timescale/timescaledb:latest-pg16
+  test_db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: videodb
     ports:
       - "5432:5432"
-    environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=viralvelocity
-    volumes:
-      - local_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d viralvelocity"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
-volumes:
-  local_pg_data:
+  # 2. Collector App
+  collector:
+    build: 
+      context: ./collector 
+      dockerfile: Dockerfile
+    depends_on:
+      test_db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:password@test_db:5432/videodb
+      YOUTUBE_API_KEYS: ${YOUTUBE_API_KEYS}
+      PREFECT_API_KEY: ${PREFECT_API_KEY}
+      PREFECT_API_URL: ${PREFECT_API_URL}

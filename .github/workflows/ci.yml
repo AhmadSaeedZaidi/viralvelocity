@@ -7,9 +7,51 @@ on:
     branches: [ "main" ]
 
 jobs:
-  quality-check:
+  # --- JOB 1: LINTING ---
+  lint:
     runs-on: ubuntu-latest
-    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Lint Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+
+      - name: Run Linter (Ruff)
+        run: ruff check .
+
+  # --- JOB 2: TESTING ---
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       PYTHONPATH: .
 
@@ -23,19 +65,15 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install All Dependencies
+      - name: Install Test Dependencies
         run: |
           pip install --upgrade pip
-          pip install ruff pytest pytest-mock pytest-env sqlalchemy google-api-python-client prefect isodate
+          pip install pytest pytest-mock pytest-env sqlalchemy google-api-python-client prefect isodate psycopg2-binary
           if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
-
-      - name: Run Linter (Ruff)
-        run: ruff check .
 
       - name: Run Tests (Pytest)
         env:
-          YOUTUBE_API_KEYS: ${{ secrets.YOUTUBE_API_KEYS || 'dummy_key_1,dummy_key_2,dummy_key_3' }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL || 'sqlite:///:memory:' }}
-          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY || 'dummy_prefect_key' }}
-          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL || 'http://dummy-url' }}
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          YOUTUBE_API_KEYS: 'dummy_key_1,dummy_key_2'
+
         run: pytest

@@ -1,18 +1,17 @@
 from datetime import datetime, timezone
-
+import os
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# Import your models
 from collector.models import Base, SearchDiscovery, TrendingDiscovery, Video, VideoStat
 
 # --- Fixtures ---
 
 @pytest.fixture(scope="module")
 def engine():
-    # Use SQLite in-memory for fast testing
-    return create_engine("sqlite:///:memory:")
+    db_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/test_db")
+    return create_engine(db_url)
 
 @pytest.fixture(scope="module")
 def tables(engine):
@@ -67,7 +66,6 @@ def test_video_stats_relationship(session):
     session.commit()
 
     # 3. Retrieve
-    # but SQLAlchemy handles the ORM layer mapping.
     stats = session.query(VideoStat).filter_by(video_id="stat_test_vid").all()
     assert len(stats) == 1
     assert stats[0].views == 100

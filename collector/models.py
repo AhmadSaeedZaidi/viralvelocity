@@ -10,13 +10,11 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 from collector.database import Base, engine
 
-
 # --- 1. The Core Video Table (Metadata) ---
-# Stores static or slowly-changing data. Created when we first find the video.
 class Video(Base):
     __tablename__ = "videos"
 
@@ -42,6 +40,11 @@ class Video(Base):
     # System Metadata
     first_seen_at = Column(DateTime(timezone=True), default=func.now())
 
+    # --- HELPERS ---
+    @property
+    def video_link(self):
+        return f"https://www.youtube.com/watch?v={self.video_id}"
+
 # --- 2. The Statistics Table (Time Series) ---
 class VideoStat(Base):
     __tablename__ = "video_stats"
@@ -60,7 +63,6 @@ class VideoStat(Base):
     )
 
 # --- 3. Discovery Logs ---
-# Tracks HOW we found the video (Search vs Trending)
 class SearchDiscovery(Base):
     __tablename__ = "search_discovery"
     
