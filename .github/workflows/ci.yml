@@ -33,11 +33,6 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     services:
-  collector:
-    build:
-      context: ./collector
-      dockerfile: Dockerfile
-    services:
       postgres:
         image: postgres:17
         env:
@@ -68,6 +63,7 @@ jobs:
       - name: Install Test Dependencies
         run: |
           pip install --upgrade pip
+          # Ensure you install the project dependencies here
           pip install pytest pytest-mock pytest-env sqlalchemy google-api-python-client prefect isodate psycopg2-binary
           if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
 
@@ -75,5 +71,4 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
           YOUTUBE_API_KEYS: 'dummy_key_1,dummy_key_2'
-
         run: pytest
