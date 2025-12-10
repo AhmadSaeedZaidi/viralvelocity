@@ -9,6 +9,10 @@ on:
 jobs:
   quality-check:
     runs-on: ubuntu-latest
+    
+    env:
+      PYTHONPATH: .
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -17,19 +21,21 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install All Dependencies
-        # Installs EVERYTHING needed for testing (Collector + ML + Test tools)
         run: |
           pip install --upgrade pip
-          pip install ruff pytest pytest-env
+          pip install ruff pytest pytest-mock pytest-env sqlalchemy google-api-python-client prefect isodate
           if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
-#          if [ -f ml_pipeline/requirements.txt ]; then pip install -r ml_pipeline/requirements.txt; fi
 
       - name: Run Linter (Ruff)
-        # Checks for messy code / bad imports
         run: ruff check .
 
       - name: Run Tests (Pytest)
-        # Runs the logic checks in your tests/ folder
+        env:
+          YOUTUBE_API_KEYS: ${{ secrets.YOUTUBE_API_KEYS || 'dummy_key_1,dummy_key_2,dummy_key_3' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'sqlite:///:memory:' }}
+          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY || 'dummy_prefect_key' }}
+          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL || 'http://dummy-url' }}
         run: pytest
