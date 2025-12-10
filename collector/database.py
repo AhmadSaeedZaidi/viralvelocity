@@ -1,19 +1,9 @@
 import os
-
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# 1. Get DB URL from Environment Variables
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@localhost:5432/videodb")
 
-if not DATABASE_URL:
-    print("WARNING: DATABASE_URL not found. Database operations will fail.")
-
-# 2. Create the Engine
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-
-# 3. Session Factory
+engine = create_engine(DATABASE_URL, pool_size=20, max_overflow=0)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# 4. Base Model
 Base = declarative_base()
