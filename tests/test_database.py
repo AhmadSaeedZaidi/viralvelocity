@@ -1,10 +1,11 @@
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, timezone
 
 # Import your models
-from collector.models import Base, Video, VideoStat, SearchDiscovery, TrendingDiscovery
+from collector.models import Base, SearchDiscovery, TrendingDiscovery, Video, VideoStat
 
 # --- Fixtures ---
 

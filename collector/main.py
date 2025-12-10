@@ -1,13 +1,21 @@
 import datetime
-import os
 import math
+import os
+
 import isodate
-from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from googleapiclient.discovery import build
 from prefect import flow, task
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from collector.database import SessionLocal
-from collector.models import Video, VideoStat, SearchDiscovery, TrendingDiscovery, init_db
+from collector.models import (
+    SearchDiscovery,
+    TrendingDiscovery,
+    Video,
+    VideoStat,
+    init_db,
+)
 
 # --- CONFIGURATION ---
 TOPIC_POOL = [
@@ -121,7 +129,8 @@ def get_historical_targets(lag_hours):
     target_ids = []
     
     # Window: Target +/- 1.5 hours
-    time_threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=lag_hours)
+    time_threshold = (
+    datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=lag_hours))
     window_start = time_threshold - datetime.timedelta(minutes=90)
     window_end = time_threshold + datetime.timedelta(minutes=90)
     
@@ -130,7 +139,9 @@ def get_historical_targets(lag_hours):
             SELECT video_id FROM videos 
             WHERE first_seen_at BETWEEN :start AND :end
         """)
-        result = session.execute(query, {"start": window_start, "end": window_end}).fetchall()
+        result = session.execute(
+            query, {"start": window_start, "end": window_end}
+        ).fetchall()
         target_ids = [row[0] for row in result]
     except Exception as e:
         print(f"Error querying historical targets: {e}")
@@ -171,9 +182,12 @@ def fetch_and_process_data(api_key, target_video_ids):
                 
                 duration_sec = 0
                 try:
-                    duration_obj = isodate.parse_duration(content.get("duration", "PT0S"))
+                    duration_obj = (
+                        isodate.parse_duration(content.get("duration", "PT0S")))
+                    
                     duration_sec = int(duration_obj.total_seconds())
-                except: pass
+                except Exception as e:
+                    print(f"Error parsing duration for {vid}: {e}")
 
                 v_obj = {
                     "video_id": vid,
@@ -187,7 +201,9 @@ def fetch_and_process_data(api_key, target_video_ids):
                     "definition": content.get("definition"),
                     "made_for_kids": status.get("madeForKids"),
                     "audio_language": snippet.get("defaultAudioLanguage"),
-                    "thumbnail_url": snippet.get("thumbnails", {}).get("high", {}).get("url"),
+                    "thumbnail_url": (
+                        snippet.get("thumbnails", {}).get("high", {}).get("url")
+                    ),
                 }
                 video_objects.append(v_obj)
                 s_obj = {
@@ -226,15 +242,31 @@ def save_data(video_dicts, stat_dicts, discovery_intents=None):
             
             for d in discovery_intents:
                 if d['type'] == 'search':
-                    search_logs.append(SearchDiscovery(video_id=d['video_id'], query=d['query']))
+                    search_logs.append(
+                        SearchDiscovery(
+                            video_id=d['video_id'],
+                            query=d['query']
+                        )
+                    )
                 elif d['type'] == 'trending':
-                    trending_logs.append(TrendingDiscovery(video_id=d['video_id'], rank=d['rank']))
+                    trending_logs.append(
+                        TrendingDiscovery(
+                            video_id=d['video_id'],
+                            rank=d['rank']
+                        )
+                    )
             
-            if search_logs: session.bulk_save_objects(search_logs)
-            if trending_logs: session.bulk_save_objects(trending_logs)
+            if search_logs:
+                session.bulk_save_objects(search_logs)
+            if trending_logs:
+                session.bulk_save_objects(trending_logs)
 
         session.commit()
-        print(f"Saved: {len(video_dicts)} Videos (Upsert), {len(stat_dicts)} Stats, {len(discovery_intents or [])} Logs.")
+        print(
+            f"Saved: {len(video_dicts)} Videos (Upsert), "
+            f"{len(stat_dicts)} Stats, "
+            f"{len(discovery_intents or [])} Logs."
+        )
 
     except Exception as e:
         session.rollback()

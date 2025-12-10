@@ -1,18 +1,19 @@
 from sqlalchemy import (
-    Column, 
-    String, 
-    BigInteger, 
-    DateTime, 
-    PrimaryKeyConstraint, 
-    Text, 
-    Integer, 
+    BigInteger,
     Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    Text,
     text,
-    ForeignKey
 )
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from collector.database import Base, engine
+
 
 # --- 1. The Core Video Table (Metadata) ---
 # Stores static or slowly-changing data. Created when we first find the video.
@@ -80,9 +81,19 @@ def init_db():
     try:
         Base.metadata.create_all(bind=engine)
         with engine.connect() as conn:
-            conn.execute(text("SELECT create_hypertable('video_stats', 'time', if_not_exists => TRUE);"))
+            conn.execute(
+                text(
+                    "SELECT create_hypertable('video_stats', 'time', "
+                    "if_not_exists => TRUE);"
+                )
+            )
             # Retention: Keep raw stats for 60 Days
-            conn.execute(text("SELECT add_retention_policy('video_stats', INTERVAL '60 days', if_not_exists => TRUE);"))
+            conn.execute(
+                text(
+                    "SELECT add_retention_policy('video_stats', INTERVAL '60 days', "
+                    "if_not_exists => TRUE);"
+                )
+            )
             conn.commit()
             print("Database initialized: Normalized Schema + Hypertable active.")
     except Exception as e:
