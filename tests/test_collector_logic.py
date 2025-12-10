@@ -1,6 +1,9 @@
-from collector.models import Video, VideoStat
 import datetime
+
 import pytest
+
+from collector.models import Video, VideoStat
+
 
 def test_video_link_generation():
     """

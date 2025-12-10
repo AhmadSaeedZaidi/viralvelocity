@@ -10,9 +10,10 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from collector.database import Base, engine
+
 
 # --- 1. The Core Video Table (Metadata) ---
 class Video(Base):
