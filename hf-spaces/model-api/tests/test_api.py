@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app import app
+from app.main import app
 
 # Use TestClient as context manager to trigger startup events (loading models)
 client = TestClient(app)

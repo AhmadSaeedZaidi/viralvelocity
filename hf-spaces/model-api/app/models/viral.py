@@ -1,5 +1,5 @@
 import numpy as np
-from schemas import ViralInput
+from ..schemas import ViralInput
 from sklearn.linear_model import LogisticRegression
 
 from .base import BaseModelWrapper

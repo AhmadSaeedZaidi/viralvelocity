@@ -1,5 +1,5 @@
 import numpy as np
-from schemas import ClickbaitInput
+from ..schemas import ClickbaitInput
 from sklearn.ensemble import RandomForestClassifier
 
 from .base import BaseModelWrapper

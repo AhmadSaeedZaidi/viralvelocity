@@ -1,6 +1,6 @@
 import numpy as np
 import xgboost as xgb
-from schemas import VelocityInput
+from ..schemas import VelocityInput
 
 from .base import BaseModelWrapper
 
