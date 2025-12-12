@@ -1,5 +1,6 @@
 import pytest
-from models import (
+
+from app.models import (
     AnomalyDetector,
     ClickbaitDetector,
     GenreClassifier,
@@ -7,7 +8,7 @@ from models import (
     VelocityPredictor,
     ViralTrendPredictor,
 )
-from schemas import (
+from app.schemas import (
     AnomalyInput,
     ChannelStats,
     ClickbaitInput,

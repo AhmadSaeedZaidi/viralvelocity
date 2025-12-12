@@ -1,10 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
 
-from core.config import settings
-from core.exceptions import ModelError, model_exception_handler
 from fastapi import FastAPI
-from models import (
+
+from .core.config import settings
+from .core.exceptions import ModelError, model_exception_handler
+from .models import (
     AnomalyDetector,
     ClickbaitDetector,
     GenreClassifier,
@@ -14,7 +15,7 @@ from models import (
 )
 
 # Import the routers we created
-from routers import health, metrics, models, predictions
+from .routers import health, metrics, models, predictions
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)

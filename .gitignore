@@ -19,6 +19,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.ruff_cache/
 
 # --- Virtual Environments ---
 # It's standard to name venvs one of these
