@@ -3,13 +3,20 @@ name: CI - Lint & Test
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'viralvelocity/hf-spaces/model-api/**'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'viralvelocity/hf-spaces/model-api/**'
 
 jobs:
   # --- JOB 1: LINTING ---
   lint:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./viralvelocity/hf-spaces/model-api
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -17,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
           cache: 'pip'
 
       - name: Install Lint Dependencies
@@ -32,23 +39,9 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      PYTHONPATH: .
+    defaults:
+      run:
+        working-directory: ./viralvelocity/hf-spaces/model-api
 
     steps:
       - name: Checkout Code
@@ -57,18 +50,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
           cache: 'pip'
 
       - name: Install Test Dependencies
         run: |
           pip install --upgrade pip
-          # Ensure you install the project dependencies here
-          pip install pytest pytest-mock pytest-env sqlalchemy google-api-python-client prefect isodate psycopg2-binary
-          if [ -f collector/requirements.txt ]; then pip install -r collector/requirements.txt; fi
+          # Installing the dependencies required for the FastAPI Model Server
+          pip install -r requirements.txt
+          pip install pytest httpx pytest-mock
 
       - name: Run Tests (Pytest)
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-          YOUTUBE_API_KEYS: 'dummy_key_1,dummy_key_2'
-        run: pytest
+          # Force Mock mode so tests run without needing real .pkl model files
+          ENABLE_MOCK_INFERENCE: "True"
+        run: pytest -v

@@ -1,0 +1,45 @@
+name: CD - Deploy to Hugging Face
+
+on:
+  # Trigger only after the CI workflow completes successfully on main
+  workflow_run:
+    workflows: ["CI - Lint & Test"]
+    branches: [ "main" ]
+    types:
+      - completed
+  
+  # Allow manual trigger from GitHub Actions tab for emergency deploys
+  workflow_dispatch:
+
+jobs:
+  # --- JOB 1: DEPLOYMENT ---
+  deploy:
+    runs-on: ubuntu-latest
+    # crucial: Only run if the CI passed (or if manually triggered)
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Required for git subtree to work
+          lfs: true       # Required if you have model files stored in LFS
+
+      - name: Push to Hugging Face Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          SPACE_NAME: "ViralVelocity-api" # Ensure this matches your space name
+        run: |
+          # 1. Configure Git Identity (Required for pushing)
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          
+          # 2. Add the Hugging Face Space as a remote
+          git remote add space https://$HF_USERNAME:$HF_TOKEN@huggingface.co/spaces/$HF_USERNAME/$SPACE_NAME
+          
+          # 3. Push ONLY the model-api folder to the root of the Space
+          # --prefix specifies the folder to push
+          # space is the remote name
+          # main is the branch on the remote
+          git subtree push --prefix viralvelocity/hf-spaces/model-api space main
