@@ -1,6 +1,7 @@
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+
 from ..schemas import (
     AnomalyInput,
     ClickbaitInput,

@@ -1,8 +1,8 @@
-from ..schemas import GenreInput
 from sklearn.decomposition import IncrementalPCA
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neural_network import MLPClassifier
 
+from ..schemas import GenreInput
 from .base import BaseModelWrapper
 
 

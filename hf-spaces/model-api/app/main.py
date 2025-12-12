@@ -1,9 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 
+from fastapi import FastAPI
+
 from .core.config import settings
 from .core.exceptions import ModelError, model_exception_handler
-from fastapi import FastAPI
 from .models import (
     AnomalyDetector,
     ClickbaitDetector,

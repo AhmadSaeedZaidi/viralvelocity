@@ -1,12 +1,12 @@
 from .requests import (
-    VideoStats,
+    AnomalyInput,
     ChannelStats,
-    VelocityInput,
     ClickbaitInput,
     GenreInput,
     TagInput,
+    VelocityInput,
+    VideoStats,
     ViralInput,
-    AnomalyInput
 )
 from .responses import PredictionResponse
 

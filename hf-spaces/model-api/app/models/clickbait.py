@@ -1,7 +1,7 @@
 import numpy as np
-from ..schemas import ClickbaitInput
 from sklearn.ensemble import RandomForestClassifier
 
+from ..schemas import ClickbaitInput
 from .base import BaseModelWrapper
 
 
