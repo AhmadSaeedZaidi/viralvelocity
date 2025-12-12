@@ -1,25 +1,29 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 
-# Use TestClient as context manager to trigger startup events (loading models)
-client = TestClient(app)
 
-def test_health_check():
+@pytest.fixture(scope="module")
+def client():
+    with TestClient(app) as c:
+        yield c
+
+def test_health_check(client):
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
     assert "models_loaded" in data
 
-def test_model_status():
+def test_model_status(client):
     response = client.get("/api/v1/models/status")
     assert response.status_code == 200
     data = response.json()
     assert "velocity" in data
     assert data["velocity"]["loaded"] is True
 
-def test_predict_velocity_endpoint():
+def test_predict_velocity_endpoint(client):
     payload = {
         "video_stats_24h": {
             "view_count": 1000, "like_count": 100, "comment_count": 50,
@@ -38,7 +42,7 @@ def test_predict_velocity_endpoint():
     assert "prediction" in data
     assert "processing_time_ms" in data
 
-def test_predict_clickbait_endpoint():
+def test_predict_clickbait_endpoint(client):
     payload = {
         "title": "Shocking Video",
         "view_count": 5000,
@@ -50,7 +54,7 @@ def test_predict_clickbait_endpoint():
     data = response.json()
     assert data["prediction"] in ["Clickbait", "Solid"]
 
-def test_predict_tags_endpoint():
+def test_predict_tags_endpoint(client):
     payload = {
         "current_tags": ["python", "tutorial"]
     }
@@ -59,7 +63,7 @@ def test_predict_tags_endpoint():
     data = response.json()
     assert isinstance(data["prediction"], list)
 
-def test_invalid_input_validation():
+def test_invalid_input_validation(client):
     # Sending string instead of int for view_count
     payload = {
         "title": "Bad Request",
