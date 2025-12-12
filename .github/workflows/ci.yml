@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./viralvelocity/hf-spaces/model-api
+        working-directory: ${{ github.workspace }}/viralvelocity/hf-spaces/model-api
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
