@@ -42,4 +42,4 @@ jobs:
           # --prefix specifies the folder to push
           # space is the remote name
           # main is the branch on the remote
-          git subtree push --prefix hf-spaces/model-api space main
+          git push space `git subtree split --prefix hf-spaces/model-api main`:main --force
