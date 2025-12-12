@@ -3,8 +3,16 @@ name: CI - Lint & Test
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'hf-spaces/model-api/**'
+      - '.github/workflows/**'
+
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'hf-spaces/model-api/**'
+      - '.github/workflows/**'
+
 
 jobs:
   # --- JOB 1: LINTING ---
@@ -12,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ${{ github.workspace }}/viralvelocity/hf-spaces/model-api
+        working-directory: ${{ github.workspace }}/hf-spaces/model-api
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -37,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./viralvelocity/hf-spaces/model-api
+        working-directory: ${{ github.workspace }}/hf-spaces/model-api
 
     steps:
       - name: Checkout Code
