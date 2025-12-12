@@ -3,13 +3,8 @@ name: CI - Lint & Test
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - 'viralvelocity/hf-spaces/model-api/**'
-      - '.github/workflows/**'
   pull_request:
     branches: [ "main" ]
-    paths:
-      - 'viralvelocity/hf-spaces/model-api/**'
 
 jobs:
   # --- JOB 1: LINTING ---
