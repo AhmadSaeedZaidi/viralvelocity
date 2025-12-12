@@ -1,6 +1,17 @@
-# YouTube ML Microservice
+---
+title: ViralVelocity-api
+emoji: 📚
+colorFrom: gray
+colorTo: pink
+sdk: docker
+pinned: false
+license: mit
+short_description: ML workflows on youtube meta data and stats
+---
 
-This microservice provides machine learning predictions for YouTube video analytics, including velocity prediction, genre classification, and more.
+# YouTube ML Microservice API
+
+This is the inference backend for the **ViralVelocity** project. It hosts 6 lightweight Machine Learning models using FastAPI, optimized for deployment on Hugging Face Spaces (Free Tier).
 
 ## Features
 
