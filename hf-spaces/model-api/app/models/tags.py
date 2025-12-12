@@ -1,5 +1,4 @@
-from schemas import TagInput
-
+from ..schemas import TagInput
 from .base import BaseModelWrapper
 
 

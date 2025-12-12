@@ -1,7 +1,7 @@
 import numpy as np
-from schemas import AnomalyInput
 from sklearn.ensemble import IsolationForest
 
+from ..schemas import AnomalyInput
 from .base import BaseModelWrapper
 
 

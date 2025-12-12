@@ -42,4 +42,4 @@ jobs:
           # --prefix specifies the folder to push
           # space is the remote name
           # main is the branch on the remote
-          git subtree push --prefix viralvelocity/hf-spaces/model-api space main
+          git subtree push --prefix hf-spaces/model-api space main

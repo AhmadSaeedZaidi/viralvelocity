@@ -1,15 +1,15 @@
-from schemas import GenreInput
 from sklearn.decomposition import IncrementalPCA
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neural_network import MLPClassifier
 
+from ..schemas import GenreInput
 from .base import BaseModelWrapper
 
 
 class GenreClassifier(BaseModelWrapper):
     def _init_mock_model(self):
         self.tfidf = TfidfVectorizer(max_features=5000, stop_words='english')
-        self.pca = IncrementalPCA(n_components=50)
+        self.pca = IncrementalPCA(n_components=5)
         self.mlp = MLPClassifier(hidden_layer_sizes=(50,), max_iter=10)
         
         texts = [
