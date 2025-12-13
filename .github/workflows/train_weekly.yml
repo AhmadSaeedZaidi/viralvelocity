@@ -1,0 +1,119 @@
+name: Train Models (Weekly)
+
+on:
+  schedule:
+    # 03:00 UTC Sundays
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      model_to_run:
+        description: 'Specific model to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - clickbait
+        - tags
+        - anomaly
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # --- JOB 1: CLICKBAIT DETECTOR ---
+  train-clickbait:
+    name: 🎣 Train Clickbait
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'clickbait' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run Pipeline
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_MODEL_REPO: ${{ secrets.HF_MODEL_REPO }}
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+        PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+        PYTHONPATH: .
+      run: python training/pipelines/clickbait_pipeline.py
+
+    - name: Upload Logs
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: logs-clickbait
+        path: "*.html"
+
+  # --- JOB 2: TAG RECOMMENDER ---
+  train-tags:
+    name: 🏷️ Train Tag Recommender
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'tags' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run Pipeline
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_MODEL_REPO: ${{ secrets.HF_MODEL_REPO }}
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+        PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+        PYTHONPATH: .
+      run: python training/pipelines/tags_pipeline.py
+
+    - name: Upload Logs
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: logs-tags
+        path: "*.html"
+
+  # --- JOB 3: ANOMALY DETECTOR ---
+  train-anomaly:
+    name: 🤖 Train Anomaly Detector
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'anomaly' }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run Pipeline
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_MODEL_REPO: ${{ secrets.HF_MODEL_REPO }}
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+        PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+        PYTHONPATH: .
+      run: python training/pipelines/anomaly_pipeline.py
+
+    - name: Upload Logs
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: logs-anomaly
+        path: "*.html"
