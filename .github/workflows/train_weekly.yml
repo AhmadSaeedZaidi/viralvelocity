@@ -2,7 +2,6 @@ name: Train Models (Weekly)
 
 on:
   schedule:
-    # 03:00 UTC Sundays
     - cron: '0 3 * * 0'
   workflow_dispatch:
     inputs:
@@ -22,13 +21,12 @@ permissions:
   packages: read
 
 jobs:
-  # --- JOB 1: CLICKBAIT DETECTOR ---
   train-clickbait:
     name: 🎣 Train Clickbait
     if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'clickbait' }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -54,13 +52,12 @@ jobs:
         name: logs-clickbait
         path: "*.html"
 
-  # --- JOB 2: TAG RECOMMENDER ---
   train-tags:
     name: 🏷️ Train Tag Recommender
     if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'tags' }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -86,13 +83,12 @@ jobs:
         name: logs-tags
         path: "*.html"
 
-  # --- JOB 3: ANOMALY DETECTOR ---
   train-anomaly:
     name: 🤖 Train Anomaly Detector
     if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'anomaly' }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

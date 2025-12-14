@@ -2,7 +2,6 @@ name: Train Models (Monthly)
 
 on:
   schedule:
-    # 04:00 UTC on 1st of month
     - cron: '0 4 1 * *'
   workflow_dispatch:
 
@@ -15,7 +14,7 @@ jobs:
     name: 🎭 Train Genre Classifier
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

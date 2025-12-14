@@ -1,5 +1,6 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 
 def clean_dataframe(df: pd.DataFrame, fill_value=0) -> pd.DataFrame:
     """Basic cleaning: infinite values, NaNs."""

@@ -1,16 +1,14 @@
-import pandas as pd
+
 import joblib
-import os
+import pandas as pd
 import yaml
-from sklearn.ensemble import IsolationForest
-from prefect import flow, task, get_run_logger
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity
+from prefect import flow, get_run_logger, task
+from sklearn.ensemble import IsolationForest
 
 # --- Modular Imports ---
 from training.feature_engineering import base_features
-from training.evaluation import metrics
-from training.evaluation.validators import ModelValidator
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -21,7 +19,10 @@ CONFIG_PATH = "training/config/training_config.yaml"
 def load_config():
     with open(CONFIG_PATH, "r") as f:
         full_config = yaml.safe_load(f)
-    return full_config.get("models", {}).get("anomaly", {}), full_config.get("global", {})
+    models_cfg = full_config.get("models", {})
+    anomaly_cfg = models_cfg.get("anomaly", {})
+    global_cfg = full_config.get("global", {})
+    return anomaly_cfg, global_cfg
 
 ANOMALY_CONFIG, GLOBAL_CONFIG = load_config()
 
@@ -55,7 +56,11 @@ def train_model(df: pd.DataFrame):
     params = ANOMALY_CONFIG.get("params", {})
     contamination = params.get("contamination", 0.01)
     
-    model = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
+    model = IsolationForest(
+        n_estimators=100,
+        contamination=contamination,
+        random_state=42,
+    )
     model.fit(df)
     
     # Calc anomaly rate on training set just for logging
@@ -101,8 +106,9 @@ def anomaly_training_flow():
         df = prepare_features(raw)
         
         path, passed = check_integrity(df)
-        if not passed: raise Exception("Integrity Failed")
-        
+        if not passed:
+            raise Exception("Integrity Failed")
+
         model, rate = train_model(df)
         metrics["Anomaly Rate"] = f"{rate:.2%}"
         

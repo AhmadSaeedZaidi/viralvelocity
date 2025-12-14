@@ -1,8 +1,14 @@
 import numpy as np
 from sklearn.metrics import (
-    accuracy_score, f1_score, precision_score, recall_score,
-    mean_absolute_error, mean_squared_error, r2_score
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
 )
+
 
 def get_classification_metrics(y_true, y_pred, y_prob=None):
     """

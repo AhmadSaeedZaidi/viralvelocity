@@ -2,7 +2,6 @@ name: Train Models (Daily)
 
 on:
   schedule:
-    # 02:00 UTC Daily
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
@@ -16,22 +15,19 @@ on:
         - velocity
         - viral
 
-# Define shared permissions if needed, though default is usually sufficient
 permissions:
   contents: read
   packages: read
 
 jobs:
-  # --- JOB 1: VELOCITY PREDICTOR ---
   train-velocity:
     name: 🚀 Train Velocity
-    # Run if scheduled OR if 'all' selected OR if 'velocity' specifically selected
     if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'velocity' }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
-        username: ${{ github.actor }}
+        username: ahmadsaeedzaidi
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
@@ -57,15 +53,14 @@ jobs:
         name: error-logs-velocity
         path: "*.html"
 
-  # --- JOB 2: VIRAL TREND CLASSIFIER ---
   train-viral:
     name: 📈 Train Viral Trend
     if: ${{ github.event_name == 'schedule' || github.event.inputs.model_to_run == 'all' || github.event.inputs.model_to_run == 'viral' }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
-        username: ${{ github.actor }}
+        username: ahmadsaeedzaidi
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:

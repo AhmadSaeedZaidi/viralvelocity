@@ -1,22 +1,22 @@
-import pandas as pd
-import numpy as np
+
 import joblib
+import numpy as np
+import pandas as pd
 import yaml
-import os
-import tensorflow as tf
-from tensorflow.keras import layers, models, callbacks
-from sklearn.preprocessing import LabelEncoder
-from sklearn.decomposition import TruncatedSVD
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from prefect import flow, task, get_run_logger
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity
+from prefect import flow, get_run_logger, task
+from sklearn.decomposition import TruncatedSVD
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras import callbacks, layers, models
+
+from training.evaluation import metrics
+from training.evaluation.validators import ModelValidator
 
 # --- Modular Imports ---
 from training.feature_engineering import text_features
-from training.evaluation import metrics
-from training.evaluation.validators import ModelValidator
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -62,8 +62,14 @@ def prepare_features_task(df: pd.DataFrame):
     
     # 2. Label Logic (Mock or Real)
     if 'category_id' not in df.columns:
-        # Fallback for dev/testing
-        df['genre'] = df['tags'].apply(lambda x: 'Gaming' if 'minecraft' in str(x).lower() else 'Vlog')
+        # Fallback for dev/testing: mark as Gaming when tags mention Minecraft
+        def _infer_genre_from_tags(x):
+            txt = str(x).lower()
+            if 'minecraft' in txt:
+                return 'Gaming'
+            return 'Vlog'
+
+        df['genre'] = df['tags'].apply(_infer_genre_from_tags)
     else:
         df['genre'] = df['category_id']
         
@@ -127,8 +133,9 @@ def svd_optimization_task(X_sparse, y):
         
         logger.info(f"Optimizing PCA components: {candidates}")
         for n in candidates:
-            if n > X_sparse.shape[1]: continue
-            
+            if n > X_sparse.shape[1]:
+                continue
+
             svd = TruncatedSVD(n_components=n, random_state=42)
             X_t = svd.fit_transform(X_train)
             X_v = svd.transform(X_val)
@@ -138,7 +145,10 @@ def svd_optimization_task(X_sparse, y):
             clf.fit(X_t, y_train)
             score = clf.score(X_v, y_val)
             
-            logger.info(f"n={n} | Proxy Acc: {score:.4f} | Var: {svd.explained_variance_ratio_.sum():.2%}")
+            logger.info(
+                f"n={n} | Proxy Acc: {score:.4f} | Var: "
+                f"{svd.explained_variance_ratio_.sum():.2%}"
+            )
             
             if score > best_score:
                 best_score = score
@@ -172,11 +182,18 @@ def train_mlp_task(X, y, num_classes):
         layers.Dense(num_classes, activation='softmax')
     ])
     
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    
-    early_stop = callbacks.EarlyStopping(monitor='loss', patience=5, restore_best_weights=True)
-    
-    history = model.fit(
+    model.compile(
+        optimizer='adam',
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy'],
+    )
+
+    early_stop = callbacks.EarlyStopping(
+        monitor='loss',
+        patience=5,
+        restore_best_weights=True,
+    )
+    model.fit(
         X_train, y_train, 
         epochs=20, 
         batch_size=32, 
@@ -191,7 +208,11 @@ def train_mlp_task(X, y, num_classes):
     
     # Convert Keras metrics to standard dict
     eval_metrics = metrics.get_classification_metrics(y_test, y_pred)
-    eval_metrics['top_k_accuracy'] = metrics.get_top_k_accuracy(y_test, y_pred_prob, k=3)
+    eval_metrics['top_k_accuracy'] = metrics.get_top_k_accuracy(
+        y_test,
+        y_pred_prob,
+        k=3,
+    )
     
     logger.info(f"Model Trained. Metrics: {eval_metrics}")
     
@@ -200,14 +221,17 @@ def train_mlp_task(X, y, num_classes):
 @task(name="Champion vs Challenger")
 def validate_genre_pipeline(new_model, X_test_reduced, y_test, new_acc):
     """
-    Custom validator for Genre because it involves 3 artifacts (SVD + Keras + Vectorizer).
-    We compare the new Keras model on the *reduced* test set against the old model's reported metrics
-    OR we try to load the full old pipeline.
-    
-    Simpler approach for Deep Learning: Compare against a static baseline or load *just* the old keras model
-    if we assume SVD structure hasn't changed drastically.
-    
-    Robust approach: We trust the 'new_acc' and compare it to the 'old_acc' if we can find it.
+    Custom validator for Genre because it involves 3 artifacts:
+    SVD + Keras + Vectorizer. We compare the new Keras model on the
+    *reduced* test set against the old model's reported metrics, or we try
+    to load the full old pipeline.
+
+    Simpler approach for Deep Learning: compare against a static baseline
+    or load *just* the old keras model if we assume SVD structure hasn't
+    changed drastically.
+
+    Robust approach: trust the 'new_acc' and compare it to the 'old_acc'
+    if we can find it.
     """
     logger = get_run_logger()
     validator = ModelValidator(repo_id=GLOBAL_CONFIG.get("hf_repo_id"))
@@ -218,11 +242,14 @@ def validate_genre_pipeline(new_model, X_test_reduced, y_test, new_acc):
     if old_model is None:
         return True, new_acc, 0.0
 
-    # Note: If SVD dimensions changed (e.g. 50 -> 100), old_model.predict(X_test_reduced) will CRASH.
-    # Therefore, we check input shape compatibility.
+    # Note: If SVD dimensions changed (e.g. 50 -> 100),
+    # old_model.predict(X_test_reduced) will CRASH. Therefore, check shape.
     try:
         if old_model.input_shape[1] != X_test_reduced.shape[1]:
-            logger.warning("Old model expects different input shape (SVD changed). Defaulting to New Model.")
+            logger.warning(
+                "Old model expects different input shape (SVD changed). "
+                "Defaulting to New Model."
+            )
             return True, new_acc, 0.0
             
         old_prob = old_model.predict(X_test_reduced)
@@ -236,7 +263,10 @@ def validate_genre_pipeline(new_model, X_test_reduced, y_test, new_acc):
         return False, new_acc, old_acc
         
     except Exception as e:
-        logger.warning(f"Could not compare models directly: {e}. Defaulting to New Model.")
+        logger.warning(
+            "Could not compare models directly: %s. Defaulting to New Model.",
+            e,
+        )
         return True, new_acc, 0.0
 
 @task(name="Deploy System")
@@ -290,7 +320,12 @@ def genre_pipeline():
         model, X_test, y_test, new_acc = train_mlp_task(X_reduced, y, len(le.classes_))
         
         # 5. Validate
-        is_champion, new_score, old_score = validate_genre_pipeline(model, X_test, y_test, new_acc)
+        is_champion, new_score, old_score = validate_genre_pipeline(
+            model,
+            X_test,
+            y_test,
+            new_acc,
+        )
         
         result_metrics = {
             "accuracy": f"{new_score:.4f}",

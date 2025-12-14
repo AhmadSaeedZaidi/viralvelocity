@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def add_date_features(df: pd.DataFrame, date_col='published_at') -> pd.DataFrame:
     """Extracts cyclic time features."""
     if date_col not in df.columns:

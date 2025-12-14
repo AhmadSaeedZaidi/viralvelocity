@@ -1,10 +1,10 @@
-import pytest
+from unittest.mock import patch
+
 import pandas as pd
-from unittest.mock import MagicMock, patch
-from training.pipelines.viral_pipeline import (
-    prepare_features,
-    train_model
-)
+import pytest
+
+from training.pipelines.viral_pipeline import prepare_features, train_model
+
 
 @pytest.fixture
 def trending_history():
@@ -48,7 +48,10 @@ def test_prepare_features(trending_history):
     assert v1['velocity'] < 0
 
 @patch("training.pipelines.viral_pipeline.RandomizedSearchCV")
-@patch("training.pipelines.viral_pipeline.VIRAL_CONFIG", {"tuning": {"params": {}, "n_iter": 1}})
+@patch(
+    "training.pipelines.viral_pipeline.VIRAL_CONFIG",
+    {"tuning": {"params": {}, "n_iter": 1}}
+)
 def test_train_model(MockSearch):
     df = pd.DataFrame({
         'velocity': [-0.5, -0.1, 0.0, 0.1],

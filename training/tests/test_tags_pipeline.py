@@ -1,13 +1,14 @@
-import pytest
+from unittest.mock import mock_open, patch
+
 import pandas as pd
-import yaml
-from unittest.mock import MagicMock, patch, mock_open
+import pytest
+
 from training.pipelines.tags_pipeline import (
-    preprocess_tags,
     generate_rules,
     load_config,
     load_data,
-    validate_and_upload
+    preprocess_tags,
+    validate_and_upload,
 )
 
 # --- Fixtures ---
@@ -16,7 +17,11 @@ from training.pipelines.tags_pipeline import (
 def sample_df():
     return pd.DataFrame({
         'video_id': ['1', '2', '3'],
-        'tags': ['python, coding, tutorial', 'python, machine learning', 'coding, tutorial'],
+        'tags': [
+            'python, coding, tutorial',
+            'python, machine learning',
+            'coding, tutorial'
+        ],
         'views': [1000, 2000, 1500]
     })
 
@@ -95,7 +100,10 @@ def test_load_data(MockDataLoader):
     assert len(result) == 1
     assert result.iloc[0]['views'] == 100
 
-@patch("training.pipelines.tags_pipeline.TAGS_CONFIG", {"params": {"min_support": 0.01, "min_threshold": 0.01}})
+@patch(
+    "training.pipelines.tags_pipeline.TAGS_CONFIG",
+    {"params": {"min_support": 0.01, "min_threshold": 0.01}}
+)
 def test_generate_rules(sample_dataset):
     """Test rule generation with mlxtend."""
     # We use very low thresholds to ensure rules are generated from small sample

@@ -1,8 +1,9 @@
 import os
-import shutil
 from datetime import datetime
+
 from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError, RepositoryNotFoundError
+
 
 class ModelUploader:
     """
@@ -15,7 +16,8 @@ class ModelUploader:
         Initialize the uploader.
         
         Args:
-            repo_id (str, optional): Explicit repository ID. If None, constructs it from env vars.
+            repo_id (str, optional): Explicit repository ID. 
+                If None, constructs it from env vars.
         """
         self.api = HfApi()
         self.token = os.getenv("HF_TOKEN")
@@ -26,7 +28,9 @@ class ModelUploader:
             username = os.getenv("HF_USERNAME")
             model_repo = os.getenv("HF_MODELS")
             if not username or not model_repo:
-                raise ValueError("HF_USERNAME and HF_MODELS must be set in environment variables.")
+                raise ValueError(
+                    "HF_USERNAME and HF_MODELS must be set in environment variables."
+                )
             self.repo_id = f"{username}/{model_repo}"
 
     def _archive_existing_file(self, path_in_repo):

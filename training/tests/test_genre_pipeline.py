@@ -1,12 +1,15 @@
-import pytest
-import pandas as pd
+from unittest.mock import patch
+
 import numpy as np
-from unittest.mock import MagicMock, patch
+import pandas as pd
+import pytest
+
 from training.pipelines.genre_pipeline import (
     prepare_features_task,
+    svd_optimization_task,
     vectorize_task,
-    svd_optimization_task
 )
+
 
 @pytest.fixture
 def sample_metadata():

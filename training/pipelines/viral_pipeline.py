@@ -1,17 +1,17 @@
-import pandas as pd
+
 import joblib
-import os
+import pandas as pd
 import yaml
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from prefect import flow, task, get_run_logger
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity, model_evaluation
+from prefect import flow, get_run_logger, task
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
 
-# --- Modular Imports ---
-from training.feature_engineering import temporal_features
 from training.evaluation import metrics
 from training.evaluation.validators import ModelValidator
+
+# --- Modular Imports ---
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -43,24 +43,20 @@ def prepare_features(df: pd.DataFrame):
     
     features_list = []
     for vid, group in df.groupby('video_id'):
-        if len(group) < 2: continue
-        
+        if len(group) < 2:
+            continue
         group = group.sort_values('discovered_at')
-        
         rank_diff = group['rank'].iloc[-1] - group['rank'].iloc[0]
         time_diff = group['timestamp'].iloc[-1] - group['timestamp'].iloc[0]
         velocity = rank_diff / (time_diff + 1)
-        
         # Target: Currently in top 10?
         current_rank = group['rank'].iloc[-1]
         is_viral = 1 if current_rank <= 10 else 0
-        
         features_list.append({
             'velocity': velocity,
             'start_rank': group['rank'].iloc[0],
             'is_viral': is_viral
         })
-        
     final_df = pd.DataFrame(features_list)
     logger.info(f"Generated features for {len(final_df)} videos.")
     return final_df
@@ -79,7 +75,9 @@ def train_model(df: pd.DataFrame):
     X = df[['velocity', 'start_rank']]
     y = df['is_viral']
     
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
     
     # Tuning Config
     tuning_conf = VIRAL_CONFIG.get("tuning", {})
@@ -162,7 +160,8 @@ def viral_training_flow():
         df = prepare_features(raw)
         
         int_path, passed = run_integrity(df)
-        if not passed: raise Exception("Integrity Failed")
+        if not passed:
+            raise Exception("Integrity Failed")
         
         model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
         run_metrics.update(eval_metrics)

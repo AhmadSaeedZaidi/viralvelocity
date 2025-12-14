@@ -1,11 +1,11 @@
-import pytest
-import pandas as pd
+from unittest.mock import patch
+
 import numpy as np
-from unittest.mock import MagicMock, patch
-from training.pipelines.velocity_pipeline import (
-    prepare_features,
-    train_model
-)
+import pandas as pd
+import pytest
+
+from training.pipelines.velocity_pipeline import prepare_features, train_model
+
 
 @pytest.fixture
 def sample_data():
@@ -51,10 +51,12 @@ def test_train_model(MockXGB):
     })
     
     mock_model = MockXGB.return_value
-    mock_model.predict.return_value = np.array([10, 20]) # Mock predictions for test set (size 1)
+    # Mock predictions for test set (size 1)
+    mock_model.predict.return_value = np.array([10, 20])
     
     model, Xt, Xv, yt, yv, metrics = train_model.fn(df)
     
     MockXGB.assert_called_once()
     mock_model.fit.assert_called_once()
-    assert 'r2' in metrics or 'rmse' in metrics # Depending on what get_regression_metrics returns
+    # Depending on what get_regression_metrics returns
+    assert 'r2' in metrics or 'rmse' in metrics

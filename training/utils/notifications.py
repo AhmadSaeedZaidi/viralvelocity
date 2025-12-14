@@ -1,9 +1,15 @@
 import os
-import requests
-import json
 from datetime import datetime
 
-def send_discord_alert(status: str, pipeline_name: str, message: str = "", details: dict = None):
+import requests
+
+
+def send_discord_alert(
+    status: str, 
+    pipeline_name: str, 
+    message: str = "", 
+    details: dict = None
+):
     """
     Sends a formatted alert to a Discord Webhook.
     Set DISCORD_WEBHOOK_URL in your .env file.

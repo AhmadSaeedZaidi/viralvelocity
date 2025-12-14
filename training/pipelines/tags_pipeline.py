@@ -1,17 +1,14 @@
-import pandas as pd
+
 import joblib
-import os
+import pandas as pd
 import yaml
-from mlxtend.frequent_patterns import apriori, association_rules
-from mlxtend.preprocessing import TransactionEncoder
-from prefect import flow, task, get_run_logger
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity
+from mlxtend.frequent_patterns import apriori, association_rules
+from mlxtend.preprocessing import TransactionEncoder
+from prefect import flow, get_run_logger, task
 
 # --- Modular Imports ---
-from training.feature_engineering import text_features
-from training.evaluation import metrics
-from training.evaluation.validators import ModelValidator
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -40,7 +37,7 @@ def preprocess_tags(df: pd.DataFrame):
     # Expand string tags to list
     dataset = []
     for tags in df['tags'].dropna():
-        tag_list = [t.strip().lower() for t in tags.split(',')]
+        tag_list = [t.strip().lower() for t in tags.split(',') if t.strip()]
         dataset.append(tag_list)
     return dataset
 

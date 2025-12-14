@@ -1,13 +1,16 @@
-import pytest
-import pandas as pd
-import numpy as np
 from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pandas as pd
+import pytest
+
 from training.pipelines.anomaly_pipeline import (
     load_data,
     prepare_features,
     train_model,
-    validate_and_upload
+    validate_and_upload,
 )
+
 
 @pytest.fixture
 def sample_stats_df():
@@ -40,7 +43,10 @@ def test_prepare_features(sample_stats_df):
 
 @patch("training.pipelines.anomaly_pipeline.IsolationForest")
 def test_train_model(MockIsoForest):
-    df = pd.DataFrame(np.random.rand(10, 5), columns=['views', 'likes', 'comments', 'r1', 'r2'])
+    df = pd.DataFrame(
+        np.random.rand(10, 5),
+        columns=['views', 'likes', 'comments', 'r1', 'r2']
+    )
     
     mock_model = MockIsoForest.return_value
     # Mock predict to return some -1 (anomalies) and 1 (normal)

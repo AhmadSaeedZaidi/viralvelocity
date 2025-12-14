@@ -6,11 +6,11 @@ on:
     paths:
       - 'training/Dockerfile'
       - 'training/requirements.txt'
+      - '.github/workflows/build-training-image.yml'
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/training
 
 jobs:
   build-and-push:
@@ -29,6 +29,10 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase Repository Name
+        run: |
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/training" >> $GITHUB_ENV
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta

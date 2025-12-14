@@ -85,7 +85,7 @@ jobs:
     name: 🧹 Lint Training
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -100,11 +100,10 @@ jobs:
         run: flake8 training/ --count --select=E9,F63,F7,F82 --show-source --statistics
 
   test-training:
-    # This creates a separate job for each file in the matrix
     name: 🧪 Test ${{ matrix.test_file }}
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/${{ github.repository }}/training:latest
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -131,5 +130,4 @@ jobs:
       - name: Run Unit Test
         env:
           PYTHONPATH: .
-        # Runs only the specific test file for this job
         run: python -m unittest tests/${{ matrix.test_file }}

@@ -1,16 +1,16 @@
+import joblib
 import pandas as pd
 import yaml
-import joblib
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
-from sklearn.metrics import classification_report
-from prefect import flow, task, get_run_logger
 from deepchecks.tabular import Dataset
-from deepchecks.tabular.suites import data_integrity, model_evaluation
+from deepchecks.tabular.suites import data_integrity
+from prefect import flow, get_run_logger, task
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
+
+from training.evaluation.validators import ModelValidator
 
 # Import our new modules
 from training.feature_engineering import base_features
-from training.evaluation.validators import ModelValidator
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -175,10 +175,20 @@ def clickbait_pipeline():
         if is_champion:
             # Generate Eval Report
             # ... run_evaluation_checks ...
-            deploy_task(best_model, {"integrity": integrity_path}) # Pass reports here
-            send_discord_alert("SUCCESS", "Clickbait Pipeline", "New model promoted to production!", metrics)
+            deploy_task(best_model, {"integrity": integrity_path})  # Pass reports here
+            send_discord_alert(
+                "SUCCESS",
+                "Clickbait Pipeline",
+                "New model promoted to production!",
+                metrics,
+            )
         else:
-            send_discord_alert("SKIPPED", "Clickbait Pipeline", "New model failed to beat production model.", metrics)
+            send_discord_alert(
+                "SKIPPED",
+                "Clickbait Pipeline",
+                "New model failed to beat production model.",
+                metrics,
+            )
             
     except Exception as e:
         send_discord_alert("FAILURE", "Clickbait Pipeline", str(e))

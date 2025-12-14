@@ -1,11 +1,14 @@
-import pytest
+from unittest.mock import patch
+
 import pandas as pd
-from unittest.mock import MagicMock, patch
+import pytest
+
 from training.pipelines.clickbait_pipeline import (
     feature_engineering_task,
     train_and_tune_task,
-    validate_model_task
+    validate_model_task,
 )
+
 
 @pytest.fixture
 def sample_df():
@@ -23,7 +26,8 @@ def sample_df():
     "target": "is_clickbait"
 })
 def test_feature_engineering_task(sample_df):
-    # v1: views=20000 (>1000), likes=10. Ratio ~ 0.0005 (<0.05). Should be clickbait (1).
+    # v1: views=20000 (>1000), likes=10. Ratio ~ 0.0005 (<0.05).
+    # Should be clickbait (1).
     # v2: views=500 (<1000). Should be 0.
     
     df = feature_engineering_task.fn(sample_df)
@@ -32,7 +36,8 @@ def test_feature_engineering_task(sample_df):
     assert 'like_view_ratio' in df.columns
     
     # Check labels
-    # Note: The order might be preserved or not depending on implementation, usually pandas preserves index
+    # Note: The order might be preserved or not depending on implementation,
+    # usually pandas preserves index
     assert df.iloc[0]['is_clickbait'] == 1
     assert df.iloc[1]['is_clickbait'] == 0
 
@@ -62,7 +67,10 @@ def test_train_and_tune_task(MockSearch):
 
 @patch("training.pipelines.clickbait_pipeline.ModelValidator")
 @patch("training.pipelines.clickbait_pipeline.PIPELINE_CONFIG", {"metric": "f1_score"})
-@patch("training.pipelines.clickbait_pipeline.CONFIG", {"global": {"hf_repo_id": "test/repo"}})
+@patch(
+    "training.pipelines.clickbait_pipeline.CONFIG",
+    {"global": {"hf_repo_id": "test/repo"}}
+)
 def test_validate_model_task(MockValidator):
     mock_val_instance = MockValidator.return_value
     mock_val_instance.compare_models.return_value = (True, 0.9, 0.8)

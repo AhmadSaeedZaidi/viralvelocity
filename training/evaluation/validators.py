@@ -1,9 +1,10 @@
 import os
+
 import joblib
-import pandas as pd
 from huggingface_hub import hf_hub_download
-from sklearn.metrics import f1_score, r2_score, accuracy_score
 from prefect import get_run_logger
+from sklearn.metrics import accuracy_score, f1_score, r2_score
+
 
 class ModelValidator:
     def __init__(self, repo_id: str, local_dir: str = "./temp_models"):
@@ -22,11 +23,23 @@ class ModelValidator:
             )
             self.logger.info(f"Loaded production model from {model_path}")
             return joblib.load(model_path)
-        except Exception:
-            self.logger.warning("No production model found (or download failed). This is likely the first run.")
+        except Exception as exc:
+            # Log the exception for debugging while avoiding a bare except
+            self.logger.warning(
+                "No production model found (or download failed). "
+                "This is likely the first run."
+            )
+            self.logger.debug("Model download/load error: %s", exc)
             return None
 
-    def compare_models(self, new_model, old_model, X_test, y_test, metric_name="f1_score"):
+    def compare_models(
+        self,
+        new_model,
+        old_model,
+        X_test,
+        y_test,
+        metric_name="f1_score",
+    ):
         """
         Compares New vs Old.
         Returns: (passed_bool, new_score, old_score)
@@ -35,7 +48,10 @@ class ModelValidator:
         new_score = self._score(new_model, X_test, y_test, metric_name)
         
         if old_model is None:
-            self.logger.info(f"No old model to compare. New model wins default. Score: {new_score}")
+            self.logger.info(
+                "No old model to compare. New model wins default. Score: %s",
+                new_score,
+            )
             return True, new_score, 0.0
 
         old_score = self._score(old_model, X_test, y_test, metric_name)
@@ -44,7 +60,12 @@ class ModelValidator:
         # Note: If metric is MSE/MAE, logic needs to be reversed (lower is better)
         improvement = new_score - old_score
         
-        self.logger.info(f"Comparison Result: New={new_score:.4f}, Old={old_score:.4f}, Diff={improvement:.4f}")
+        self.logger.info(
+            "Comparison Result: New=%0.4f, Old=%0.4f, Diff=%0.4f",
+            new_score,
+            old_score,
+            improvement,
+        )
         
         # Improvement Threshold (e.g., must be at least equal or better)
         if new_score >= old_score:
@@ -54,11 +75,28 @@ class ModelValidator:
 
     def _score(self, model, X, y, metric_name):
         preds = model.predict(X)
-        if metric_name == "f1_score":
-            return f1_score(y, preds)
-        elif metric_name == "r2_score":
+        
+        # Normalize metric name to handle aliases (f1 vs f1_score)
+        metric = metric_name.lower().strip()
+        
+        if metric in ["f1", "f1_score"]:
+            # Handle binary vs multiclass automatically
+            try:
+                return f1_score(y, preds)
+            except ValueError:
+                return f1_score(y, preds, average='weighted')
+                
+        elif metric in ["r2", "r2_score"]:
             return r2_score(y, preds)
-        elif metric_name == "accuracy":
+            
+        elif metric in ["accuracy", "acc"]:
             return accuracy_score(y, preds)
+            
+        elif metric in ["mae", "mean_absolute_error"]:
+            return mean_absolute_error(y, preds)
+            
+        elif metric in ["rmse", "mean_squared_error"]:
+            return mean_squared_error(y, preds, squared=False)
+            
         else:
             raise ValueError(f"Unknown metric: {metric_name}")
