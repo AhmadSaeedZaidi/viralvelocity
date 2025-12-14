@@ -34,7 +34,7 @@ jobs:
         working-directory: ${{ github.workspace }}/hf-spaces/model-api
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -58,7 +58,7 @@ jobs:
         working-directory: ${{ github.workspace }}/hf-spaces/model-api
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -91,7 +91,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Lint Tools
         run: pip install flake8
@@ -122,7 +122,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Test Tools
         run: pip install pytest
