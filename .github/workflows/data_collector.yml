@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkoutv4
+        uses: actions/checkout@v3
 
       - name: Build Collector Image
         run: docker build -t vv-collector ./collector
