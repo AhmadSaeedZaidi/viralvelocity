@@ -10,7 +10,6 @@ mlxtend==0.22.0
 
 # Validation & Orchestration
 deepchecks==0.17.4
-# Prefect 2.19.4 fixes the 'griffe.dataclasses' error
 prefect==2.19.4
 
 # Infrastructure & Utilities
