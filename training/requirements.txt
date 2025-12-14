@@ -1,0 +1,15 @@
+pandas
+numpy
+sqlalchemy
+psycopg2-binary
+scikit-learn
+xgboost
+tensorflow
+mlxtend
+huggingface_hub
+joblib
+pyyaml
+python-dotenv
+prefect
+deepchecks
+requests
