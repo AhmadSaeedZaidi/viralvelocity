@@ -3,7 +3,13 @@ import os
 import joblib
 from huggingface_hub import hf_hub_download
 from prefect import get_run_logger
-from sklearn.metrics import accuracy_score, f1_score, r2_score, mean_absolute_error, mean_squared_error
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+)
 
 
 class ModelValidator:
