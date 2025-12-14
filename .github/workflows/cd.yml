@@ -20,7 +20,7 @@ jobs:
     
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkoutv4
         with:
           fetch-depth: 0  # Required for git subtree to work
           lfs: true       # Required if you have model files stored in LFS

@@ -32,7 +32,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkoutv4
 
     - name: Run Pipeline
       env:
@@ -47,7 +47,7 @@ jobs:
 
     - name: Upload Logs
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifactv4
       with:
         name: logs-clickbait
         path: "*.html"
@@ -63,7 +63,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkoutv4
 
     - name: Run Pipeline
       env:
@@ -78,7 +78,7 @@ jobs:
 
     - name: Upload Logs
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifactv4
       with:
         name: logs-tags
         path: "*.html"
@@ -94,7 +94,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkoutv4
 
     - name: Run Pipeline
       env:
@@ -109,7 +109,7 @@ jobs:
 
     - name: Upload Logs
       if: failure()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifactv4
       with:
         name: logs-anomaly
         path: "*.html"
