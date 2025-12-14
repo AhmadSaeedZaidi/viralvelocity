@@ -4,6 +4,7 @@ import pandas as pd
 
 def clean_dataframe(df: pd.DataFrame, fill_value=0) -> pd.DataFrame:
     """Basic cleaning: infinite values, NaNs."""
+    # Replace inf with NaN, then fill NaNs
     return df.replace([np.inf, -np.inf], np.nan).fillna(fill_value)
 
 def calculate_engagement_ratios(df: pd.DataFrame) -> pd.DataFrame:
