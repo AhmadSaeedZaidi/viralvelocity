@@ -5,18 +5,29 @@ on:
     branches: [ "main" ]
     paths:
       - 'hf-spaces/model-api/**'
+      - 'training/**'
+      - 'tests/**'
       - '.github/workflows/**'
 
   pull_request:
     branches: [ "main" ]
     paths:
       - 'hf-spaces/model-api/**'
+      - 'training/**'
+      - 'tests/**'
       - '.github/workflows/**'
 
+permissions:
+  contents: read
+  packages: read
 
 jobs:
-  # --- JOB 1: LINTING ---
-  lint:
+  # ======================================================
+  # GROUP 1: MODEL API (FastAPI)
+  # ======================================================
+  
+  lint-api:
+    name: 🧹 Lint API
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,14 +50,12 @@ jobs:
       - name: Run Linter (Ruff)
         run: ruff check .
 
-  # --- JOB 2: TESTING ---
-  test:
-    needs: lint
+  test-api:
+    name: 🧪 Test API
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ${{ github.workspace }}/hf-spaces/model-api
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -60,12 +69,65 @@ jobs:
       - name: Install Test Dependencies
         run: |
           pip install --upgrade pip
-          # Installing the dependencies required for the FastAPI Model Server
           pip install -r requirements.txt
           pip install pytest httpx pytest-mock
 
       - name: Run Tests (Pytest)
         env:
-          # Force Mock mode so tests run without needing real .pkl model files
           ENABLE_MOCK_INFERENCE: "True"
         run: pytest -v
+
+  # ======================================================
+  # GROUP 2: TRAINING PIPELINE (Dockerized)
+  # ======================================================
+
+  lint-training:
+    name: 🧹 Lint Training
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Lint Tools
+        run: pip install flake8
+
+      - name: Lint Training Code
+        run: flake8 training/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  test-training:
+    name: 🧪 Test ${{ matrix.test_file }}
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file:
+          - test_feature_engineering.py
+          - test_anomaly_pipeline.py
+          - test_clickbait_pipeline.py
+          - test_genre_pipeline.py
+          - test_tags_pipeline.py
+          - test_velocity_pipeline.py
+          - test_viral_pipeline.py
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Test Tools
+        run: pip install pytest
+
+      - name: Run Unit Test
+        env:
+          PYTHONPATH: .
+        run: python -m unittest training/tests/${{ matrix.test_file }}
