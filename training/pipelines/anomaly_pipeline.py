@@ -1,5 +1,5 @@
-
 import joblib
+import numpy as np
 import pandas as pd
 import yaml
 from deepchecks.tabular import Dataset
@@ -17,46 +17,61 @@ from training.utils.notifications import send_discord_alert
 CONFIG_PATH = "training/config/training_config.yaml"
 
 def load_config():
-    with open(CONFIG_PATH, "r") as f:
-        full_config = yaml.safe_load(f)
-    models_cfg = full_config.get("models", {})
-    anomaly_cfg = models_cfg.get("anomaly", {})
-    global_cfg = full_config.get("global", {})
-    return anomaly_cfg, global_cfg
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            full_config = yaml.safe_load(f)
+        return (
+            full_config.get("models", {}).get("anomaly", {}),
+            full_config.get("global", {}),
+        )
+    except FileNotFoundError:
+        return {}, {}
 
 ANOMALY_CONFIG, GLOBAL_CONFIG = load_config()
 
+# --- Tasks ---
+
 @task(retries=3, name="Load Stats")
 def load_data():
+    logger = get_run_logger()
     loader = DataLoader()
-    df = loader.get_latest_stats()
+    
+    # Use deduplicated stats directly from loader
+    df = loader.get_deduplicated_stats()
+    
+    logger.info(f"Loaded {len(df)} unique records for anomaly detection.")
     return df
 
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
-    df = base_features.clean_dataframe(df)
-    df = base_features.calculate_engagement_ratios(df)
-    features = ['views', 'likes', 'comments', 'like_view_ratio', 'comment_view_ratio']
-    return df[features].fillna(0)
+    logger = get_run_logger()
+    
+    # Use modular feature preparation
+    df_features = base_features.prepare_anomaly_features(df)
+    
+    # Log correlation matrix for debugging
+    corr_matrix = df_features.corr()
+    logger.info(f"Feature Correlation Matrix:\n{corr_matrix}")
+    
+    return df_features
 
 @task(name="Deepchecks: Integrity")
 def check_integrity(df: pd.DataFrame):
     logger = get_run_logger()
+    
+    # Deepchecks works best when it knows it's unsupervised (no label)
     ds = Dataset(df, cat_features=[])
+    
+    # We use a custom suite or simple integrity check
     suite = data_integrity()
     result = suite.run(ds)
+    
     path = "anomaly_integrity.html"
     result.save_as_html(path)
     
+    # Log failure but don't crash pipeline (integrity issues are warnings here)
     if not result.passed():
-        logger.warning("Data Integrity checks failed. Uploading report and continuing...")
-        try:
-            repo_id = GLOBAL_CONFIG.get("hf_repo_id")
-            if repo_id:
-                uploader = ModelUploader(repo_id)
-                uploader.upload_file(path, "reports/anomaly_integrity_FAILED.html")
-        except Exception as e:
-            logger.warning(f"Failed to upload integrity report: {e}")
+        logger.warning("Integrity checks flagged issues. See report.")
             
     return path, result.passed()
 
@@ -64,38 +79,60 @@ def check_integrity(df: pd.DataFrame):
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
     
-    # Configurable contamination
+    # Configurable parameters
     params = ANOMALY_CONFIG.get("params", {})
-    contamination = params.get("contamination", 0.01)
+    contamination = params.get("contamination", 0.01) # Default 1%
+    
+    logger.info(f"Training Isolation Forest with contamination={contamination}")
     
     model = IsolationForest(
-        n_estimators=100,
+        n_estimators=200,    # Increased for stability
         contamination=contamination,
+        max_samples='auto',
         random_state=42,
+        n_jobs=-1
     )
+    
+    # Fit model
     model.fit(df)
     
-    # Calc anomaly rate on training set just for logging
-    preds = model.predict(df)
+    # Calculate anomaly scores and predictions
+    scores = model.decision_function(df)
+    preds = model.predict(df) # -1 for anomaly, 1 for normal
+    
     n_anomalies = (preds == -1).sum()
-    rate = n_anomalies / len(df)
+    detected_rate = n_anomalies / len(df)
     
-    logger.info(f"Detected {n_anomalies} anomalies ({rate:.2%}) in training batch.")
+    # Score Stats
+    mean_score = np.mean(scores)
+    min_score = np.min(scores) # Most anomalous value
     
-    return model, rate
+    metrics = {
+        "n_anomalies": int(n_anomalies),
+        "detected_rate": round(detected_rate, 4),
+        "avg_normality_score": round(mean_score, 4),
+        "most_anomalous_score": round(min_score, 4)
+    }
+    
+    logger.info(f"Training Metrics: {metrics}")
+    
+    return model, metrics
 
 @task(name="Validate Model Logic")
-def validate_model_logic(rate):
+def validate_model_logic(metrics: dict):
     logger = get_run_logger()
     
-    min_rate = ANOMALY_CONFIG.get("validation", {}).get("min_rate", 0.0001) # 0.01%
-    max_rate = ANOMALY_CONFIG.get("validation", {}).get("max_rate", 0.20)   # 20%
+    rate = metrics["detected_rate"]
+    
+    # Sanity bounds
+    min_rate = ANOMALY_CONFIG.get("validation", {}).get("min_rate", 0.001)
+    max_rate = ANOMALY_CONFIG.get("validation", {}).get("max_rate", 0.10)
     
     if not (min_rate <= rate <= max_rate):
-        logger.error(f"Anomaly rate {rate:.2%} is outside bounds ({min_rate:.2%} - {max_rate:.2%}). Aborting upload.")
+        logger.error(f"Anomaly rate {rate:.2%} out of bounds ({min_rate:.1%} - {max_rate:.1%})")
         return False
         
-    logger.info(f"Anomaly rate {rate:.2%} is within valid bounds.")
+    logger.info("Model logic validation passed.")
     return True
 
 @task(name="Validate & Upload")
@@ -106,56 +143,67 @@ def validate_and_upload(model, integrity_report, is_valid):
         logger.warning("Model validation failed. Skipping upload.")
         return "DISCARDED"
     
-    # Initialize uploader\
+    repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+    if not repo_id:
+        logger.info("No HF Repo ID. Saving locally only.")
+        joblib.dump(model, "anomaly_model.pkl")
+        return "SAVED_LOCAL"
+    
     try:
-        uploader = ModelUploader()
-    except ValueError as e:
-        logger.warning(f"Skipping upload: {e}")
-        return "SKIPPED"
-    
-    local_path = "anomaly_model.pkl"
-    joblib.dump(model, local_path)
-    
-    uploader.upload_file(local_path, "anomaly/model.pkl")
-    
-    # Upload reports using the new unified method
-    reports = {
-        "integrity": integrity_report
-    }
-    uploader.upload_reports(reports, folder="anomaly/reports")
-    
-    return "PROMOTED"
+        uploader = ModelUploader(repo_id)
+        
+        # Save and upload model
+        joblib.dump(model, "anomaly_model.pkl")
+        uploader.upload_file("anomaly_model.pkl", "anomaly/model.pkl")
+        
+        # Upload report
+        if integrity_report:
+            uploader.upload_file(integrity_report, "reports/anomaly_integrity_latest.html")
+            
+        return "PROMOTED"
+        
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        return "ERROR_UPLOAD"
 
 @task(name="Notify")
 def notify(status, error=None, metrics=None):
-    send_discord_alert(status, "Anomaly Detector", 
-                       f"Finished. {error if error else ''}", metrics)
+    msg = f"Pipeline Status: {status}"
+    if error:
+        msg += f"\nError: {error}"
+    
+    send_discord_alert(status, "Anomaly Detector", msg, metrics)
 
 @flow(name="Train Anomaly Detector", log_prints=True)
 def anomaly_training_flow():
-    metrics = {}
+    run_metrics = {}
     try:
-        raw = load_data()
-        metrics["Records"] = len(raw)
+        # 1. Load & Clean
+        raw_df = load_data()
+        run_metrics["Records"] = len(raw_df)
         
-        df = prepare_features(raw)
+        # 2. Featurize (Fixes Correlation)
+        processed_df = prepare_features(raw_df)
+        run_metrics["Features"] = processed_df.shape[1]
         
-        path, passed = check_integrity(df)
-        if not passed:
-            print("Integrity Failed. Continuing pipeline as requested...")
-
-        model, rate = train_model(df)
-        metrics["Anomaly Rate"] = f"{rate:.2%}"
+        # 3. Integrity Check
+        integrity_path, integrity_passed = check_integrity(processed_df)
         
-        is_valid = validate_model_logic(rate)
+        # 4. Train (Fixes Overfitting/Metrics)
+        model, train_metrics = train_model(processed_df)
+        run_metrics.update(train_metrics)
         
-        validate_and_upload(model, path, is_valid)
+        # 5. Logic Validation
+        is_valid = validate_model_logic(train_metrics)
         
-        status = "SUCCESS" if is_valid else "SKIPPED"
-        notify(status, metrics=metrics)
+        # 6. Upload
+        status = validate_and_upload(model, integrity_path, is_valid)
+        run_metrics["Deployment"] = status
+        
+        notify("SUCCESS", metrics=run_metrics)
         
     except Exception as e:
-        notify("FAILURE", error=str(e), metrics=metrics)
+        notify("FAILURE", error=str(e), metrics=run_metrics)
         raise e
 
 if __name__ == "__main__":

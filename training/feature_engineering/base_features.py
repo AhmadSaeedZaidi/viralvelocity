@@ -55,3 +55,24 @@ def normalize_features(df: pd.DataFrame) -> pd.DataFrame:
         df["log_duration"] = np.log1p(df["duration_seconds"])
         
     return df
+
+def prepare_anomaly_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepares features specifically for anomaly detection.
+    Uses log-transformed views for magnitude and ratios for quality.
+    """
+    # Clean and basic ratios
+    df = clean_dataframe(df)
+    df = calculate_engagement_ratios(df)
+    
+    # Log transform views (Magnitude)
+    df['log_views'] = np.log1p(df['views'])
+    
+    # Select orthogonal features
+    features = [
+        'log_views',          # Magnitude
+        'like_view_ratio',    # Quality 1
+        'comment_view_ratio'  # Quality 2
+    ]
+    
+    return df[features].fillna(0)

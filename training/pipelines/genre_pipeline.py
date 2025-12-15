@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from deepchecks.tabular import Dataset
-from deepchecks.tabular.suites import data_integrity, model_evaluation
+from deepchecks.tabular.suites import data_integrity
 from prefect import flow, get_run_logger, task
 from sklearn.decomposition import TruncatedSVD
 from sklearn.linear_model import LogisticRegression

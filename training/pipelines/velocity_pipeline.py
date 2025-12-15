@@ -70,53 +70,72 @@ def load_data():
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
-    logger.info("Preparing features for velocity model")
+    logger.info("Preparing features (Orthogonal & Leakage-Free)")
     
-    # --- 1. Temporal Features (modular) ---
+    # --- 1. Temporal Features ---
     df = temporal_features.add_date_features(df, date_col="published_at")
     
-    # --- 2. Engagement Features (modular) ---
-    # Rename columns for base_features compatibility
-    df["views"] = df["start_views"]
-    df["likes"] = df["start_likes"]
-    df["comments"] = df["start_comments"]
-    df = base_features.calculate_engagement_ratios(df)
+    if "publish_hour" in df.columns:
+        df["hour_sin"] = np.sin(2 * np.pi * df["publish_hour"] / 24)
+        df["hour_cos"] = np.cos(2 * np.pi * df["publish_hour"] / 24)
     
-    # --- 3. Growth-based Features (modular) ---
-    df = base_features.calculate_growth_features(df)
+    # --- 2. Interaction Quality (Ratios) ---
+    df["like_view_ratio"] = df["start_likes"] / (df["start_views"] + 1)
+    df["comment_view_ratio"] = df["start_comments"] / (df["start_views"] + 1)
+    
+    # --- 3. Velocity & Physics ---
+    df["published_at"] = pd.to_datetime(df["published_at"])
+    df["start_time"] = pd.to_datetime(df["start_time"])
+    time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
+    df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0.1) # Avoid div/0
+    df["initial_view_velocity"] = df["start_views"] / df["video_age_hours"]
+    df["interaction_score"] = (df["start_likes"] * 1.0) + (df["start_comments"] * 3.0)
+    df["initial_interaction_velocity"] = df["interaction_score"] / df["video_age_hours"]
 
-    # --- 4. Text Features (modular) ---
+    # --- 4. Text Features ---
     if "title" in df.columns:
-        df = text_features.extract_title_features(df, title_col="title")
+        try:
+            df = text_features.extract_title_features(df, title_col="title")
+        except Exception:
+            # Fallback if text_features module is missing or fails
+            df["title"] = df["title"].fillna("")
+            df["title_len"] = df["title"].str.len()
+            df["caps_ratio"] = df["title"].apply(lambda x: sum(1 for c in str(x) if c.isupper()) / (len(str(x)) + 1))
+            df["exclamation_count"] = df["title"].str.count("!")
+            df["question_count"] = df["title"].str.count("\?")
+            df["has_digits"] = df["title"].str.contains(r'\d').astype(int)
 
-    # --- 5. Video Age (modular) ---
-    df = temporal_features.calculate_video_age(df)
-    
-    # --- 6. Normalization (modular) ---
-    df = base_features.normalize_features(df)
+    # --- 5. Magnitude (Log Space) ---
+    # Log transforms reduce skew and correlation with raw linear values
+    df["log_start_views"] = np.log1p(df["start_views"])
+    df["log_duration"] = np.log1p(df["duration_seconds"])
 
-    # --- 7. Define Target ---
+    # --- 6. Define Target ---
     target_col = VELOCITY_CONFIG.get("target", "views")
     df[target_col] = df["target_views"]
 
-    # --- 8. Select Final Features ---
+    # --- 7. Select Final Features (DE-CORRELATED) ---
     features = [
         # Temporal
         "hour_sin", "hour_cos", "publish_day", "is_weekend",
-        # Initial state (Log & Raw)
-        "duration_seconds", "log_duration",
-        "start_views", "log_start_views",
-        "start_likes", "start_comments",
-        # Engagement ratios
-        "like_view_ratio", "comment_view_ratio", "engagement_score",
-        # Growth Physics (New)
-        "view_growth_rate", "log_view_growth", "relative_growth_rate",
-        "interaction_velocity", "interaction_score",
+        
+        # Magnitude (Logs only, drop raw versions to fix correlation)
+        "log_start_views", 
+        "log_duration",
+        
+        # Quality (Ratios)
+        "like_view_ratio", "comment_view_ratio", 
+        
+        # Velocity / Heat (Safe, no leakage)
+        "initial_view_velocity", "initial_interaction_velocity", "interaction_score",
+        
         # Context
-        "video_age_hours", "hours_tracked",
-        # Text (If available)
+        "video_age_hours",
+        
+        # Text
         "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits",
-        # Category (If available)
+        
+        # Category
         "category_id"
     ]
     
@@ -130,7 +149,6 @@ def prepare_features(df: pd.DataFrame):
     final_df = df[available_features + [target_col]]
     final_df = base_features.clean_dataframe(final_df, fill_value=0)
     
-    # Log feature statistics
     logger.info(f"Features prepared: {len(available_features)} features, {len(final_df)} samples")
     return final_df
 
@@ -165,7 +183,6 @@ def run_integrity_checks(df: pd.DataFrame):
 
     if not result.passed():
         logger.warning("Data Integrity issues found. Uploading report and continuing...")
-        # (Upload logic preserved from original)
         repo_id = GLOBAL_CONFIG.get("hf_repo_id")
         if repo_id:
             try:
@@ -235,7 +252,6 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     cat_features = [f for f in potential_cat_features if f in X_train.columns]
     
     # Deepchecks will call model.predict(), which returns REAL values now.
-    # So we pass the REAL y_train/y_test.
     train_ds = Dataset(
         pd.concat([X_train, y_train], axis=1),
         label=target_col,
@@ -266,8 +282,6 @@ def validate_and_upload(model, X_test, y_test, reports):
     old_model = validator.load_production_model("velocity/model.pkl")
     metric_name = VELOCITY_CONFIG.get("metric", "r2_score")
 
-    # This works because our model wrapper returns real values, 
-    # compatible with y_test (real values)
     passed, new_score, old_score = validator.compare_models(
         model, old_model, X_test, y_test, metric_name=metric_name
     )
@@ -278,7 +292,6 @@ def validate_and_upload(model, X_test, y_test, reports):
         uploader = ModelUploader(repo_id)
         uploader.upload_file("velocity_model.pkl", "velocity/model.pkl")
         
-        # Use unified report uploader
         uploader.upload_reports(reports, folder="velocity/reports")
         return "PROMOTED"
     return "DISCARDED"

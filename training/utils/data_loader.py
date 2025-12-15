@@ -223,3 +223,16 @@ class DataLoader:
             ORDER BY d.first_discovered DESC
         """)
         return pd.read_sql(query, self.engine)
+
+    def get_deduplicated_stats(self):
+        """
+        Fetches latest stats and removes duplicates, keeping the most recent observation per video.
+        """
+        df = self.get_latest_stats()
+        
+        if "video_id" in df.columns:
+            df = df.drop_duplicates(subset=["video_id"], keep="last")
+        else:
+            df = df.drop_duplicates()
+            
+        return df
