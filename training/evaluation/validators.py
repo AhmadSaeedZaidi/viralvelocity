@@ -60,14 +60,24 @@ class ModelValidator:
             )
             return True, new_score, 0.0
 
-        old_score = self._score(old_model, X_test, y_test, metric_name)
+        # Try to score old model - may fail if features changed
+        try:
+            old_score = self._score(old_model, X_test, y_test, metric_name)
+        except ValueError as e:
+            if "feature names" in str(e).lower():
+                self.logger.warning(
+                    "Old model has different features - can't compare. "
+                    "Promoting new model. Error: %s", e
+                )
+                return True, new_score, 0.0
+            raise  # Re-raise if it's a different ValueError
         
         # Comparison logic (higher is better for F1/R2/Acc)
         # Note: If metric is MSE/MAE, logic needs to be reversed (lower is better)
         improvement = new_score - old_score
         
         self.logger.info(
-            "Comparison Result: New=%0.4f, Old=%0.4f, Diff=%0.4f",
+            "Comparison: New=%0.4f, Old=%0.4f, Diff=%0.4f",
             new_score,
             old_score,
             improvement,
