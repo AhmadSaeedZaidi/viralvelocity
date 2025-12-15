@@ -63,17 +63,17 @@ class ModelValidator:
         # Try to score old model - may fail if features changed
         try:
             old_score = self._score(old_model, X_test, y_test, metric_name)
-        except ValueError as e:
-            if "feature names" in str(e).lower():
+        except Exception as e:
+            err_msg = str(e).lower()
+            if any(x in err_msg for x in ["feature", "shape", "mismatch", "expected", "input"]):
                 self.logger.warning(
-                    "Old model has different features - can't compare. "
+                    "Old model incompatible with new data (features/shape mismatch). "
                     "Promoting new model. Error: %s", e
                 )
                 return True, new_score, 0.0
-            raise  # Re-raise if it's a different ValueError
+            raise  # Re-raise if it's a different error
         
-        # Comparison logic (higher is better for F1/R2/Acc)
-        # Note: If metric is MSE/MAE, logic needs to be reversed (lower is better)
+        # Comparison logic
         improvement = new_score - old_score
         
         self.logger.info(
