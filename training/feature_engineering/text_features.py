@@ -39,6 +39,29 @@ def prepare_text_features(df: pd.DataFrame, text_cols=['title', 'tags']) -> pd.S
     # Clean
     return combined_text.apply(clean_text)
 
+def extract_title_features(df: pd.DataFrame, title_col='title') -> pd.DataFrame:
+    """Extracts heuristic features from video titles (clickbait signals)."""
+    if title_col not in df.columns:
+        return df
+        
+    # Ensure string type and handle NaNs
+    titles = df[title_col].fillna("").astype(str)
+    
+    df["title_len"] = titles.str.len()
+    
+    # Count uppercase characters
+    df["caps_count"] = titles.apply(lambda x: sum(1 for c in x if c.isupper()))
+    df["caps_ratio"] = df["caps_count"] / (df["title_len"] + 1)
+    
+    # Punctuation counts
+    df["exclamation_count"] = titles.str.count("!")
+    df["question_count"] = titles.str.count(r"\?")
+    
+    # Digits
+    df["has_digits"] = titles.str.contains(r'\d').astype(int)
+    
+    return df
+
 def get_tags_list(tags_str: str) -> list:
     """
     Parses a comma-separated tag string into a clean list.

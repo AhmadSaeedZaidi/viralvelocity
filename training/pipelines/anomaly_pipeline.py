@@ -72,9 +72,27 @@ def train_model(df: pd.DataFrame):
     
     return model, rate
 
-@task(name="Validate & Upload")
-def validate_and_upload(model, integrity_report):
+@task(name="Validate Model Logic")
+def validate_model_logic(rate):
     logger = get_run_logger()
+    
+    min_rate = ANOMALY_CONFIG.get("validation", {}).get("min_rate", 0.0001) # 0.01%
+    max_rate = ANOMALY_CONFIG.get("validation", {}).get("max_rate", 0.20)   # 20%
+    
+    if not (min_rate <= rate <= max_rate):
+        logger.error(f"Anomaly rate {rate:.2%} is outside bounds ({min_rate:.2%} - {max_rate:.2%}). Aborting upload.")
+        return False
+        
+    logger.info(f"Anomaly rate {rate:.2%} is within valid bounds.")
+    return True
+
+@task(name="Validate & Upload")
+def validate_and_upload(model, integrity_report, is_valid):
+    logger = get_run_logger()
+    
+    if not is_valid:
+        logger.warning("Model validation failed. Skipping upload.")
+        return "DISCARDED"
     
     # Initialize uploader\
     try:
@@ -112,8 +130,12 @@ def anomaly_training_flow():
         model, rate = train_model(df)
         metrics["Anomaly Rate"] = f"{rate:.2%}"
         
-        validate_and_upload(model, path)
-        notify("SUCCESS", metrics=metrics)
+        is_valid = validate_model_logic(rate)
+        
+        validate_and_upload(model, path, is_valid)
+        
+        status = "SUCCESS" if is_valid else "SKIPPED"
+        notify(status, metrics=metrics)
         
     except Exception as e:
         notify("FAILURE", error=str(e), metrics=metrics)

@@ -2,7 +2,7 @@ import joblib
 import pandas as pd
 import yaml
 from deepchecks.tabular import Dataset
-from deepchecks.tabular.suites import data_integrity
+from deepchecks.tabular.suites import data_integrity, model_evaluation
 from prefect import flow, get_run_logger, task
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
@@ -115,6 +115,19 @@ def train_and_tune_task(df: pd.DataFrame):
     
     return best_model, X_train, X_test, y_train, y_test
 
+@task(name="Deepchecks: Model Eval")
+def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
+    target_col = PIPELINE_CONFIG["target"]
+    
+    train_ds = Dataset(pd.concat([X_train, y_train], axis=1), label=target_col, cat_features=[])
+    test_ds = Dataset(pd.concat([X_test, y_test], axis=1), label=target_col, cat_features=[])
+    
+    suite = model_evaluation()
+    result = suite.run(train_dataset=train_ds, test_dataset=test_ds, model=model)
+    path = "clickbait_eval.html"
+    result.save_as_html(path)
+    return path
+
 @task(name="Champion vs Challenger")
 def validate_model_task(new_model, X_test, y_test):
     validator = ModelValidator(repo_id=CONFIG["global"]["hf_repo_id"])
@@ -174,8 +187,9 @@ def clickbait_pipeline():
         
         if is_champion:
             # Generate Eval Report
-            # ... run_evaluation_checks ...
-            deploy_task(best_model, {"integrity": integrity_path})  # Pass reports here
+            eval_path = run_evaluation_checks(best_model, Xt, Xv, yt, yv)
+            
+            deploy_task(best_model, {"integrity": integrity_path, "eval": eval_path})
             send_discord_alert(
                 "SUCCESS",
                 "Clickbait Pipeline",

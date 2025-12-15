@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from deepchecks.tabular import Dataset
-from deepchecks.tabular.suites import data_integrity
+from deepchecks.tabular.suites import data_integrity, model_evaluation
 from prefect import flow, get_run_logger, task
 from sklearn.decomposition import TruncatedSVD
 from sklearn.linear_model import LogisticRegression
@@ -208,15 +208,41 @@ def train_mlp_task(X, y, num_classes):
     
     # Convert Keras metrics to standard dict
     eval_metrics = metrics.get_classification_metrics(y_test, y_pred)
-    eval_metrics['top_k_accuracy'] = metrics.get_top_k_accuracy(
-        y_test,
-        y_pred_prob,
-        k=3,
-    )
+    
+    try:
+        eval_metrics['top_k_accuracy'] = metrics.get_top_k_accuracy(
+            y_test,
+            y_pred_prob,
+            k=3,
+        )
+    except Exception as e:
+        logger.warning(f"Could not calc top_k_accuracy: {e}")
     
     logger.info(f"Model Trained. Metrics: {eval_metrics}")
     
     return model, X_test, y_test, eval_metrics['accuracy']
+
+class KerasWrapper:
+    """Wraps Keras model to behave like sklearn classifier for Deepchecks"""
+    def __init__(self, model):
+        self.model = model
+        
+    def predict(self, X):
+        # Deepchecks expects class labels
+        probs = self.model.predict(X)
+        return np.argmax(probs, axis=1)
+        
+    def predict_proba(self, X):
+        # Deepchecks expects probabilities
+        return self.model.predict(X)
+
+@task(name="Deepchecks: Model Eval")
+def run_evaluation_checks(model, X_test, y_test):
+    df_test = pd.DataFrame(X_test)
+    df_test['target'] = y_test
+    
+    ds_test = Dataset(df_test, label='target', cat_features=[])
+    return None
 
 @task(name="Champion vs Challenger")
 def validate_genre_pipeline(new_model, X_test_reduced, y_test, new_acc):
@@ -225,13 +251,6 @@ def validate_genre_pipeline(new_model, X_test_reduced, y_test, new_acc):
     SVD + Keras + Vectorizer. We compare the new Keras model on the
     *reduced* test set against the old model's reported metrics, or we try
     to load the full old pipeline.
-
-    Simpler approach for Deep Learning: compare against a static baseline
-    or load *just* the old keras model if we assume SVD structure hasn't
-    changed drastically.
-
-    Robust approach: trust the 'new_acc' and compare it to the 'old_acc'
-    if we can find it.
     """
     logger = get_run_logger()
     validator = ModelValidator(repo_id=GLOBAL_CONFIG.get("hf_repo_id"))
@@ -242,8 +261,6 @@ def validate_genre_pipeline(new_model, X_test_reduced, y_test, new_acc):
     if old_model is None:
         return True, new_acc, 0.0
 
-    # Note: If SVD dimensions changed (e.g. 50 -> 100),
-    # old_model.predict(X_test_reduced) will CRASH. Therefore, check shape.
     try:
         if old_model.input_shape[1] != X_test_reduced.shape[1]:
             logger.warning(

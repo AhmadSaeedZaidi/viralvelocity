@@ -78,9 +78,31 @@ def generate_rules(dataset):
     logger.info(f"Generated {len(filtered_rules)} rules.")
     return filtered_rules
 
-@task(name="Validate & Upload")
-def validate_and_upload(rules, report_path):
+@task(name="Validate Rules")
+def validate_rules(rules):
     logger = get_run_logger()
+    
+    # 1. Quantity Check
+    if len(rules) < 10:
+        logger.warning("Too few rules generated (<10).")
+        return False
+        
+    # 2. Quality Check (Lift)
+    avg_lift = rules['lift'].mean()
+    if avg_lift < 1.1:
+        logger.warning(f"Average lift is too low ({avg_lift:.2f}). Rules might be weak.")
+        return False
+        
+    logger.info(f"Validation Passed. Avg Lift: {avg_lift:.2f}")
+    return True
+
+@task(name="Validate & Upload")
+def validate_and_upload(rules, report_path, is_valid):
+    logger = get_run_logger()
+    
+    if not is_valid:
+        logger.warning("Validation failed. Skipping upload.")
+        return "DISCARDED"
     
     # Initialize uploader (will use env vars HF_USERNAME/HF_MODELS)
     try:
@@ -88,11 +110,6 @@ def validate_and_upload(rules, report_path):
     except ValueError as e:
         logger.warning(f"Skipping upload: {e}")
         return "SKIPPED"
-
-    # Simple validation: Do we have enough rules?
-    if len(rules) < 10:
-        logger.warning("Too few rules generated. Aborting upload.")
-        return "FAILED_VALIDATION"
 
     local_path = "tag_rules.pkl"
     joblib.dump(rules, local_path)
@@ -123,8 +140,12 @@ def tags_training_flow():
         rules = generate_rules(dataset)
         metrics["Rules Generated"] = len(rules)
         
-        validate_and_upload(rules, report_path)
-        notify("SUCCESS", metrics=metrics)
+        is_valid = validate_rules(rules)
+        
+        validate_and_upload(rules, report_path, is_valid)
+        
+        status = "SUCCESS" if is_valid else "SKIPPED"
+        notify(status, metrics=metrics)
         
     except Exception as e:
         notify("FAILURE", error_msg=str(e), metrics=metrics)

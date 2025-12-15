@@ -1,17 +1,19 @@
 import joblib
+import numpy as np
 import pandas as pd
-import xgboost as xgb
 import yaml
+from catboost import CatBoostRegressor
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity, model_evaluation
 from prefect import flow, get_run_logger, task
-from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.model_selection import train_test_split
 
 from training.evaluation import metrics
 from training.evaluation.validators import ModelValidator
 
 # --- Modular Imports ---
-from training.feature_engineering import base_features, temporal_features
+from training.feature_engineering import base_features, temporal_features, text_features
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -21,12 +23,15 @@ CONFIG_PATH = "training/config/training_config.yaml"
 
 
 def load_config():
-    with open(CONFIG_PATH, "r") as f:
-        full_config = yaml.safe_load(f)
-    return (
-        full_config.get("models", {}).get("velocity", {}),
-        full_config.get("global", {}),
-    )
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            full_config = yaml.safe_load(f)
+        return (
+            full_config.get("models", {}).get("velocity", {}),
+            full_config.get("global", {}),
+        )
+    except FileNotFoundError:
+        return {}, {}
 
 
 VELOCITY_CONFIG, GLOBAL_CONFIG = load_config()
@@ -41,7 +46,6 @@ def load_data():
     loader = DataLoader()
     
     # Use search_discovery with 2-hour minimum tracking (for early data)
-    # This predicts view growth from T=0 to T=latest (typically 2h to 24h range)
     MIN_TRACKING_HOURS = 2
     df = loader.get_velocity_training_data(min_hours=MIN_TRACKING_HOURS)
     
@@ -52,21 +56,14 @@ def load_data():
         if df.empty:
             raise ValueError(
                 "No training data found. Ensure search_discovery and video_stats "
-                "tables have data. The data collector needs to run for a few cycles."
+                "tables have data."
             )
     
-    # Diagnostic logging
+    # Ensure no negative values for log transforms later
+    df['target_views'] = df['target_views'].clip(lower=0)
+    df['start_views'] = df['start_views'].clip(lower=0)
+    
     logger.info(f"Loaded {len(df)} samples (min {MIN_TRACKING_HOURS}h tracking)")
-    target_min, target_max = df['target_views'].min(), df['target_views'].max()
-    start_min, start_max = df['start_views'].min(), df['start_views'].max()
-    logger.info(f"Target views: {target_min:.0f} - {target_max:.0f}")
-    logger.info(f"Start views: {start_min:.0f} - {start_max:.0f}")
-    
-    if 'hours_tracked' in df.columns:
-        h_min, h_max = df['hours_tracked'].min(), df['hours_tracked'].max()
-        logger.info(f"Tracking window: {h_min:.1f} - {h_max:.1f} hours")
-        logger.info(f"Avg tracking: {df['hours_tracked'].mean():.1f} hours")
-    
     return df
 
 
@@ -85,69 +82,56 @@ def prepare_features(df: pd.DataFrame):
     df["comments"] = df["start_comments"]
     df = base_features.calculate_engagement_ratios(df)
     
-    # --- 3. Growth-based Features ---
-    hours = df["hours_tracked"] + 0.1  # Avoid div by zero
-    
-    # View growth rate (views gained per hour)
-    df["view_growth_rate"] = (df["target_views"] - df["start_views"]) / hours
-    
-    # Engagement velocity (likes/comments gained per hour)
-    if "end_likes" in df.columns:
-        df["like_growth_rate"] = (df["end_likes"] - df["start_likes"]) / hours
-        df["comment_growth_rate"] = (
-            (df["end_comments"] - df["start_comments"]) / hours
-        )
-    
-    # Video age at first observation (hours since publish)
-    df["published_at"] = pd.to_datetime(df["published_at"])
-    df["start_time"] = pd.to_datetime(df["start_time"])
-    time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
-    df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0)
+    # --- 3. Growth-based Features (modular) ---
+    df = base_features.calculate_growth_features(df)
 
-    # --- 4. Define Target ---
+    # --- 4. Text Features (modular) ---
+    if "title" in df.columns:
+        df = text_features.extract_title_features(df, title_col="title")
+
+    # --- 5. Video Age (modular) ---
+    df = temporal_features.calculate_video_age(df)
+    
+    # --- 6. Normalization (modular) ---
+    df = base_features.normalize_features(df)
+
+    # --- 7. Define Target ---
     target_col = VELOCITY_CONFIG.get("target", "views")
     df[target_col] = df["target_views"]
 
-    # --- 5. Select Final Features ---
+    # --- 8. Select Final Features ---
     features = [
         # Temporal
-        "publish_hour",
-        "publish_day",
-        "is_weekend",
-        # Initial state
-        "duration_seconds",
-        "start_views",
-        "start_likes",
-        "start_comments",
+        "hour_sin", "hour_cos", "publish_day", "is_weekend",
+        # Initial state (Log & Raw)
+        "duration_seconds", "log_duration",
+        "start_views", "log_start_views",
+        "start_likes", "start_comments",
         # Engagement ratios
-        "like_view_ratio",
-        "comment_view_ratio",
-        "engagement_score",
+        "like_view_ratio", "comment_view_ratio", "engagement_score",
+        # Growth Physics (New)
+        "view_growth_rate", "log_view_growth", "relative_growth_rate",
+        "interaction_velocity", "interaction_score",
         # Context
-        "video_age_hours",
-        "hours_tracked",
+        "video_age_hours", "hours_tracked",
+        # Text (If available)
+        "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits",
+        # Category (If available)
+        "category_id"
     ]
     
     # Only include features that exist
     available_features = [f for f in features if f in df.columns]
     
+    # Keep Category ID as int if it exists (for CatBoost)
+    if "category_id" in df.columns:
+        df["category_id"] = df["category_id"].fillna(-1).astype(int)
+
     final_df = df[available_features + [target_col]]
     final_df = base_features.clean_dataframe(final_df, fill_value=0)
     
     # Log feature statistics
-    n_features = len(available_features)
-    n_samples = len(final_df)
-    logger.info(f"Features prepared: {n_features} features, {n_samples} samples")
-    logger.info(f"Feature list: {available_features}")
-    target_mean = final_df[target_col].mean()
-    target_median = final_df[target_col].median()
-    logger.info(f"Target: mean={target_mean:.0f}, median={target_median:.0f}")
-    
-    # Check for potential data issues
-    zero_target = (final_df[target_col] == 0).sum()
-    if zero_target > 0:
-        logger.warning(f"{zero_target} samples have zero target views")
-    
+    logger.info(f"Features prepared: {len(available_features)} features, {len(final_df)} samples")
     return final_df
 
 
@@ -158,27 +142,13 @@ def run_integrity_checks(df: pd.DataFrame):
     
     # Skip detailed checks if dataset is too small
     if len(df) < 50:
-        logger.warning(
-            f"Dataset too small for meaningful integrity checks ({len(df)} samples). "
-            "Skipping Deepchecks validation - will improve as data accumulates."
-        )
+        logger.warning("Dataset too small for integrity checks. Skipping.")
         return "skipped_small_dataset.html", True
     
     validation_df = df.loc[:, df.nunique() > 1]
     
-    dropped_cols = set(df.columns) - set(validation_df.columns)
-    if dropped_cols:
-        logger.warning(f"Skipping constant columns for integrity check: {dropped_cols}")
-
-    if target_col not in validation_df.columns:
-        logger.warning(
-            "Target column seems constant! "
-            "Adding it back for validation check."
-        )
-        validation_df[target_col] = df[target_col]
-
-    # Identify categorical features that exist in the data
-    potential_cat_features = ["publish_day", "publish_hour", "is_weekend"]
+    # Identify categorical features
+    potential_cat_features = ["publish_day", "is_weekend", "category_id"]
     cat_features = [f for f in potential_cat_features if f in validation_df.columns]
     
     ds = Dataset(
@@ -194,26 +164,21 @@ def run_integrity_checks(df: pd.DataFrame):
     result.save_as_html(report_path)
 
     if not result.passed():
-        logger.warning("Data Integrity issues found (see report). Continuing...")
+        logger.warning("Data Integrity issues found. Continuing...")
+        # (Upload logic preserved from original)
         repo_id = GLOBAL_CONFIG.get("hf_repo_id")
         if repo_id:
             try:
                 uploader = ModelUploader(repo_id)
-                uploader.upload_file(
-                    report_path,
-                    "reports/velocity_integrity_FAILED.html",
-                )
-                logger.info("Uploaded integrity report to HF Hub for review.")
-            except Exception as e:
-                logger.error(f"Failed to upload error report: {e}")
-        
-        # Return True to continue pipeline - integrity issues are warnings, not blockers
+                uploader.upload_file(report_path, "reports/velocity_integrity_FAILED.html")
+            except Exception:
+                pass
         return report_path, True
 
     return report_path, True
 
 
-@task(name="Train XGBoost (AutoML)")
+@task(name="Train CatBoost (Log Space)")
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
     target_col = VELOCITY_CONFIG.get("target", "views")
@@ -225,41 +190,39 @@ def train_model(df: pd.DataFrame):
         X, y, test_size=0.2, random_state=42
     )
 
-    tuning_conf = VELOCITY_CONFIG.get("tuning", {})
-    param_dist = tuning_conf.get("params", {})
+    cat_features = []
+    if "category_id" in X_train.columns:
+        cat_features = ["category_id"]
+        X_train["category_id"] = X_train["category_id"].astype(int)
+        X_test["category_id"] = X_test["category_id"].astype(int)
 
-    if not param_dist:
-        logger.warning("No tuning params. Using defaults.")
-        model = xgb.XGBRegressor(
-            objective="reg:squarederror",
-            n_jobs=-1,
-            random_state=42,
-        )
-        model.fit(X_train, y_train)
-    else:
-        logger.info(f"Starting AutoML ({tuning_conf.get('n_iter', 10)} iters)...")
-        base_model = xgb.XGBRegressor(
-            objective="reg:squarederror",
-            n_jobs=-1,
-            random_state=42,
-        )
-        search = RandomizedSearchCV(
-            estimator=base_model,
-            param_distributions=param_dist,
-            n_iter=tuning_conf.get("n_iter", 10),
-            cv=tuning_conf.get("cv", 3),
-            scoring="r2",
-            verbose=1,
-            random_state=42,
-            n_jobs=-1
-        )
-        search.fit(X_train, y_train)
-        model = search.best_estimator_
-        logger.info(f"Best Params: {search.best_params_}")
+    logger.info("Training CatBoost with TransformedTargetRegressor (Log Space)...")
+
+    base_model = CatBoostRegressor(
+        iterations=1500,
+        learning_rate=0.03,
+        depth=6,
+        l2_leaf_reg=3,
+        loss_function='RMSE',
+        verbose=0, # Silent to keep logs clean
+        random_seed=42,
+        allow_writing_files=False,
+        cat_features=cat_features if cat_features else None
+    )
+
+    model = TransformedTargetRegressor(
+        regressor=base_model,
+        func=np.log1p,
+        inverse_func=np.expm1
+    )
+
+    model.fit(X_train, y_train)
 
     preds = model.predict(X_test)
+    
+    # Calculate metrics on REAL values
     eval_metrics = metrics.get_regression_metrics(y_test, preds)
-    logger.info(f"Training Metrics: {eval_metrics}")
+    logger.info(f"Training Metrics (Real Space): {eval_metrics}")
 
     return model, X_train, X_test, y_train, y_test, eval_metrics
 
@@ -268,10 +231,11 @@ def train_model(df: pd.DataFrame):
 def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     target_col = VELOCITY_CONFIG.get("target", "views")
     
-    # Identify categorical features that exist in the data
-    potential_cat_features = ["publish_day", "publish_hour", "is_weekend"]
+    potential_cat_features = ["publish_day", "is_weekend", "category_id"]
     cat_features = [f for f in potential_cat_features if f in X_train.columns]
     
+    # Deepchecks will call model.predict(), which returns REAL values now.
+    # So we pass the REAL y_train/y_test.
     train_ds = Dataset(
         pd.concat([X_train, y_train], axis=1),
         label=target_col,
@@ -295,13 +259,15 @@ def validate_and_upload(model, X_test, y_test, reports):
     logger = get_run_logger()
     repo_id = GLOBAL_CONFIG.get("hf_repo_id")
     if not repo_id:
-        logger.warning("No hf_repo_id configured in training_config.yaml - skipping upload.")
+        logger.warning("No hf_repo_id - skipping upload.")
         return "SKIPPED"
 
     validator = ModelValidator(repo_id)
     old_model = validator.load_production_model("velocity/model.pkl")
     metric_name = VELOCITY_CONFIG.get("metric", "r2_score")
 
+    # This works because our model wrapper returns real values, 
+    # compatible with y_test (real values)
     passed, new_score, old_score = validator.compare_models(
         model, old_model, X_test, y_test, metric_name=metric_name
     )

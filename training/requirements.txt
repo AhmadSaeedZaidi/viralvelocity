@@ -7,6 +7,7 @@ scikit-learn==1.2.2
 xgboost==1.7.6
 tensorflow==2.11.1
 mlxtend==0.22.0
+catboost==1.2.0
 
 # Validation & Orchestration
 deepchecks==0.18.1
