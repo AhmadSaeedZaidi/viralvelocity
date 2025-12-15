@@ -27,10 +27,16 @@ def calculate_growth_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # View Growth
     if 'target_views' in df.columns and 'start_views' in df.columns:
-        df["view_growth_rate"] = (df["target_views"] - df["start_views"]) / hours
-        df["log_view_growth"] = np.log1p(df["target_views"]) - np.log1p(df["start_views"])
+        df["view_growth_rate"] = (
+            df["target_views"] - df["start_views"]
+        ) / hours
+        df["log_view_growth"] = (
+            np.log1p(df["target_views"]) - np.log1p(df["start_views"])
+        )
         # Relative Growth (Normalized by start size)
-        df["relative_growth_rate"] = (df["target_views"] - df["start_views"]) / (df["start_views"] + 1)
+        df["relative_growth_rate"] = (
+            df["target_views"] - df["start_views"]
+        ) / (df["start_views"] + 1)
 
     # Engagement Velocity
     if "end_likes" in df.columns and "start_likes" in df.columns:
@@ -41,7 +47,9 @@ def calculate_growth_features(df: pd.DataFrame) -> pd.DataFrame:
         
     # Interaction Velocity (Weighted)
     if "start_likes" in df.columns and "start_comments" in df.columns:
-        df["interaction_score"] = (df["start_likes"] * 1.0) + (df["start_comments"] * 3.0)
+        df["interaction_score"] = (
+            (df["start_likes"] * 1.0) + (df["start_comments"] * 3.0)
+        )
         df["interaction_velocity"] = df["interaction_score"] / hours
         
     return df

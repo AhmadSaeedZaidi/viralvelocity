@@ -65,10 +65,18 @@ class ModelValidator:
             old_score = self._score(old_model, X_test, y_test, metric_name)
         except Exception as e:
             err_msg = str(e).lower()
-            if any(x in err_msg for x in ["feature", "shape", "mismatch", "expected", "input"]):
+            compatibility_keywords = (
+                "feature",
+                "shape",
+                "mismatch",
+                "expected",
+                "input",
+            )
+            if any(x in err_msg for x in compatibility_keywords):
                 self.logger.warning(
                     "Old model incompatible with new data (features/shape mismatch). "
-                    "Promoting new model. Error: %s", e
+                    "Promoting new model. Error: %s",
+                    e,
                 )
                 return True, new_score, 0.0
             raise  # Re-raise if it's a different error

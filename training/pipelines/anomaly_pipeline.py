@@ -129,7 +129,11 @@ def validate_model_logic(metrics: dict):
     max_rate = ANOMALY_CONFIG.get("validation", {}).get("max_rate", 0.10)
     
     if not (min_rate <= rate <= max_rate):
-        logger.error(f"Anomaly rate {rate:.2%} out of bounds ({min_rate:.1%} - {max_rate:.1%})")
+        msg = (
+            f"Anomaly rate {rate:.2%} out of bounds "
+            f"({min_rate:.1%} - {max_rate:.1%})"
+        )
+        logger.error(msg)
         return False
         
     logger.info("Model logic validation passed.")
@@ -158,7 +162,8 @@ def validate_and_upload(model, integrity_report, is_valid):
         
         # Upload report
         if integrity_report:
-            uploader.upload_file(integrity_report, "reports/anomaly_integrity_latest.html")
+            report_repo_path = "reports/anomaly_integrity_latest.html"
+            uploader.upload_file(integrity_report, report_repo_path)
             
         return "PROMOTED"
         

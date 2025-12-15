@@ -80,7 +80,8 @@ def run_integrity_checks(df: pd.DataFrame):
             repo_id = CONFIG.get("global", {}).get("hf_repo_id")
             if repo_id:
                 uploader = ModelUploader(repo_id)
-                uploader.upload_file(report_path, "reports/clickbait_integrity_FAILED.html")
+                repo_path = "reports/clickbait_integrity_FAILED.html"
+                uploader.upload_file(report_path, repo_path)
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
@@ -129,8 +130,16 @@ def train_and_tune_task(df: pd.DataFrame):
 def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     target_col = PIPELINE_CONFIG["target"]
     
-    train_ds = Dataset(pd.concat([X_train, y_train], axis=1), label=target_col, cat_features=[])
-    test_ds = Dataset(pd.concat([X_test, y_test], axis=1), label=target_col, cat_features=[])
+    train_ds = Dataset(
+        pd.concat([X_train, y_train], axis=1),
+        label=target_col,
+        cat_features=[],
+    )
+    test_ds = Dataset(
+        pd.concat([X_test, y_test], axis=1),
+        label=target_col,
+        cat_features=[],
+    )
     
     suite = model_evaluation()
     result = suite.run(train_dataset=train_ds, test_dataset=test_ds, model=model)

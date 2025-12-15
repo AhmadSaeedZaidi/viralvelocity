@@ -118,12 +118,11 @@ class ModelUploader:
         print("Upload complete.")
 
     def upload_reports(self, reports, folder="reports"):
-        """
-        Uploads a dictionary of reports to the HF Hub.
-        
+        """Upload multiple report files to the Hub.
+
         Args:
-            reports (dict): Key-value pairs where key is report name/type and value is local path.
-            folder (str): The folder in the repo to upload to.
+            reports (dict): Mapping of report-name -> local path.
+            folder (str): Repo folder to upload reports into.
         """
         for name, local_path in reports.items():
             if not os.path.exists(local_path):

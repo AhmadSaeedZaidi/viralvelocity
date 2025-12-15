@@ -225,8 +225,9 @@ class DataLoader:
         return pd.read_sql(query, self.engine)
 
     def get_deduplicated_stats(self):
-        """
-        Fetches latest stats and removes duplicates, keeping the most recent observation per video.
+        """Fetch latest stats and remove duplicates.
+
+        Keeps the most recent observation per video when `video_id` exists.
         """
         df = self.get_latest_stats()
         

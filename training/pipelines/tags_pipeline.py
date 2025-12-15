@@ -53,12 +53,13 @@ def check_input_integrity(df: pd.DataFrame):
     result.save_as_html(report_path)
     
     if not result.passed():
-        logger.warning("Data Integrity checks failed. Uploading report and continuing...")
+        logger.warning("Data Integrity checks failed. Uploading report and continuing.")
         try:
             repo_id = GLOBAL_CONFIG.get("hf_repo_id")
             if repo_id:
                 uploader = ModelUploader(repo_id)
-                uploader.upload_file(report_path, "reports/tags_integrity_FAILED.html")
+                repo_path = "reports/tags_integrity_FAILED.html"
+                uploader.upload_file(report_path, repo_path)
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
@@ -102,7 +103,7 @@ def validate_rules(rules):
     # 2. Quality Check (Lift)
     avg_lift = rules['lift'].mean()
     if avg_lift < 1.1:
-        logger.warning(f"Average lift is too low ({avg_lift:.2f}). Rules might be weak.")
+        logger.warning("Average lift is too low (%.2f). Rules might be weak.", avg_lift)
         return False
         
     logger.info(f"Validation Passed. Avg Lift: {avg_lift:.2f}")

@@ -92,7 +92,7 @@ def run_integrity_checks(df: pd.DataFrame):
     result.save_as_html(report_path)
     
     if not result.passed():
-        logger.warning("Data Integrity checks failed. Uploading report and continuing...")
+        logger.warning("Data Integrity checks failed. Uploading report and continuing.")
         try:
             repo_id = GLOBAL_CONFIG.get("hf_repo_id")
             if repo_id:
@@ -248,8 +248,8 @@ class KerasWrapper:
 def run_evaluation_checks(model, X_test, y_test):
     df_test = pd.DataFrame(X_test)
     df_test['target'] = y_test
-    
-    ds_test = Dataset(df_test, label='target', cat_features=[])
+
+    Dataset(df_test, label='target', cat_features=[])
     return None
 
 @task(name="Champion vs Challenger")

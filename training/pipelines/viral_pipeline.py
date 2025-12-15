@@ -325,6 +325,8 @@ def notify(status, error=None, metrics=None):
 @flow(name="Train Viral Classifier", log_prints=True)
 def viral_training_flow():
     logger = get_run_logger()
+    # small debug log to use `logger` and satisfy linters
+    logger.debug("Starting viral_training_flow")
     metrics = {}
     try:
         raw = load_data()

@@ -11,16 +11,12 @@ from sklearn.model_selection import train_test_split
 
 from training.evaluation import metrics
 from training.evaluation.validators import ModelValidator
-
-# --- Modular Imports ---
 from training.feature_engineering import base_features, temporal_features, text_features
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
 
-# --- Configuration ---
 CONFIG_PATH = "training/config/training_config.yaml"
-
 
 def load_config():
     try:
@@ -33,169 +29,140 @@ def load_config():
     except FileNotFoundError:
         return {}, {}
 
-
 VELOCITY_CONFIG, GLOBAL_CONFIG = load_config()
-
-# --- Tasks ---
-
 
 @task(retries=3, retry_delay_seconds=30, name="Load Video Data")
 def load_data():
     logger = get_run_logger()
-    logger.info("Starting data load for velocity pipeline (using search_discovery)")
+    logger.info("Loading velocity data")
     loader = DataLoader()
     
-    # Use search_discovery with 2-hour minimum tracking (for early data)
     MIN_TRACKING_HOURS = 2
     df = loader.get_velocity_training_data(min_hours=MIN_TRACKING_HOURS)
     
     if df.empty:
-        logger.warning("No data from search_discovery. Trying legacy fallback...")
         df = loader.get_training_pairs_flexible()
-        
         if df.empty:
-            raise ValueError(
-                "No training data found. Ensure search_discovery and video_stats "
-                "tables have data."
-            )
+            raise ValueError("No training data found.")
     
-    # Ensure no negative values for log transforms later
+    # Filter noise
+    df = df[df['start_views'] >= 10]
+    
     df['target_views'] = df['target_views'].clip(lower=0)
     df['start_views'] = df['start_views'].clip(lower=0)
     
-    logger.info(f"Loaded {len(df)} samples (min {MIN_TRACKING_HOURS}h tracking)")
     return df
-
 
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
-    logger.info("Preparing features (Orthogonal & Leakage-Free)")
+    logger.info("Preparing features")
     
-    # --- 1. Temporal Features ---
     df = temporal_features.add_date_features(df, date_col="published_at")
     
     if "publish_hour" in df.columns:
         df["hour_sin"] = np.sin(2 * np.pi * df["publish_hour"] / 24)
         df["hour_cos"] = np.cos(2 * np.pi * df["publish_hour"] / 24)
     
-    # --- 2. Interaction Quality (Ratios) ---
     df["like_view_ratio"] = df["start_likes"] / (df["start_views"] + 1)
     df["comment_view_ratio"] = df["start_comments"] / (df["start_views"] + 1)
     
-    # --- 3. Velocity & Physics ---
     df["published_at"] = pd.to_datetime(df["published_at"])
     df["start_time"] = pd.to_datetime(df["start_time"])
     time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
-    df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0.1) # Avoid div/0
+    
+    df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0.5)
     df["initial_view_velocity"] = df["start_views"] / df["video_age_hours"]
-    df["interaction_score"] = (df["start_likes"] * 1.0) + (df["start_comments"] * 3.0)
-    df["initial_interaction_velocity"] = df["interaction_score"] / df["video_age_hours"]
+    
+    # Physics features
+    df["virality_index"] = (
+        np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
+    )
+    interaction_num = np.log1p(df["start_likes"] + df["start_comments"] * 2)
+    interaction_den = np.log1p(df["start_views"] + 1)
+    df["interaction_density"] = interaction_num / interaction_den
 
-    # --- 4. Text Features ---
     if "title" in df.columns:
         try:
             df = text_features.extract_title_features(df, title_col="title")
         except Exception:
-            # Fallback if text_features module is missing or fails
             df["title"] = df["title"].fillna("")
             df["title_len"] = df["title"].str.len()
-            df["caps_ratio"] = df["title"].apply(lambda x: sum(1 for c in str(x) if c.isupper()) / (len(str(x)) + 1))
+
+            def _caps_ratio(val):
+                s = str(val)
+                upper_count = sum(1 for c in s if c.isupper())
+                return upper_count / (len(s) + 1)
+
+            df["caps_ratio"] = df["title"].apply(_caps_ratio)
             df["exclamation_count"] = df["title"].str.count("!")
-            df["question_count"] = df["title"].str.count("\?")
+            df["question_count"] = df["title"].str.count("?")
             df["has_digits"] = df["title"].str.contains(r'\d').astype(int)
 
-    # --- 5. Magnitude (Log Space) ---
-    # Log transforms reduce skew and correlation with raw linear values
     df["log_start_views"] = np.log1p(df["start_views"])
     df["log_duration"] = np.log1p(df["duration_seconds"])
 
-    # --- 6. Define Target ---
     target_col = VELOCITY_CONFIG.get("target", "views")
     df[target_col] = df["target_views"]
 
-    # --- 7. Select Final Features (DE-CORRELATED) ---
     features = [
-        # Temporal
         "hour_sin", "hour_cos", "publish_day", "is_weekend",
-        
-        # Magnitude (Logs only, drop raw versions to fix correlation)
-        "log_start_views", 
-        "log_duration",
-        
-        # Quality (Ratios)
-        "like_view_ratio", "comment_view_ratio", 
-        
-        # Velocity / Heat (Safe, no leakage)
-        "initial_view_velocity", "initial_interaction_velocity", "interaction_score",
-        
-        # Context
+        "log_start_views", "log_duration",
+        "virality_index", "initial_view_velocity", "interaction_density",
+        "like_view_ratio", "comment_view_ratio",
         "video_age_hours",
-        
-        # Text
         "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits",
-        
-        # Category
         "category_id"
     ]
     
-    # Only include features that exist
     available_features = [f for f in features if f in df.columns]
     
-    # Keep Category ID as int if it exists (for CatBoost)
     if "category_id" in df.columns:
         df["category_id"] = df["category_id"].fillna(-1).astype(int)
 
     final_df = df[available_features + [target_col]]
     final_df = base_features.clean_dataframe(final_df, fill_value=0)
     
-    logger.info(f"Features prepared: {len(available_features)} features, {len(final_df)} samples")
+    logger.info(
+        "Features prepared: %d cols, %d rows",
+        len(available_features),
+        len(final_df),
+    )
     return final_df
-
 
 @task(name="Deepchecks: Data Integrity")
 def run_integrity_checks(df: pd.DataFrame):
     logger = get_run_logger()
     target_col = VELOCITY_CONFIG.get("target", "views")
     
-    # Skip detailed checks if dataset is too small
     if len(df) < 50:
-        logger.warning("Dataset too small for integrity checks. Skipping.")
         return "skipped_small_dataset.html", True
     
     validation_df = df.loc[:, df.nunique() > 1]
+    potential_cat = ["publish_day", "is_weekend", "category_id"]
+    cat_features = [f for f in potential_cat if f in validation_df.columns]
     
-    # Identify categorical features
-    potential_cat_features = ["publish_day", "is_weekend", "category_id"]
-    cat_features = [f for f in potential_cat_features if f in validation_df.columns]
-    
-    ds = Dataset(
-        validation_df,
-        label=target_col,
-        cat_features=cat_features,
-    )
-
-    integ_suite = data_integrity()
-    result = integ_suite.run(ds)
+    ds = Dataset(validation_df, label=target_col, cat_features=cat_features)
+    result = data_integrity().run(ds)
 
     report_path = "velocity_integrity_report.html"
     result.save_as_html(report_path)
 
     if not result.passed():
-        logger.warning("Data Integrity issues found. Uploading report and continuing...")
+        logger.warning("Integrity issues found.")
         repo_id = GLOBAL_CONFIG.get("hf_repo_id")
         if repo_id:
             try:
                 uploader = ModelUploader(repo_id)
-                uploader.upload_file(report_path, "reports/velocity_integrity_FAILED.html")
+                repo_path = "reports/velocity_integrity_FAILED.html"
+                uploader.upload_file(report_path, repo_path)
             except Exception:
                 pass
         return report_path, False
 
     return report_path, True
 
-
-@task(name="Train CatBoost (Log Space)")
+@task(name="Train CatBoost")
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
     target_col = VELOCITY_CONFIG.get("target", "views")
@@ -213,15 +180,15 @@ def train_model(df: pd.DataFrame):
         X_train["category_id"] = X_train["category_id"].astype(int)
         X_test["category_id"] = X_test["category_id"].astype(int)
 
-    logger.info("Training CatBoost with TransformedTargetRegressor (Log Space)...")
+    logger.info("Training CatBoost (Huber Loss)")
 
     base_model = CatBoostRegressor(
-        iterations=1500,
-        learning_rate=0.03,
+        iterations=2000,
+        learning_rate=0.02,
         depth=6,
-        l2_leaf_reg=3,
-        loss_function='RMSE',
-        verbose=0, # Silent to keep logs clean
+        l2_leaf_reg=5,
+        loss_function='Huber:delta=1.0',
+        verbose=0,
         random_seed=42,
         allow_writing_files=False,
         cat_features=cat_features if cat_features else None
@@ -234,24 +201,19 @@ def train_model(df: pd.DataFrame):
     )
 
     model.fit(X_train, y_train)
-
     preds = model.predict(X_test)
     
-    # Calculate metrics on REAL values
     eval_metrics = metrics.get_regression_metrics(y_test, preds)
-    logger.info(f"Training Metrics (Real Space): {eval_metrics}")
+    logger.info(f"Metrics: {eval_metrics}")
 
     return model, X_train, X_test, y_train, y_test, eval_metrics
-
 
 @task(name="Deepchecks: Model Eval")
 def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     target_col = VELOCITY_CONFIG.get("target", "views")
+    potential_cat = ["publish_day", "is_weekend", "category_id"]
+    cat_features = [f for f in potential_cat if f in X_train.columns]
     
-    potential_cat_features = ["publish_day", "is_weekend", "category_id"]
-    cat_features = [f for f in potential_cat_features if f in X_train.columns]
-    
-    # Deepchecks will call model.predict(), which returns REAL values now.
     train_ds = Dataset(
         pd.concat([X_train, y_train], axis=1),
         label=target_col,
@@ -269,13 +231,11 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     result.save_as_html(report_path)
     return report_path
 
-
 @task(name="Validate & Upload")
 def validate_and_upload(model, X_test, y_test, reports):
     logger = get_run_logger()
     repo_id = GLOBAL_CONFIG.get("hf_repo_id")
     if not repo_id:
-        logger.warning("No hf_repo_id - skipping upload.")
         return "SKIPPED"
 
     validator = ModelValidator(repo_id)
@@ -291,19 +251,16 @@ def validate_and_upload(model, X_test, y_test, reports):
         joblib.dump(model, "velocity_model.pkl")
         uploader = ModelUploader(repo_id)
         uploader.upload_file("velocity_model.pkl", "velocity/model.pkl")
-        
         uploader.upload_reports(reports, folder="velocity/reports")
         return "PROMOTED"
     return "DISCARDED"
 
-
 @task(name="Notify")
 def notify(status, error_msg=None, metrics=None):
-    msg = f"Pipeline finished. Error: {error_msg}" if error_msg else "Success"
+    msg = f"Finished. Error: {error_msg}" if error_msg else "Success"
     send_discord_alert(status, "Velocity Predictor", msg, metrics)
 
-
-@flow(name="Train Velocity Predictor (V1)", log_prints=True)
+@flow(name="Train Velocity Predictor", log_prints=True)
 def velocity_training_flow():
     logger = get_run_logger()
     run_metrics = {}
@@ -315,8 +272,6 @@ def velocity_training_flow():
         run_metrics["Features"] = processed_df.shape[1] - 1
 
         integrity_path, passed = run_integrity_checks(processed_df)
-        if not passed:
-            print("Data Integrity issues found. Continuing pipeline as requested...")
 
         (
             model,
@@ -331,10 +286,7 @@ def velocity_training_flow():
         eval_path = run_evaluation_checks(model, X_train, X_test, y_train, y_test)
         
         status = validate_and_upload(
-            model,
-            X_test,
-            y_test,
-            {"integrity": integrity_path, "eval": eval_path},
+            model, X_test, y_test, {"integrity": integrity_path, "eval": eval_path}
         )
         run_metrics["Deployment"] = status
         notify("SUCCESS", metrics=run_metrics)
@@ -343,7 +295,6 @@ def velocity_training_flow():
         logger.error(f"Pipeline crashed: {e}")
         notify("FAILURE", error_msg=str(e), metrics=run_metrics)
         raise e
-
 
 if __name__ == "__main__":
     velocity_training_flow()

@@ -19,7 +19,11 @@ def add_date_features(df: pd.DataFrame, date_col='published_at') -> pd.DataFrame
     
     return df
 
-def calculate_video_age(df: pd.DataFrame, start_time_col='start_time', published_at_col='published_at') -> pd.DataFrame:
+def calculate_video_age(
+    df: pd.DataFrame,
+    start_time_col: str = 'start_time',
+    published_at_col: str = 'published_at',
+) -> pd.DataFrame:
     """Calculates video age in hours at the time of first observation."""
     if start_time_col not in df.columns or published_at_col not in df.columns:
         return df
