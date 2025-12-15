@@ -34,12 +34,36 @@ VIRAL_CONFIG, GLOBAL_CONFIG = load_config()
 # --- Tasks ---
 
 
-@task(retries=3, name="Load Trending History")
+@task(retries=3, name="Load Video Stats History")
 def load_data():
+    logger = get_run_logger()
     loader = DataLoader()
-    df = loader.get_trending_history()
+    df = loader.get_viral_training_data()
+    
     if df.empty:
-        raise ValueError("No trending history found.")
+        raise ValueError(
+            "No training data found. Ensure search_discovery and video_stats tables have data. "
+            "The data collector needs to run for at least a few cycles."
+        )
+    
+    # Diagnostic logging
+    logger.info(f"Loaded {len(df)} total stat rows")
+    logger.info(f"Unique videos: {df['video_id'].nunique()}")
+    
+    # Count videos with multiple stat snapshots (needed for velocity calculation)
+    stat_counts = df.groupby('video_id').size()
+    videos_with_multiple = (stat_counts >= 2).sum()
+    logger.info(
+        f"Videos with 2+ stat snapshots (usable for training): {videos_with_multiple}"
+    )
+    
+    if videos_with_multiple == 0:
+        raise ValueError(
+            f"Found {len(df)} rows, but NO videos have 2+ stat snapshots. "
+            "The viral model needs repeated observations to calculate view velocity. "
+            "Wait for more data collection cycles."
+        )
+    
     return df
 
 
@@ -47,40 +71,111 @@ def load_data():
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
 
-    # Velocity Calc
-    df["timestamp"] = pd.to_datetime(df["discovered_at"])
+    df["stat_time"] = pd.to_datetime(df["stat_time"])
+    df["published_at"] = pd.to_datetime(df["published_at"])
 
+    total_videos = df["video_id"].nunique()
+    skipped_single_snapshot = 0
     features_list = []
+    
+    all_velocities = []
+    
+    for vid, group in df.groupby("video_id"):
+        if len(group) < 2:
+            skipped_single_snapshot += 1
+            continue
+
+        group = group.sort_values("stat_time")
+        
+        # Calculate time span in hours
+        time_diff_hours = (
+            group["stat_time"].iloc[-1] - group["stat_time"].iloc[0]
+        ).total_seconds() / 3600.0
+        
+        if time_diff_hours < 1:  # Need at least 1 hour of data
+            skipped_single_snapshot += 1
+            continue
+        
+        # View velocity = views gained per hour
+        view_diff = group["views"].iloc[-1] - group["views"].iloc[0]
+        view_velocity = view_diff / (time_diff_hours + 0.1)
+        all_velocities.append(view_velocity)
+    
+    # Define "viral" threshold as top 20% of view velocities
+    if not all_velocities:
+        raise ValueError("No valid videos with sufficient time span found.")
+    
+    viral_threshold = pd.Series(all_velocities).quantile(0.80)
+    logger.info(f"Viral threshold (top 20% view velocity): {viral_threshold:.0f} views/hour")
+    
+    # Second pass: build features with viral labels
     for vid, group in df.groupby("video_id"):
         if len(group) < 2:
             continue
 
-        group = group.sort_values("discovered_at")
-
-        rank_diff = group["rank"].iloc[-1] - group["rank"].iloc[0]
-        time_diff_hours = (
-            group["timestamp"].iloc[-1] - group["timestamp"].iloc[0]
-        ).total_seconds() / 3600.0
-        velocity = rank_diff / (time_diff_hours + 0.1)
-
-        current_rank = group["rank"].iloc[-1]
-        start_rank = group["rank"].iloc[0]
-        min_rank = group["rank"].min()
-        rank_volatility = group["rank"].std() if len(group) > 2 else 0.0
-        appearances = len(group)
+        group = group.sort_values("stat_time")
         
-        is_viral = 1 if current_rank <= 10 else 0
+        time_diff_hours = (
+            group["stat_time"].iloc[-1] - group["stat_time"].iloc[0]
+        ).total_seconds() / 3600.0
+        
+        if time_diff_hours < 1:
+            continue
+        
+        # Core metrics
+        start_views = group["views"].iloc[0]
+        end_views = group["views"].iloc[-1]
+        view_diff = end_views - start_views
+        view_velocity = view_diff / (time_diff_hours + 0.1)
+        
+        # Engagement metrics
+        start_likes = group["likes"].iloc[0]
+        end_likes = group["likes"].iloc[-1]
+        like_velocity = (end_likes - start_likes) / (time_diff_hours + 0.1)
+        
+        start_comments = group["comments"].iloc[0]
+        end_comments = group["comments"].iloc[-1]
+        comment_velocity = (end_comments - start_comments) / (time_diff_hours + 0.1)
+        
+        # Engagement ratios (at end state)
+        like_ratio = end_likes / (end_views + 1)
+        comment_ratio = end_comments / (end_views + 1)
+        
+        # Video age at first observation (hours since publish)
+        video_age_hours = (
+            group["stat_time"].iloc[0] - group["published_at"].iloc[0]
+        ).total_seconds() / 3600.0
+        
+        # Duration (if available)
+        duration = group["duration_seconds"].iloc[0] if pd.notna(group["duration_seconds"].iloc[0]) else 0
+        
+        # Label: Is this video in top 20% of view velocity?
+        is_viral = 1 if view_velocity >= viral_threshold else 0
 
-        features_list.append(
-            {
-                "velocity": velocity,
-                "start_rank": start_rank,
-                "min_rank": min_rank,
-                "rank_volatility": rank_volatility,
-                "appearances": appearances,
-                "hours_tracked": time_diff_hours,
-                "is_viral": is_viral,
-            }
+        features_list.append({
+            "view_velocity": view_velocity,
+            "like_velocity": like_velocity,
+            "comment_velocity": comment_velocity,
+            "start_views": start_views,
+            "like_ratio": like_ratio,
+            "comment_ratio": comment_ratio,
+            "video_age_hours": video_age_hours,
+            "duration_seconds": duration,
+            "hours_tracked": time_diff_hours,
+            "snapshots": len(group),
+            "is_viral": is_viral,
+        })
+
+    logger.info(
+        f"Feature engineering: {total_videos} unique videos, "
+        f"skipped {skipped_single_snapshot} with insufficient data, "
+        f"kept {len(features_list)} for training"
+    )
+
+    if not features_list:
+        raise ValueError(
+            "No training samples generated! Videos need 2+ stat snapshots with 1+ hour span. "
+            "Wait for the data collector to run longer."
         )
 
     final_df = pd.DataFrame(features_list)
@@ -88,8 +183,7 @@ def prepare_features(df: pd.DataFrame):
     viral_count = final_df["is_viral"].sum()
     total_count = len(final_df)
     logger.info(
-        f"Generated features for {total_count} videos. "
-        f"Viral: {viral_count} ({100*viral_count/total_count:.1f}%), "
+        f"Class distribution - Viral (top 20%): {viral_count} ({100*viral_count/total_count:.1f}%), "
         f"Not Viral: {total_count - viral_count} ({100*(total_count-viral_count)/total_count:.1f}%)"
     )
     
@@ -115,11 +209,22 @@ def run_integrity(df: pd.DataFrame):
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
     
-    feature_cols = ["velocity", "start_rank", "min_rank", "rank_volatility", "appearances", "hours_tracked"]
-    X = df[feature_cols]
+    feature_cols = [
+        "view_velocity",
+        "like_velocity",
+        "comment_velocity",
+        "start_views",
+        "like_ratio",
+        "comment_ratio",
+        "video_age_hours",
+        "duration_seconds",
+        "hours_tracked",
+        "snapshots",
+    ]
+    X = df[feature_cols].fillna(0)
     y = df["is_viral"]
     
-    logger.info(f"Training with features: {feature_cols}")
+    logger.info(f"Training with {len(feature_cols)} features: {feature_cols}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42

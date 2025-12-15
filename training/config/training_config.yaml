@@ -85,5 +85,5 @@ models:
       random_state: 42
 
 global:
-  hf_repo_id: "your-username/viralvelocity-models"
+  hf_repo_id: "Rolaficus/viralvelocity-models"
   min_improvement_threshold: 0.01 # New model must be 1% better to replace

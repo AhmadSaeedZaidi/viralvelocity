@@ -39,26 +39,48 @@ def load_data():
     logger = get_run_logger()
     logger.info("Starting data load for velocity pipeline")
     loader = DataLoader()
-    df = loader.get_training_pairs(target_hours=168)
-
+    
+    # Try strict 7-day window first
+    df = loader.get_training_pairs(target_hours=168, window_hours=24)
+    
     if df.empty:
-        raise ValueError("Database returned empty dataframe! No 7-day history found.")
+        logger.warning(
+            "No 7-day training pairs found. Trying flexible fallback "
+            "(uses earliest/latest stats regardless of time window)..."
+        )
+        df = loader.get_training_pairs_flexible()
+        
+        if df.empty:
+            raise ValueError(
+                "No training data found even with flexible query. "
+                "Ensure video_stats table has data with multiple snapshots per video. "
+                "The data collector needs to run for at least a few cycles."
+            )
+        
+        logger.info(f"Fallback loaded {len(df)} pairs with variable time spans")
+        if 'hours_between' in df.columns:
+            logger.info(f"Time span range: {df['hours_between'].min():.1f} - {df['hours_between'].max():.1f} hours")
+    else:
+        logger.info(f"Loaded {len(df)} training pairs (7-day window)")
 
-    logger.info(f"Loaded {len(df)} training pairs.")
+    # Diagnostic logging
+    logger.info(f"Columns: {list(df.columns)}")
+    logger.info(f"Target views range: {df['target_views'].min():.0f} - {df['target_views'].max():.0f}")
+    logger.info(f"Start views range: {df['start_views'].min():.0f} - {df['start_views'].max():.0f}")
+    
     return df
 
 
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
-    logger.debug("Preparing features for velocity model")
+    logger.info("Preparing features for velocity model")
     
     df = temporal_features.add_date_features(df, date_col="published_at")
     df["likes"] = df["start_likes"]
     df["comments"] = df["start_comments"]
     
     # Placeholder for channel stats (will be constant 0)
-    # Kept in model to ensure architecture is ready for future data
     df['channel_avg_views'] = 0.0
 
     target_col = VELOCITY_CONFIG.get("target", "views")
@@ -75,7 +97,16 @@ def prepare_features(df: pd.DataFrame):
     ]
 
     final_df = df[features + [target_col]].fillna(0)
+    
+    # Log feature statistics
     logger.info(f"Features prepared. Shape: {final_df.shape}")
+    logger.info(f"Target ({target_col}) stats: mean={final_df[target_col].mean():.0f}, median={final_df[target_col].median():.0f}")
+    
+    # Check for potential data issues
+    zero_target = (final_df[target_col] == 0).sum()
+    if zero_target > 0:
+        logger.warning(f"{zero_target} samples have zero target views")
+    
     return final_df
 
 
