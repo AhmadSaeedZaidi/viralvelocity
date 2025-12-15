@@ -42,8 +42,8 @@ def load_data():
     
     if df.empty:
         raise ValueError(
-            "No training data found. Ensure search_discovery and video_stats tables have data. "
-            "The data collector needs to run for at least a few cycles."
+            "No training data found. Ensure search_discovery and "
+            "video_stats tables have data. Run collector for a few cycles."
         )
     
     # Diagnostic logging
@@ -92,7 +92,7 @@ def prepare_features(df: pd.DataFrame):
             group["stat_time"].iloc[-1] - group["stat_time"].iloc[0]
         ).total_seconds() / 3600.0
         
-        if time_diff_hours < 1:  # Need at least 1 hour of data
+        if time_diff_hours < 2:  # Need at least 2 hours of data
             skipped_single_snapshot += 1
             continue
         
@@ -106,7 +106,7 @@ def prepare_features(df: pd.DataFrame):
         raise ValueError("No valid videos with sufficient time span found.")
     
     viral_threshold = pd.Series(all_velocities).quantile(0.80)
-    logger.info(f"Viral threshold (top 20% view velocity): {viral_threshold:.0f} views/hour")
+    logger.info(f"Viral threshold (top 20%): {viral_threshold:.0f} views/hour")
     
     # Second pass: build features with viral labels
     for vid, group in df.groupby("video_id"):
@@ -119,7 +119,7 @@ def prepare_features(df: pd.DataFrame):
             group["stat_time"].iloc[-1] - group["stat_time"].iloc[0]
         ).total_seconds() / 3600.0
         
-        if time_diff_hours < 1:
+        if time_diff_hours < 2:
             continue
         
         # Core metrics
@@ -147,7 +147,8 @@ def prepare_features(df: pd.DataFrame):
         ).total_seconds() / 3600.0
         
         # Duration (if available)
-        duration = group["duration_seconds"].iloc[0] if pd.notna(group["duration_seconds"].iloc[0]) else 0
+        dur_val = group["duration_seconds"].iloc[0]
+        duration = dur_val if pd.notna(dur_val) else 0
         
         # Label: Is this video in top 20% of view velocity?
         is_viral = 1 if view_velocity >= viral_threshold else 0
@@ -174,18 +175,19 @@ def prepare_features(df: pd.DataFrame):
 
     if not features_list:
         raise ValueError(
-            "No training samples generated! Videos need 2+ stat snapshots with 1+ hour span. "
-            "Wait for the data collector to run longer."
+            "No training samples! Videos need 2+ stat snapshots. "
+            "Wait for data collector to run longer."
         )
 
     final_df = pd.DataFrame(features_list)
     
     viral_count = final_df["is_viral"].sum()
     total_count = len(final_df)
-    logger.info(
-        f"Class distribution - Viral (top 20%): {viral_count} ({100*viral_count/total_count:.1f}%), "
-        f"Not Viral: {total_count - viral_count} ({100*(total_count-viral_count)/total_count:.1f}%)"
-    )
+    not_viral = total_count - viral_count
+    viral_pct = 100 * viral_count / total_count
+    not_viral_pct = 100 * not_viral / total_count
+    logger.info(f"Viral: {viral_count} ({viral_pct:.1f}%)")
+    logger.info(f"Not Viral: {not_viral} ({not_viral_pct:.1f}%)")
     
     return final_df
 
@@ -209,8 +211,8 @@ def run_integrity(df: pd.DataFrame):
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
     
+    # NOTE: view_velocity EXCLUDED - it defines target (data leakage)
     feature_cols = [
-        "view_velocity",
         "like_velocity",
         "comment_velocity",
         "start_views",
@@ -225,6 +227,7 @@ def train_model(df: pd.DataFrame):
     y = df["is_viral"]
     
     logger.info(f"Training with {len(feature_cols)} features: {feature_cols}")
+    logger.info(f"Samples: {len(X)}, Target dist: {y.value_counts().to_dict()}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
@@ -313,14 +316,19 @@ def notify(status, error=None, metrics=None):
 
 @flow(name="Train Viral Classifier", log_prints=True)
 def viral_training_flow():
+    logger = get_run_logger()
     metrics = {}
     try:
         raw = load_data()
+        metrics["Raw_Rows"] = len(raw)
+        
         df = prepare_features(raw)
+        metrics["Training_Samples"] = len(df)
+        metrics["Features"] = len(df.columns) - 1  # Exclude target column
 
         int_path, passed = run_integrity(df)
         if not passed:
-            print("Data Integrity Warning - Check Reports")
+            logger.warning("Data Integrity failed - continuing (check reports)")
 
         model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
         metrics.update(eval_metrics)

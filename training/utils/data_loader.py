@@ -120,8 +120,10 @@ class DataLoader:
                 )
                 ORDER BY s.video_id, s.time DESC
             )
-            SELECT v.video_id, v.title, v.duration_seconds, v.published_at, v.channel_id,
-                e.start_views, e.start_likes, e.start_comments, t.target_views
+            SELECT v.video_id, v.title, v.duration_seconds,
+                v.published_at, v.channel_id,
+                e.start_views, e.start_likes, e.start_comments,
+                t.target_views
             FROM videos v
             JOIN earliest_stats e ON v.video_id = e.video_id
             JOIN target_stats t ON v.video_id = t.video_id
@@ -148,13 +150,76 @@ class DataLoader:
                 FROM video_stats 
                 ORDER BY video_id, time DESC
             )
-            SELECT v.video_id, v.title, v.duration_seconds, v.published_at, v.channel_id,
+            SELECT v.video_id, v.title, v.duration_seconds,
+                v.published_at, v.channel_id,
                 e.start_views, e.start_likes, e.start_comments, 
                 l.target_views,
-                EXTRACT(EPOCH FROM (l.target_time - e.start_time))/3600 as hours_between
+                EXTRACT(EPOCH FROM (l.target_time - e.start_time))/3600
+                    as hours_between
             FROM videos v
             JOIN earliest_stats e ON v.video_id = e.video_id
             JOIN latest_stats l ON v.video_id = l.video_id
             WHERE l.target_time > e.start_time + INTERVAL '1 hour'
+        """)
+        return pd.read_sql(query, self.engine)
+
+    def get_velocity_training_data(self, min_hours=2):
+        """
+        Fetch video data for velocity prediction (view growth regression).
+        Uses search_discovery for more data, with earliest/latest stats.
+        
+        Args:
+            min_hours: Minimum tracking window required (default 2 hours)
+        """
+        query = text(f"""
+            WITH discovered_videos AS (
+                SELECT DISTINCT video_id, MIN(discovered_at) as first_discovered
+                FROM search_discovery
+                GROUP BY video_id
+            ),
+            earliest_stats AS (
+                SELECT DISTINCT ON (video_id) 
+                    video_id, 
+                    views as start_views, 
+                    likes as start_likes, 
+                    comments as start_comments, 
+                    time as start_time
+                FROM video_stats 
+                ORDER BY video_id, time ASC
+            ),
+            latest_stats AS (
+                SELECT DISTINCT ON (video_id) 
+                    video_id, 
+                    views as target_views,
+                    likes as end_likes,
+                    comments as end_comments,
+                    time as end_time
+                FROM video_stats 
+                ORDER BY video_id, time DESC
+            )
+            SELECT 
+                v.video_id,
+                v.title,
+                v.tags,
+                v.duration_seconds,
+                v.published_at,
+                v.channel_id,
+                v.category_id,
+                d.first_discovered,
+                e.start_views,
+                e.start_likes,
+                e.start_comments,
+                e.start_time,
+                l.target_views,
+                l.end_likes,
+                l.end_comments,
+                l.end_time,
+                EXTRACT(EPOCH FROM (l.end_time - e.start_time))/3600 as hours_tracked
+            FROM discovered_videos d
+            JOIN videos v ON d.video_id = v.video_id
+            JOIN earliest_stats e ON d.video_id = e.video_id
+            JOIN latest_stats l ON d.video_id = l.video_id
+            WHERE l.end_time > e.start_time + INTERVAL '{min_hours} hours'
+            ORDER BY d.first_discovered DESC
         """)
         return pd.read_sql(query, self.engine)
