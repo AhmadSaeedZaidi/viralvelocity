@@ -43,6 +43,7 @@ def preprocess_tags(df: pd.DataFrame):
 
 @task(name="Deepchecks: Input Integrity")
 def check_input_integrity(df: pd.DataFrame):
+    logger = get_run_logger()
     # We check the raw dataframe before transformation
     ds = Dataset(df, cat_features=[])
     integ_suite = data_integrity()
@@ -50,6 +51,17 @@ def check_input_integrity(df: pd.DataFrame):
     
     report_path = "tags_integrity_report.html"
     result.save_as_html(report_path)
+    
+    if not result.passed():
+        logger.warning("Data Integrity checks failed. Uploading report and continuing...")
+        try:
+            repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+            if repo_id:
+                uploader = ModelUploader(repo_id)
+                uploader.upload_file(report_path, "reports/tags_integrity_FAILED.html")
+        except Exception as e:
+            logger.warning(f"Failed to upload integrity report: {e}")
+            
     return report_path, result.passed()
 
 @task(name="Generate Rules (Apriori)")
@@ -115,7 +127,12 @@ def validate_and_upload(rules, report_path, is_valid):
     joblib.dump(rules, local_path)
     
     uploader.upload_file(local_path, "tags/rules.pkl")
-    uploader.upload_file(report_path, "reports/tags_integrity_latest.html")
+    
+    # Use unified report uploader
+    reports = {
+        "integrity": report_path
+    }
+    uploader.upload_reports(reports, folder="tags/reports")
     
     return "PROMOTED"
 
@@ -134,7 +151,7 @@ def tags_training_flow():
         
         report_path, passed = check_input_integrity(df)
         if not passed:
-            raise Exception("Data Integrity Checks Failed")
+            print("Data Integrity Checks Failed. Continuing pipeline as requested...")
             
         dataset = preprocess_tags(df)
         rules = generate_rules(dataset)

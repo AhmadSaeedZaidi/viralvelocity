@@ -202,7 +202,14 @@ def run_integrity(df: pd.DataFrame):
     res.save_as_html(path)
 
     if not res.passed():
-        logger.warning("Integrity checks failed (Report saved).")
+        logger.warning("Integrity checks failed. Uploading report and continuing...")
+        try:
+            repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+            if repo_id:
+                uploader = ModelUploader(repo_id)
+                uploader.upload_file(path, "reports/viral_integrity_FAILED.html")
+        except Exception as e:
+            logger.warning(f"Failed to upload integrity report: {e}")
         return path, False
     return path, True
 
@@ -300,8 +307,9 @@ def validate_and_upload(model, X_test, y_test, reports):
         joblib.dump(model, "viral_model.pkl")
         uploader = ModelUploader(repo_id)
         uploader.upload_file("viral_model.pkl", "viral/model.pkl")
-        for k, v in reports.items():
-            uploader.upload_file(v, f"reports/viral_{k}_latest.html")
+        
+        # Use unified report uploader
+        uploader.upload_reports(reports, folder="viral/reports")
         return "PROMOTED"
     
     logger.info("Model did not improve.")
@@ -328,7 +336,7 @@ def viral_training_flow():
 
         int_path, passed = run_integrity(df)
         if not passed:
-            logger.warning("Data Integrity failed - continuing (check reports)")
+            print("Data Integrity failed. Continuing pipeline as requested...")
 
         model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
         metrics.update(eval_metrics)

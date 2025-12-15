@@ -73,7 +73,17 @@ def run_integrity_checks(df: pd.DataFrame):
     result.save_as_html(report_path)
     
     if not result.passed():
-        logger.error("Data Integrity checks failed!")
+        logger.warning("Data Integrity checks failed (see report). Continuing...")
+        
+        # Upload failed report for inspection
+        try:
+            repo_id = CONFIG.get("global", {}).get("hf_repo_id")
+            if repo_id:
+                uploader = ModelUploader(repo_id)
+                uploader.upload_file(report_path, "reports/clickbait_integrity_FAILED.html")
+        except Exception as e:
+            logger.warning(f"Failed to upload integrity report: {e}")
+            
         return report_path, False
         
     return report_path, True
@@ -155,8 +165,8 @@ def deploy_task(model, reports, force=False):
         uploader = ModelUploader() # Uses env vars
         uploader.upload_file("clickbait_model.pkl", "clickbait/model.pkl")
         
-        for k, v in reports.items():
-            uploader.upload_file(v, f"reports/clickbait_{k}_latest.html")
+        # Use unified report uploader
+        uploader.upload_reports(reports, folder="clickbait/reports")
     except ValueError as e:
         logger.error(f"Deployment failed: {e}")
 
@@ -171,7 +181,7 @@ def clickbait_pipeline():
         # 2. Integrity Check (Deepchecks)
         integrity_path, passed = run_integrity_checks(df)
         if not passed:
-            raise Exception("Data Integrity Failed")
+            print("Data Integrity Failed. Continuing pipeline as requested...")
         
         # 3. Train & Tune (AutoML)
         best_model, Xt, Xv, yt, yv = train_and_tune_task(df)

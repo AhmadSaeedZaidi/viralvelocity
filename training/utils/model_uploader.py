@@ -116,3 +116,23 @@ class ModelUploader:
         )
         
         print("Upload complete.")
+
+    def upload_reports(self, reports, folder="reports"):
+        """
+        Uploads a dictionary of reports to the HF Hub.
+        
+        Args:
+            reports (dict): Key-value pairs where key is report name/type and value is local path.
+            folder (str): The folder in the repo to upload to.
+        """
+        for name, local_path in reports.items():
+            if not os.path.exists(local_path):
+                print(f"Warning: Report {local_path} not found. Skipping.")
+                continue
+                
+            # Construct path in repo
+            filename = os.path.basename(local_path)
+            path_in_repo = f"{folder}/{filename}"
+            
+            # Use the standard upload logic (which handles archiving)
+            self.upload_file(local_path, path_in_repo)

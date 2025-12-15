@@ -92,7 +92,15 @@ def run_integrity_checks(df: pd.DataFrame):
     result.save_as_html(report_path)
     
     if not result.passed():
-        logger.error("Data Integrity checks failed!")
+        logger.warning("Data Integrity checks failed. Uploading report and continuing...")
+        try:
+            repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+            if repo_id:
+                uploader = ModelUploader(repo_id)
+                uploader.upload_file(report_path, "reports/genre_integrity_FAILED.html")
+        except Exception as e:
+            logger.warning(f"Failed to upload integrity report: {e}")
+            
         return report_path, False
         
     return report_path, True
@@ -307,7 +315,13 @@ def deploy_task(model, vectorizer, le, svd, is_champion, integrity_report):
         uploader.upload_file("genre_vectorizer.pkl", "genre/vectorizer.pkl")
         uploader.upload_file("genre_label_encoder.pkl", "genre/label_encoder.pkl")
         uploader.upload_file("genre_svd.pkl", "genre/svd.pkl")
-        uploader.upload_file(integrity_report, "reports/genre_integrity_latest.html")
+        
+        # Use unified report uploader
+        reports = {
+            "integrity": integrity_report
+        }
+        uploader.upload_reports(reports, folder="genre/reports")
+        
         logger.info("🚀 All Genre artifacts deployed to production.")
     except ValueError as e:
         logger.error(f"Deployment failed: {e}")
@@ -325,7 +339,7 @@ def genre_pipeline():
         # 2. Integrity Check
         integrity_path, passed = run_integrity_checks(df)
         if not passed:
-            raise Exception("Data Integrity Failed")
+            print("Data Integrity Failed. Continuing pipeline as requested...")
         
         # 3. Vectorize
         X_sparse, y, vectorizer, le = vectorize_task(df)

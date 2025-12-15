@@ -164,7 +164,7 @@ def run_integrity_checks(df: pd.DataFrame):
     result.save_as_html(report_path)
 
     if not result.passed():
-        logger.warning("Data Integrity issues found. Continuing...")
+        logger.warning("Data Integrity issues found. Uploading report and continuing...")
         # (Upload logic preserved from original)
         repo_id = GLOBAL_CONFIG.get("hf_repo_id")
         if repo_id:
@@ -173,7 +173,7 @@ def run_integrity_checks(df: pd.DataFrame):
                 uploader.upload_file(report_path, "reports/velocity_integrity_FAILED.html")
             except Exception:
                 pass
-        return report_path, True
+        return report_path, False
 
     return report_path, True
 
@@ -277,8 +277,9 @@ def validate_and_upload(model, X_test, y_test, reports):
         joblib.dump(model, "velocity_model.pkl")
         uploader = ModelUploader(repo_id)
         uploader.upload_file("velocity_model.pkl", "velocity/model.pkl")
-        for k, v in reports.items():
-            uploader.upload_file(v, f"reports/velocity_{k}_latest.html")
+        
+        # Use unified report uploader
+        uploader.upload_reports(reports, folder="velocity/reports")
         return "PROMOTED"
     return "DISCARDED"
 
@@ -300,7 +301,9 @@ def velocity_training_flow():
         processed_df = prepare_features(raw_df)
         run_metrics["Features"] = processed_df.shape[1] - 1
 
-        integrity_path, _ = run_integrity_checks(processed_df)
+        integrity_path, passed = run_integrity_checks(processed_df)
+        if not passed:
+            print("Data Integrity issues found. Continuing pipeline as requested...")
 
         (
             model,

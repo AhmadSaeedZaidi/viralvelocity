@@ -41,11 +41,23 @@ def prepare_features(df: pd.DataFrame):
 
 @task(name="Deepchecks: Integrity")
 def check_integrity(df: pd.DataFrame):
+    logger = get_run_logger()
     ds = Dataset(df, cat_features=[])
     suite = data_integrity()
     result = suite.run(ds)
     path = "anomaly_integrity.html"
     result.save_as_html(path)
+    
+    if not result.passed():
+        logger.warning("Data Integrity checks failed. Uploading report and continuing...")
+        try:
+            repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+            if repo_id:
+                uploader = ModelUploader(repo_id)
+                uploader.upload_file(path, "reports/anomaly_integrity_FAILED.html")
+        except Exception as e:
+            logger.warning(f"Failed to upload integrity report: {e}")
+            
     return path, result.passed()
 
 @task(name="Train Isolation Forest")
@@ -105,7 +117,12 @@ def validate_and_upload(model, integrity_report, is_valid):
     joblib.dump(model, local_path)
     
     uploader.upload_file(local_path, "anomaly/model.pkl")
-    uploader.upload_file(integrity_report, "reports/anomaly_integrity_latest.html")
+    
+    # Upload reports using the new unified method
+    reports = {
+        "integrity": integrity_report
+    }
+    uploader.upload_reports(reports, folder="anomaly/reports")
     
     return "PROMOTED"
 
@@ -125,7 +142,7 @@ def anomaly_training_flow():
         
         path, passed = check_integrity(df)
         if not passed:
-            raise Exception("Integrity Failed")
+            print("Integrity Failed. Continuing pipeline as requested...")
 
         model, rate = train_model(df)
         metrics["Anomaly Rate"] = f"{rate:.2%}"
