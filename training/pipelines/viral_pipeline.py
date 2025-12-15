@@ -48,7 +48,7 @@ def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
 
     # Velocity Calc
-    df["timestamp"] = pd.to_datetime(df["discovered_at"]).astype(int) // 10**9
+    df["timestamp"] = pd.to_datetime(df["discovered_at"])
 
     features_list = []
     for vid, group in df.groupby("video_id"):
@@ -58,22 +58,41 @@ def prepare_features(df: pd.DataFrame):
         group = group.sort_values("discovered_at")
 
         rank_diff = group["rank"].iloc[-1] - group["rank"].iloc[0]
-        time_diff = group["timestamp"].iloc[-1] - group["timestamp"].iloc[0]
-        velocity = rank_diff / (time_diff + 1)
+        time_diff_hours = (
+            group["timestamp"].iloc[-1] - group["timestamp"].iloc[0]
+        ).total_seconds() / 3600.0
+        velocity = rank_diff / (time_diff_hours + 0.1)
 
         current_rank = group["rank"].iloc[-1]
+        start_rank = group["rank"].iloc[0]
+        min_rank = group["rank"].min()
+        rank_volatility = group["rank"].std() if len(group) > 2 else 0.0
+        appearances = len(group)
+        
         is_viral = 1 if current_rank <= 10 else 0
 
         features_list.append(
             {
                 "velocity": velocity,
-                "start_rank": group["rank"].iloc[0],
+                "start_rank": start_rank,
+                "min_rank": min_rank,
+                "rank_volatility": rank_volatility,
+                "appearances": appearances,
+                "hours_tracked": time_diff_hours,
                 "is_viral": is_viral,
             }
         )
 
     final_df = pd.DataFrame(features_list)
-    logger.info(f"Generated features for {len(final_df)} videos.")
+    
+    viral_count = final_df["is_viral"].sum()
+    total_count = len(final_df)
+    logger.info(
+        f"Generated features for {total_count} videos. "
+        f"Viral: {viral_count} ({100*viral_count/total_count:.1f}%), "
+        f"Not Viral: {total_count - viral_count} ({100*(total_count-viral_count)/total_count:.1f}%)"
+    )
+    
     return final_df
 
 
@@ -95,8 +114,12 @@ def run_integrity(df: pd.DataFrame):
 @task(name="Train Logistic Regression")
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
-    X = df[["velocity", "start_rank"]]
+    
+    feature_cols = ["velocity", "start_rank", "min_rank", "rank_volatility", "appearances", "hours_tracked"]
+    X = df[feature_cols]
     y = df["is_viral"]
+    
+    logger.info(f"Training with features: {feature_cols}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
@@ -106,20 +129,22 @@ def train_model(df: pd.DataFrame):
     tuning_conf = VIRAL_CONFIG.get("tuning", {})
     
     if tuning_conf:
-        base_model = LogisticRegression(max_iter=1000)
+        # Always use class_weight="balanced" as base to handle imbalanced classes
+        base_model = LogisticRegression(max_iter=1000, class_weight="balanced")
         search = RandomizedSearchCV(
             estimator=base_model,
             param_distributions=tuning_conf.get("params", {}),
             n_iter=tuning_conf.get("n_iter", 10),
             cv=tuning_conf.get("cv", 3),
-            scoring='accuracy',
+            scoring='f1',  # Use F1 instead of accuracy for imbalanced classification
             n_jobs=-1,
             verbose=1
         )
         search.fit(X_train, y_train)
         model = search.best_estimator_
+        logger.info(f"Best hyperparameters: {search.best_params_}")
     else:
-        model = LogisticRegression(class_weight="balanced")
+        model = LogisticRegression(class_weight="balanced", max_iter=1000)
         model.fit(X_train, y_train)
     
     preds = model.predict(X_test)
@@ -198,7 +223,7 @@ def viral_training_flow():
         eval_path = run_eval(model, Xt, Xv, yt, yv)
 
         status = validate_and_upload(
-            model, Xt, yv, {"integrity": int_path, "eval": eval_path}
+            model, Xv, yv, {"integrity": int_path, "eval": eval_path}
         )
         metrics["Deployment"] = status
         notify("SUCCESS", metrics=metrics)

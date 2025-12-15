@@ -65,15 +65,14 @@ models:
   viral:
     type: "classification"
     target: "is_viral"
-    metric: "accuracy"
+    metric: "f1_score"
     test_size: 0.2
     tuning:
       n_iter: 10
       cv: 3
       params:
-        C: [0.1, 1.0, 10.0]  # Regularization strength
-        penalty: ["l2"]      # Norm used in the penalization
-        class_weight: ["balanced", null]
+        C: [0.01, 0.1, 1.0, 10.0]
+        penalty: ["l2"]
 
   # --- 6. Anomaly (Isolation Forest) ---
   anomaly:
