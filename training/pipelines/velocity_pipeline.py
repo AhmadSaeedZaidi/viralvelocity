@@ -293,12 +293,9 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
 @task(name="Validate & Upload")
 def validate_and_upload(model, X_test, y_test, reports):
     logger = get_run_logger()
-
-    try:
-        uploader = ModelUploader()
-        repo_id = uploader.repo_id
-    except ValueError as e:
-        logger.warning(f"Skipping upload: {e}")
+    repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+    if not repo_id:
+        logger.warning("No hf_repo_id configured in training_config.yaml - skipping upload.")
         return "SKIPPED"
 
     validator = ModelValidator(repo_id)
