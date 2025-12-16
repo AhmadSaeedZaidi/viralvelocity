@@ -1,4 +1,3 @@
-
 import joblib
 import pandas as pd
 import yaml
@@ -9,6 +8,7 @@ from mlxtend.preprocessing import TransactionEncoder
 from prefect import flow, get_run_logger, task
 
 from training.evaluation import metrics
+from training.evaluation.validators import ModelValidator
 from training.feature_engineering import text_features
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
@@ -112,11 +112,11 @@ def run_integrity_checks(df: pd.DataFrame):
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
-    return report_path, result.passed()
+    return report_path
 
 
 @task(name="Generate Rules (Apriori)")
-def generate_rules(dataset):
+def train_model(dataset):
     logger = get_run_logger()
     
     if not dataset:
@@ -176,7 +176,7 @@ def generate_rules(dataset):
 
 
 @task(name="Validate Rules")
-def validate_rules(rule_metrics):
+def run_evaluation_checks(rules, rule_metrics):
     logger = get_run_logger()
     
     # 1. Quantity Check
@@ -200,7 +200,7 @@ def validate_rules(rule_metrics):
 
 
 @task(name="Validate & Upload")
-def validate_and_upload(rules, report_path, is_valid):
+def validate_and_upload(rules, rule_metrics, is_valid, integrity_report):
     logger = get_run_logger()
     
     if not is_valid:
@@ -211,16 +211,21 @@ def validate_and_upload(rules, report_path, is_valid):
         return "SKIPPED"
 
     try:
+        validator = ModelValidator(repo_id)
+        old_rules = validator.load_production_model("tags/rules.pkl")
+        
+        if old_rules is not None:
+            old_metrics = metrics.get_association_rule_metrics(old_rules)
+            logger.info(f"Previous Model Metrics: {old_metrics}")
+            
         uploader = ModelUploader(repo_id)
         
         local_path = "tag_rules.pkl"
         joblib.dump(rules, local_path)
         
-        # Upload Model
         uploader.upload_file(local_path, "tags/rules.pkl")
         
-        # Upload Reports
-        reports = {"integrity": report_path}
+        reports = {"integrity": integrity_report}
         uploader.upload_reports(reports, folder="tags/reports")
         
         return "PROMOTED"
@@ -245,25 +250,21 @@ def tags_training_flow():
         run_metrics["Top_Videos"] = len(df)
         
         # 2. Check Input (Deepchecks)
-        report_path, passed = run_integrity_checks(df)
-        if not passed:
-            logger.warning(
-                "Data Integrity Checks Failed. Continuing pipeline..."
-            )
+        report_path = run_integrity_checks(df)
             
         # 3. Feature Engineering (Preprocess Tags)
         dataset = prepare_features(df)
         run_metrics["Transactions"] = len(dataset)
         
         # 4. Generate Rules & Metrics
-        rules, rule_metrics = generate_rules(dataset)
+        rules, rule_metrics = train_model(dataset)
         run_metrics.update(rule_metrics)
         
         # 5. Validate Rules
-        is_valid = validate_rules(rule_metrics)
+        is_valid = run_evaluation_checks(rules, rule_metrics)
         
         # 6. Upload
-        status = validate_and_upload(rules, report_path, is_valid)
+        status = validate_and_upload(rules, rule_metrics, is_valid, report_path)
         
         run_metrics["Deployment"] = status
         notify("SUCCESS", metrics=run_metrics)

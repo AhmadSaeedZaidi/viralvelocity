@@ -55,3 +55,22 @@ def get_top_k_accuracy(y_true, y_prob, k=3):
     # Check if true label is in top k
     matches = [y in pred for y, pred in zip(y_true, top_k_preds)]
     return float(np.mean(matches))
+
+def get_association_rule_metrics(rules_df):
+    """
+    Calculates summary metrics for association rules.
+    """
+    if rules_df.empty:
+        return {
+            "rule_count": 0,
+            "avg_lift": 0.0,
+            "avg_confidence": 0.0,
+            "max_lift": 0.0
+        }
+        
+    return {
+        "rule_count": len(rules_df),
+        "avg_lift": float(rules_df["lift"].mean()),
+        "avg_confidence": float(rules_df["confidence"].mean()),
+        "max_lift": float(rules_df["lift"].max())
+    }
