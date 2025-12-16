@@ -31,14 +31,15 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting up... Initializing models.")
     
-    # Initialize instances
+    # Initialize instances with their HF Hub paths
     model_instances = {
-        "velocity": VelocityPredictor("velocity_v1"),
-        "clickbait": ClickbaitDetector("clickbait_v1"),
-        "genre": GenreClassifier("genre_v1"),
-        "tags": TagRecommender("tags_v1"),
-        "viral": ViralTrendPredictor("viral_v1"),
-        "anomaly": AnomalyDetector("anomaly_v1"),
+        "velocity": VelocityPredictor("velocity_v1", "velocity/model.pkl"),
+        "clickbait": ClickbaitDetector("clickbait_v1", "clickbait/model.pkl"),
+        # Note: Genre needs special handling for multiple files
+        "genre": GenreClassifier("genre_v1", "genre/model.h5"),
+        "tags": TagRecommender("tags_v1", "tags/rules.pkl"),
+        "viral": ViralTrendPredictor("viral_v1", "viral/model.pkl"),
+        "anomaly": AnomalyDetector("anomaly_v1", "anomaly/model.pkl"),
     }
 
     # Load them

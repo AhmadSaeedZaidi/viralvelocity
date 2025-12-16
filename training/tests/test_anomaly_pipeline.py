@@ -64,9 +64,11 @@ def test_train_model(MockIsoForest, mock_logger):
 def test_validate_and_upload(mock_dump, MockUploader, mock_logger):
     mock_model = MagicMock()
     # Note: validate_and_upload signature changed to accept metrics
-    # validate_and_upload(model, integrity_report) -> validate_and_upload(model, integrity_report, metrics)
+    # validate_and_upload(model, integrity_report)
+    #   -> validate_and_upload(model, integrity_report, metrics)
     # But wait, let's check the actual file content again.
-    # The read_file output shows: def validate_and_upload(model, integrity_report):
+    # The read_file output shows:
+    #   def validate_and_upload(model, integrity_report):
     # So the signature matches the test.
     
     status = validate_and_upload.fn(mock_model, "report.html")

@@ -4,10 +4,10 @@ import pandas as pd
 import pytest
 
 from training.pipelines.tags_pipeline import (
-    train_model,
     load_config,
     load_data,
     prepare_features,
+    train_model,
     validate_and_upload,
 )
 
@@ -63,8 +63,9 @@ def test_prepare_features(mock_logger, sample_df):
 def test_prepare_features_empty(mock_logger):
     """Test handling of empty or null tags."""
     df = pd.DataFrame({'tags': [None, '']})
-    # The function drops na, so None should be skipped. 
-    # The implementation filters empty strings: [t.strip().lower() for t in tags.split(',') if t.strip()]
+    # The function drops na, so None should be skipped.
+    # The implementation filters empty strings:
+    #   [t.strip().lower() for t in tags.split(',') if t.strip()]
     # So '' splits to [''], but 'if t.strip()' filters it out.
     # Resulting list is empty [].
     
