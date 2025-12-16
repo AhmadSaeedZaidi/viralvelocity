@@ -6,7 +6,6 @@ from catboost import CatBoostRegressor
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity, model_evaluation
 from prefect import flow, get_run_logger, task
-from sklearn.compose import TransformedTargetRegressor
 from sklearn.model_selection import train_test_split
 
 from training.evaluation import metrics
@@ -71,16 +70,13 @@ def prepare_features(df: pd.DataFrame):
     df["start_time"] = pd.to_datetime(df["start_time"])
     time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
     
+    # Clip age to 0.5 hours minimum to prevent log(0) or div/0 explosions
     df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0.5)
-    df["initial_view_velocity"] = df["start_views"] / df["video_age_hours"]
-    
-    # Physics features
-    df["virality_index"] = (
-        np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
-    )
-    interaction_num = np.log1p(df["start_likes"] + df["start_comments"] * 2)
-    interaction_den = np.log1p(df["start_views"] + 1)
-    df["interaction_density"] = interaction_num / interaction_den
+
+    # Physics features (Safe Log-Space)
+    # virality_index = Slope of log-log plot (Beta coefficient)
+    df["virality_index"] = np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
+    df["interaction_density"] = np.log1p(df["start_likes"] + df["start_comments"] * 2) / np.log1p(df["start_views"] + 1)
 
     if "title" in df.columns:
         try:
@@ -88,15 +84,9 @@ def prepare_features(df: pd.DataFrame):
         except Exception:
             df["title"] = df["title"].fillna("")
             df["title_len"] = df["title"].str.len()
-
-            def _caps_ratio(val):
-                s = str(val)
-                upper_count = sum(1 for c in s if c.isupper())
-                return upper_count / (len(s) + 1)
-
-            df["caps_ratio"] = df["title"].apply(_caps_ratio)
+            df["caps_ratio"] = df["title"].apply(lambda x: sum(1 for c in str(x) if c.isupper()) / (len(str(x)) + 1))
             df["exclamation_count"] = df["title"].str.count("!")
-            df["question_count"] = df["title"].str.count("?")
+            df["question_count"] = df["title"].str.count("\?")
             df["has_digits"] = df["title"].str.contains(r'\d').astype(int)
 
     df["log_start_views"] = np.log1p(df["start_views"])
@@ -108,7 +98,7 @@ def prepare_features(df: pd.DataFrame):
     features = [
         "hour_sin", "hour_cos", "publish_day", "is_weekend",
         "log_start_views", "log_duration",
-        "virality_index", "initial_view_velocity", "interaction_density",
+        "virality_index", "interaction_density",
         "like_view_ratio", "comment_view_ratio",
         "video_age_hours",
         "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits",
@@ -123,11 +113,7 @@ def prepare_features(df: pd.DataFrame):
     final_df = df[available_features + [target_col]]
     final_df = base_features.clean_dataframe(final_df, fill_value=0)
     
-    logger.info(
-        "Features prepared: %d cols, %d rows",
-        len(available_features),
-        len(final_df),
-    )
+    logger.info(f"Features prepared: {len(available_features)} cols, {len(final_df)} rows")
     return final_df
 
 @task(name="Deepchecks: Data Integrity")
@@ -180,9 +166,13 @@ def train_model(df: pd.DataFrame):
         X_train["category_id"] = X_train["category_id"].astype(int)
         X_test["category_id"] = X_test["category_id"].astype(int)
 
-    logger.info("Training CatBoost (Huber Loss)")
+    logger.info("Training CatBoost (Manual Log-Transform + Clip)")
 
-    base_model = CatBoostRegressor(
+    # Manual Log Transform to allow for Safety Clipping
+    y_train_log = np.log1p(y_train)
+    y_test_log = np.log1p(y_test)
+
+    model = CatBoostRegressor(
         iterations=2000,
         learning_rate=0.02,
         depth=6,
@@ -194,14 +184,17 @@ def train_model(df: pd.DataFrame):
         cat_features=cat_features if cat_features else None
     )
 
-    model = TransformedTargetRegressor(
-        regressor=base_model,
-        func=np.log1p,
-        inverse_func=np.expm1
-    )
-
-    model.fit(X_train, y_train)
-    preds = model.predict(X_test)
+    model.fit(X_train, y_train_log)
+    
+    # Predict in Log Space
+    preds_log = model.predict(X_test)
+    
+    # SAFETY CLIP: e^25 is ~72 Billion views. 
+    # Anything higher is a mathematical explosion error, not a real prediction.
+    preds_log = np.clip(preds_log, 0, 25)
+    
+    # Inverse Transform
+    preds = np.expm1(preds_log)
     
     eval_metrics = metrics.get_regression_metrics(y_test, preds)
     logger.info(f"Metrics: {eval_metrics}")
@@ -214,19 +207,21 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     potential_cat = ["publish_day", "is_weekend", "category_id"]
     cat_features = [f for f in potential_cat if f in X_train.columns]
     
-    train_ds = Dataset(
-        pd.concat([X_train, y_train], axis=1),
-        label=target_col,
-        cat_features=cat_features,
-    )
-    test_ds = Dataset(
-        pd.concat([X_test, y_test], axis=1),
-        label=target_col,
-        cat_features=cat_features,
-    )
+    # Manual wrapper to allow Deepchecks to call predict() naturally
+    class LogModelWrapper:
+        def __init__(self, internal_model):
+            self.model = internal_model
+        def predict(self, X):
+            p_log = self.model.predict(X)
+            p_log = np.clip(p_log, 0, 25) # Apply safety clip here too
+            return np.expm1(p_log)
+    
+    wrapped_model = LogModelWrapper(model)
+    
+    train_ds = Dataset(pd.concat([X_train, y_train], axis=1), label=target_col, cat_features=cat_features)
+    test_ds = Dataset(pd.concat([X_test, y_test], axis=1), label=target_col, cat_features=cat_features)
 
-    eval_suite = model_evaluation()
-    result = eval_suite.run(train_dataset=train_ds, test_dataset=test_ds, model=model)
+    result = model_evaluation().run(train_dataset=train_ds, test_dataset=test_ds, model=wrapped_model)
     report_path = "velocity_eval_report.html"
     result.save_as_html(report_path)
     return report_path
@@ -241,14 +236,25 @@ def validate_and_upload(model, X_test, y_test, reports):
     validator = ModelValidator(repo_id)
     old_model = validator.load_production_model("velocity/model.pkl")
     metric_name = VELOCITY_CONFIG.get("metric", "r2_score")
+    
+    # Wrap model for validation comparison
+    class LogModelWrapper:
+        def __init__(self, internal_model):
+            self.model = internal_model
+        def predict(self, X):
+            p_log = self.model.predict(X)
+            p_log = np.clip(p_log, 0, 25)
+            return np.expm1(p_log)
+    
+    wrapped_model = LogModelWrapper(model)
 
     passed, new_score, old_score = validator.compare_models(
-        model, old_model, X_test, y_test, metric_name=metric_name
+        wrapped_model, old_model, X_test, y_test, metric_name=metric_name
     )
 
     if passed:
         logger.info(f"Promoting model ({new_score:.4f} vs {old_score:.4f})")
-        joblib.dump(model, "velocity_model.pkl")
+        joblib.dump(model, "velocity_model.pkl") 
         uploader = ModelUploader(repo_id)
         uploader.upload_file("velocity_model.pkl", "velocity/model.pkl")
         uploader.upload_reports(reports, folder="velocity/reports")

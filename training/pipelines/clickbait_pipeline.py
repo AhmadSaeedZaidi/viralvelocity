@@ -7,6 +7,7 @@ from prefect import flow, get_run_logger, task
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 
+from training.evaluation.metrics import get_classification_metrics
 from training.evaluation.validators import ModelValidator
 
 # Import our new modules
@@ -25,34 +26,41 @@ PIPELINE_CONFIG = CONFIG["models"]["clickbait"]
 def load_data_task():
     loader = DataLoader()
     df = loader.get_joined_data()
+    
+    # Deduplicate to fix data integrity issues (Conflicting Labels / Duplicates)
+    if "video_id" in df.columns:
+        df = df.drop_duplicates(subset=["video_id"], keep="last")
+        
     return df
 
 @task(name="Feature Engineering")
 def feature_engineering_task(df: pd.DataFrame):
     logger = get_run_logger()
     
-    # 1. Clean
+    # 1. Clean & Ratios (Needed for labeling)
     df = base_features.clean_dataframe(df)
-    
-    # 2. Calculate Engagement
     df = base_features.calculate_engagement_ratios(df)
     
-    # 3. Labeling Logic (From Config)
+    # 2. Labeling Logic (From Config)
     thresh = PIPELINE_CONFIG["labeling"]["engagement_threshold"]
     min_views = PIPELINE_CONFIG["labeling"]["min_views"]
+    target_col = PIPELINE_CONFIG["target"]
     
     def label_clickbait(row):
         if row['views'] > min_views and row['engagement_score'] < thresh:
             return 1
         return 0
     
-    df[PIPELINE_CONFIG["target"]] = df.apply(label_clickbait, axis=1)
+    df[target_col] = df.apply(label_clickbait, axis=1)
     
-    # Select Features
-    features = ['duration_seconds', 'like_view_ratio', 'comment_view_ratio']
-    target = PIPELINE_CONFIG["target"]
+    # 3. Prepare Features (X)
+    # This adds log_views, log_duration and selects the right columns
+    # Including log_views helps resolve conflicting labels/duplicates
+    X = base_features.prepare_clickbait_features(df)
     
-    final_df = df[features + [target]]
+    # 4. Combine X and y
+    final_df = pd.concat([X, df[target_col]], axis=1)
+    
     logger.info(f"Features ready. Shape: {final_df.shape}")
     return final_df
 
@@ -195,13 +203,19 @@ def clickbait_pipeline():
         # 3. Train & Tune (AutoML)
         best_model, Xt, Xv, yt, yv = train_and_tune_task(df)
         
+        # Calculate detailed metrics on validation set
+        y_pred = best_model.predict(Xv)
+        val_metrics = get_classification_metrics(yv, y_pred)
+        print(f"Validation Metrics: {val_metrics}")
+        
         # 4. Validation (Beat the Champion)
         is_champion, new_score, old_score = validate_model_task(best_model, Xv, yv)
         
         metrics = {
             "new_f1": f"{new_score:.4f}",
             "old_f1": f"{old_score:.4f}",
-            "deployed": is_champion
+            "deployed": is_champion,
+            **val_metrics # Include detailed metrics in alert
         }
         
         if is_champion:

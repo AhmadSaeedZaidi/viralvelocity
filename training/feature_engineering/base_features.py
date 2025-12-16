@@ -84,3 +84,29 @@ def prepare_anomaly_features(df: pd.DataFrame) -> pd.DataFrame:
     ]
     
     return df[features].fillna(0)
+
+def prepare_clickbait_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Prepares features for clickbait classification.
+    Includes log_views to distinguish between low/high traffic videos (resolves conflicting labels).
+    """
+    # Ensure basic cleaning/ratios if not already done
+    if 'like_view_ratio' not in df.columns:
+        df = calculate_engagement_ratios(df)
+        
+    # Log transforms
+    df = normalize_features(df)
+    if 'views' in df.columns:
+        df['log_views'] = np.log1p(df['views'])
+        
+    features = [
+        'log_duration',       # Normalized duration
+        'like_view_ratio',    # Engagement Quality
+        'comment_view_ratio', # Engagement Quality
+        'log_views'           # Magnitude (Crucial for distinguishing labels)
+    ]
+    
+    # Return only selected features, filling NaNs
+    # Filter to ensure columns exist (e.g. if duration missing)
+    selected_features = [f for f in features if f in df.columns]
+    return df[selected_features].fillna(0)
