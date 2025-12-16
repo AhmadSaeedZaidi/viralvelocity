@@ -116,7 +116,7 @@ def run_integrity_checks(df: pd.DataFrame):
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
-    return report_path
+    return report_path, result.passed()
 
 
 @task(name="Generate Rules (Apriori)")
@@ -204,7 +204,7 @@ def run_evaluation_checks(rules, rule_metrics):
 
 
 @task(name="Validate & Upload")
-def validate_and_upload(rules, rule_metrics, is_valid, integrity_report):
+def validate_and_upload(rules, rule_metrics, is_valid, reports):
     logger = get_run_logger()
     
     if not is_valid:
@@ -229,7 +229,6 @@ def validate_and_upload(rules, rule_metrics, is_valid, integrity_report):
         
         uploader.upload_file(local_path, "tags/rules.pkl")
         
-        reports = {"integrity": integrity_report}
         uploader.upload_reports(reports, folder="tags/reports")
         
         return "PROMOTED"
@@ -239,8 +238,8 @@ def validate_and_upload(rules, rule_metrics, is_valid, integrity_report):
 
 
 @task(name="Notify")
-def notify(status, error_msg=None, metrics=None):
-    msg = f"Finished. Error: {error_msg}" if error_msg else "Success"
+def notify(status, error=None, metrics=None):
+    msg = f"Finished. {error if error else ''}"
     send_discord_alert(status, "Tag Recommender", msg, metrics)
 
 
@@ -251,10 +250,14 @@ def tags_training_flow():
     try:
         # 1. Load Data
         df = load_data()
-        run_metrics["Top_Videos"] = len(df)
+        run_metrics["Training_Samples"] = len(df)
         
         # 2. Check Input (Deepchecks)
-        report_path = run_integrity_checks(df)
+        report_path, passed = run_integrity_checks(df)
+        if not passed:
+            logger.warning(
+                "Data Integrity Checks Failed. Continuing pipeline..."
+            )
             
         # 3. Feature Engineering (Preprocess Tags)
         dataset = prepare_features(df)
@@ -268,14 +271,16 @@ def tags_training_flow():
         is_valid = run_evaluation_checks(rules, rule_metrics)
         
         # 6. Upload
-        status = validate_and_upload(rules, rule_metrics, is_valid, report_path)
+        status = validate_and_upload(
+            rules, rule_metrics, is_valid, {"integrity": report_path}
+        )
         
         run_metrics["Deployment"] = status
         notify("SUCCESS", metrics=run_metrics)
         
     except Exception as e:
         logger.error(f"Pipeline crashed: {e}")
-        notify("FAILURE", error_msg=str(e), metrics=run_metrics)
+        notify("FAILURE", error=str(e), metrics=run_metrics)
         raise e
 
 
