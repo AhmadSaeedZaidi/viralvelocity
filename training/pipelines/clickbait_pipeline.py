@@ -57,6 +57,9 @@ def prepare_features(df: pd.DataFrame):
     # 4. Combine X and y
     final_df = pd.concat([X, df[target_col]], axis=1)
     
+    # Deduplicate to satisfy Deepchecks (and avoid bias)
+    final_df = final_df.drop_duplicates()
+    
     logger.info(f"Features ready. Shape: {final_df.shape}")
     return final_df
 
@@ -191,7 +194,11 @@ def clickbait_pipeline():
     try:
         # 1. ETL
         raw_df = load_data()
+        run_metrics["Raw_Rows"] = len(raw_df)
+        
         df = prepare_features(raw_df)
+        run_metrics["Training_Samples"] = len(df)
+        run_metrics["Features"] = len(df.columns) - 1
         
         # 2. Integrity Check (Deepchecks)
         integrity_path, passed = run_integrity(df)
