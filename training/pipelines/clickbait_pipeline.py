@@ -5,7 +5,7 @@ import yaml
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity, model_evaluation
 from prefect import flow, get_run_logger, task
-from sklearn.ensemble import GradientBoostingClassifier
+from xgboost import XGBClassifier
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 
 from training.evaluation import metrics
@@ -156,8 +156,17 @@ def train_model(df: pd.DataFrame):
     # Tuning Config
     tuning_conf = PIPELINE_CONFIG.get("tuning", {})
     
-    # Upgrade: Gradient Boosting is better for dense numerical/ordinal features
-    base_model = GradientBoostingClassifier(random_state=42)
+    # Calculate scale_pos_weight for XGBoost (imbalance handling)
+    num_neg = (y_train == 0).sum()
+    num_pos = (y_train == 1).sum()
+    scale_pos_weight = num_neg / num_pos if num_pos > 0 else 1.0
+    
+    # Use XGBoost
+    base_model = XGBClassifier(
+        random_state=42,
+        scale_pos_weight=scale_pos_weight,
+        eval_metric='logloss'
+    )
     
     if tuning_conf:
         search = RandomizedSearchCV(
@@ -247,7 +256,11 @@ def clickbait_pipeline():
     run_metrics = {}
     try:
         raw_df = load_data()
+        run_metrics["Raw_Rows"] = len(raw_df)
+        
         df = prepare_features(raw_df)
+        run_metrics["Training_Samples"] = len(df)
+        run_metrics["Features"] = len(df.columns) - 1
         
         integrity_path, passed = run_integrity(df)
         if not passed:
