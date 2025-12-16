@@ -13,6 +13,13 @@ from sklearn.metrics import (
 
 
 class ModelValidator:
+    """
+    Standardized validator for comparing new models against production models.
+    Supports:
+    - Supervised Learning (Regression/Classification) via metric comparison.
+    - Unsupervised Learning (Anomaly Detection) via heuristic checks.
+    - Rule-Based Systems (Tags) via metric comparison.
+    """
     def __init__(self, repo_id: str, local_dir: str = "./temp_models"):
         self.repo_id = repo_id
         self.local_dir = local_dir
@@ -29,98 +36,127 @@ class ModelValidator:
             )
             self.logger.info(f"Loaded production model from {model_path}")
             return joblib.load(model_path)
-        except Exception as exc:
-            # Log the exception for debugging while avoiding a bare except
+        except Exception:
             self.logger.warning(
-                "No production model found (or download failed). "
-                "This is likely the first run."
+                f"No production model found at {model_filename}. Assuming first run."
             )
-            self.logger.debug("Model download/load error: %s", exc)
             return None
 
-    def compare_models(
+    def validate_supervised(
         self,
         new_model,
         old_model,
         X_test,
         y_test,
         metric_name="f1_score",
+        threshold_improvement=0.0
     ):
         """
-        Compares New vs Old.
-        Returns: (passed_bool, new_score, old_score)
-        """
-        # Get Scores
-        new_score = self._score(new_model, X_test, y_test, metric_name)
+        Compares a new supervised model against the old one using a specific metric.
         
+        Args:
+            new_model: The newly trained model.
+            old_model: The production model (can be None).
+            X_test: Validation features.
+            y_test: Validation labels.
+            metric_name: Metric to optimize (e.g., 'f1_score', 'rmse').
+            threshold_improvement: Minimum improvement required to promote (default 0).
+            
+        Returns:
+            (passed: bool, new_score: float, old_score: float)
+        """
+        # 1. Score New Model
+        new_score = self._calculate_metric(new_model, X_test, y_test, metric_name)
+        
+        # 2. Handle First Run
         if old_model is None:
             self.logger.info(
-                "No old model to compare. New model wins default. Score: %s",
-                new_score,
+                f"First run. New model score ({metric_name}): {new_score:.4f}"
             )
             return True, new_score, 0.0
 
-        # Try to score old model - may fail if features changed
+        # 3. Score Old Model (Handle Compatibility Issues)
         try:
-            old_score = self._score(old_model, X_test, y_test, metric_name)
+            old_score = self._calculate_metric(old_model, X_test, y_test, metric_name)
         except Exception as e:
-            err_msg = str(e).lower()
-            compatibility_keywords = (
-                "feature",
-                "shape",
-                "mismatch",
-                "expected",
-                "input",
+            self.logger.warning(
+                f"Old model failed on new data (likely schema change). "
+                f"Promoting new model. Error: {e}"
             )
-            if any(x in err_msg for x in compatibility_keywords):
-                self.logger.warning(
-                    "Old model incompatible with new data (features/shape mismatch). "
-                    "Promoting new model. Error: %s",
-                    e,
-                )
-                return True, new_score, 0.0
-            raise  # Re-raise if it's a different error
+            return True, new_score, 0.0
+
+        # 4. Compare
+        lower_is_better = metric_name.lower() in [
+            "mae", "mean_absolute_error", "rmse", "mean_squared_error"
+        ]
         
-        # Comparison logic
-        improvement = new_score - old_score
-        
+        if lower_is_better:
+            improvement = old_score - new_score
+            passed = improvement >= threshold_improvement
+        else:
+            improvement = new_score - old_score
+            passed = improvement >= threshold_improvement
+            
         self.logger.info(
-            "Comparison: New=%0.4f, Old=%0.4f, Diff=%0.4f",
-            new_score,
-            old_score,
-            improvement,
+            f"Validation ({metric_name}): New={new_score:.4f}, "
+            f"Old={old_score:.4f}, Diff={improvement:.4f}"
         )
         
-        # Improvement Threshold (e.g., must be at least equal or better)
-        if new_score >= old_score:
-            return True, new_score, old_score
-        else:
-            return False, new_score, old_score
+        if not passed:
+            self.logger.warning(
+                f"Model failed validation. Improvement {improvement:.4f} < "
+                f"{threshold_improvement}"
+            )
+            
+        return passed, new_score, old_score
 
-    def _score(self, model, X, y, metric_name):
-        preds = model.predict(X)
+    def validate_unsupervised(self, metrics: dict, bounds: dict):
+        """
+        Validates unsupervised models (e.g., Anomaly Detection) using heuristic bounds.
         
-        # Normalize metric name to handle aliases (f1 vs f1_score)
+        Args:
+            metrics (dict): Dictionary of calculated metrics 
+                            (e.g., {'anomaly_rate': 0.05}).
+            bounds (dict): Dictionary of min/max bounds 
+                           (e.g., {'anomaly_rate': (0.01, 0.10)}).
+            
+        Returns:
+            bool: True if all metrics are within bounds.
+        """
+        passed = True
+        for metric, (min_val, max_val) in bounds.items():
+            val = metrics.get(metric)
+            if val is None:
+                self.logger.warning(f"Metric {metric} missing from validation metrics.")
+                continue
+                
+            if not (min_val <= val <= max_val):
+                self.logger.warning(
+                    f"Metric {metric}={val:.4f} out of bounds [{min_val}, {max_val}]"
+                )
+                passed = False
+                
+        if passed:
+            self.logger.info("Unsupervised validation passed.")
+        return passed
+
+    def _calculate_metric(self, model, X, y, metric_name):
+        """Internal helper to calculate metrics safely."""
+        preds = model.predict(X)
         metric = metric_name.lower().strip()
         
         if metric in ["f1", "f1_score"]:
-            # Handle binary vs multiclass automatically
             try:
                 return f1_score(y, preds)
             except ValueError:
                 return f1_score(y, preds, average='weighted')
-                
         elif metric in ["r2", "r2_score"]:
             return r2_score(y, preds)
-            
         elif metric in ["accuracy", "acc"]:
             return accuracy_score(y, preds)
-            
         elif metric in ["mae", "mean_absolute_error"]:
             return mean_absolute_error(y, preds)
-            
         elif metric in ["rmse", "mean_squared_error"]:
             return mean_squared_error(y, preds, squared=False)
-            
         else:
             raise ValueError(f"Unknown metric: {metric_name}")

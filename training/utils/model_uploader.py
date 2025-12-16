@@ -130,7 +130,8 @@ class ModelUploader:
                 continue
                 
             # Construct path in repo
-            filename = os.path.basename(local_path)
+            # Standardize naming: {name}_latest.html
+            filename = f"{name}_latest.html"
             path_in_repo = f"{folder}/{filename}"
             
             # Use the standard upload logic (which handles archiving)

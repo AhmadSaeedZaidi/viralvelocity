@@ -41,8 +41,9 @@ def test_prepare_features(sample_stats_df):
     # Ensure only numeric features returned
     assert 'video_id' not in df.columns
 
+@patch("training.pipelines.anomaly_pipeline.get_run_logger")
 @patch("training.pipelines.anomaly_pipeline.IsolationForest")
-def test_train_model(MockIsoForest):
+def test_train_model(MockIsoForest, mock_logger):
     df = pd.DataFrame(
         np.random.rand(10, 5),
         columns=['views', 'likes', 'comments', 'r1', 'r2']
@@ -57,10 +58,17 @@ def test_train_model(MockIsoForest):
     assert rate == 0.2  # 2 out of 10 are anomalies
     mock_model.fit.assert_called_once()
 
+@patch("training.pipelines.anomaly_pipeline.get_run_logger")
 @patch("training.pipelines.anomaly_pipeline.ModelUploader")
 @patch("joblib.dump")
-def test_validate_and_upload(mock_dump, MockUploader):
+def test_validate_and_upload(mock_dump, MockUploader, mock_logger):
     mock_model = MagicMock()
+    # Note: validate_and_upload signature changed to accept metrics
+    # validate_and_upload(model, integrity_report) -> validate_and_upload(model, integrity_report, metrics)
+    # But wait, let's check the actual file content again.
+    # The read_file output shows: def validate_and_upload(model, integrity_report):
+    # So the signature matches the test.
+    
     status = validate_and_upload.fn(mock_model, "report.html")
     
     assert status == "PROMOTED"

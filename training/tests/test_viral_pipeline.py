@@ -28,7 +28,8 @@ def trending_history():
         
     return pd.DataFrame(data)
 
-def test_prepare_features(trending_history):
+@patch("training.pipelines.viral_pipeline.get_run_logger")
+def test_prepare_features(mock_logger, trending_history):
     df = prepare_features.fn(trending_history)
     
     assert len(df) == 2 # 2 videos

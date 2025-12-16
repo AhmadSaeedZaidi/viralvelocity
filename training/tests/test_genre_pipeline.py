@@ -5,9 +5,8 @@ import pandas as pd
 import pytest
 
 from training.pipelines.genre_pipeline import (
-    prepare_features_task,
-    svd_optimization_task,
-    vectorize_task,
+    prepare_features,
+    train_model,
 )
 
 
@@ -20,8 +19,9 @@ def sample_metadata():
         'category_id': ['Gaming', 'Lifestyle']
     })
 
-def test_prepare_features_task(sample_metadata):
-    df = prepare_features_task.fn(sample_metadata)
+@patch("training.pipelines.genre_pipeline.get_run_logger")
+def test_prepare_features(mock_logger, sample_metadata):
+    df = prepare_features.fn(sample_metadata)
     
     assert 'text' in df.columns
     assert 'genre' in df.columns
@@ -29,27 +29,22 @@ def test_prepare_features_task(sample_metadata):
     assert 'minecraft' in df.iloc[0]['text']
     assert 'gaming' in df.iloc[0]['text']
 
-def test_vectorize_task():
+@patch("training.pipelines.genre_pipeline.get_run_logger")
+@patch("training.pipelines.genre_pipeline.GENRE_CONFIG", {"pca_candidates": [2]})
+def test_train_model(mock_logger):
+    # Create a dataframe with text and genre
     df = pd.DataFrame({
-        'text': ['gaming video', 'vlog video', 'gaming minecraft'],
-        'genre': ['Gaming', 'Vlog', 'Gaming']
+        'text': ['gaming video ' * 10, 'vlog video ' * 10] * 50,
+        'genre': ['Gaming', 'Vlog'] * 50
     })
     
-    X, y, vectorizer, le = vectorize_task.fn(df)
+    artifacts, Xt, Xv, yt, yv, metrics = train_model.fn(df)
     
-    assert X.shape[0] == 3
-    assert len(y) == 3
-    # Check label encoding
-    assert len(set(y)) == 2 # Gaming, Vlog
-
-@patch("training.pipelines.genre_pipeline.GENRE_CONFIG", {"pca_candidates": [2]})
-def test_svd_optimization_task():
-    # Create a sparse matrix-like object or dense array
-    X = np.random.rand(10, 5) # 10 samples, 5 features
-    y = np.array([0, 1] * 5)
+    assert "model" in artifacts
+    assert "vectorizer" in artifacts
+    assert "svd" in artifacts
+    assert "le" in artifacts
     
-    X_reduced, svd = svd_optimization_task.fn(X, y)
-    
-    # Should reduce to 2 components as per config
-    assert X_reduced.shape[1] == 2
-    assert svd.n_components == 2
+    # Check shapes
+    assert Xt.shape[1] == 2 # Reduced to 2 components
+    assert len(yt) == Xt.shape[0]
