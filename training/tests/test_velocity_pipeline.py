@@ -13,30 +13,30 @@ def sample_data():
         'video_id': ['v1', 'v2'],
         'published_at': pd.to_datetime(['2023-01-01 10:00:00', '2023-01-02 14:00:00']),
         'channel_id': ['c1', 'c1'],
-        'views': [100, 200], # Current views (target)
-        'likes': [10, 20],
-        'comments': [1, 2],
+        'start_views': [100, 200],
+        'target_views': [1000, 2000],
+        'start_likes': [10, 20],
+        'start_comments': [1, 2],
         'duration_seconds': [60, 120]
     })
 
 @patch("training.pipelines.velocity_pipeline.VELOCITY_CONFIG", {"target": "views"})
-def test_prepare_features(sample_data):
+@patch("training.pipelines.velocity_pipeline.get_run_logger")
+def test_prepare_features(mock_logger, sample_data):
     # Test feature engineering logic
     df = prepare_features.fn(sample_data)
     
     assert 'publish_hour' in df.columns
     assert 'publish_day' in df.columns
-    assert 'channel_avg_views_recent' in df.columns
+    assert 'start_views' in df.columns
+    assert 'likes' in df.columns
+    assert 'comments' in df.columns
     
     # Check values
     assert df.iloc[0]['publish_hour'] == 10
     assert df.iloc[1]['publish_hour'] == 14
-    
-    # Check rolling window (channel_avg_views_recent)
-    # v1 is first, so it should be 0 (or filled 0)
-    # v2 is second, it should take v1's views (100) as history
-    # Note: The implementation sorts by channel/date.
-    assert df.iloc[1]['channel_avg_views_recent'] == 100.0
+    assert df.iloc[0]['likes'] == 10
+    assert df.iloc[0]['comments'] == 1
 
 @patch("training.pipelines.velocity_pipeline.xgb.XGBRegressor")
 @patch("training.pipelines.velocity_pipeline.VELOCITY_CONFIG", {

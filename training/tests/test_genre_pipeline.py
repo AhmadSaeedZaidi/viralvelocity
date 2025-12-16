@@ -20,7 +20,8 @@ def sample_metadata():
         'category_id': ['Gaming', 'Lifestyle']
     })
 
-def test_prepare_features_task(sample_metadata):
+@patch("training.pipelines.genre_pipeline.get_run_logger")
+def test_prepare_features_task(mock_logger, sample_metadata):
     df = prepare_features_task.fn(sample_metadata)
     
     assert 'text' in df.columns
@@ -29,7 +30,8 @@ def test_prepare_features_task(sample_metadata):
     assert 'minecraft' in df.iloc[0]['text']
     assert 'gaming' in df.iloc[0]['text']
 
-def test_vectorize_task():
+@patch("training.pipelines.genre_pipeline.get_run_logger")
+def test_vectorize_task(mock_logger):
     df = pd.DataFrame({
         'text': ['gaming video', 'vlog video', 'gaming minecraft'],
         'genre': ['Gaming', 'Vlog', 'Gaming']
@@ -42,8 +44,9 @@ def test_vectorize_task():
     # Check label encoding
     assert len(set(y)) == 2 # Gaming, Vlog
 
+@patch("training.pipelines.genre_pipeline.get_run_logger")
 @patch("training.pipelines.genre_pipeline.GENRE_CONFIG", {"pca_candidates": [2]})
-def test_svd_optimization_task():
+def test_svd_optimization_task(mock_logger):
     # Create a sparse matrix-like object or dense array
     X = np.random.rand(10, 5) # 10 samples, 5 features
     y = np.array([0, 1] * 5)

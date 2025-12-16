@@ -61,14 +61,16 @@ def test_preprocess_tags(sample_df):
 def test_preprocess_tags_empty():
     """Test handling of empty or null tags."""
     df = pd.DataFrame({'tags': [None, '']})
-    # The function drops na, so None should be skipped. Empty string splits to [''].
-    # Let's check the implementation behavior for empty string.
-    # split('') returns [''], so we might get [['']].
+    # The function drops na, so None should be skipped. 
+    # The implementation filters empty strings: [t.strip().lower() for t in tags.split(',') if t.strip()]
+    # So '' splits to [''], but 'if t.strip()' filters it out.
+    # Resulting list is empty [].
+    
     result = preprocess_tags.fn(df)
     # Based on implementation: df['tags'].dropna() removes None.
-    # ' '.split(',') -> ['']
+    # ' '.split(',') -> [''] -> filtered -> []
     assert len(result) == 1
-    assert result[0] == ['']
+    assert result[0] == []
 
 @patch("builtins.open", new_callable=mock_open, read_data="data")
 @patch("yaml.safe_load")

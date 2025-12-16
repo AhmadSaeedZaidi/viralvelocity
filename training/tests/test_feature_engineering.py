@@ -50,8 +50,16 @@ class TestFeatureEngineering(unittest.TestCase):
             'tags': [self.text_input]
         })
         res = text_features.prepare_text_features(df)
+        # The result is a Series of strings
         self.assertIn("minecraft", res.iloc[0])
         self.assertIn("video 1", res.iloc[0])
+
+    def test_get_tags_list(self):
+        tags_str = "Minecraft, Gaming,  Tutorial "
+        res = text_features.get_tags_list(tags_str)
+        self.assertEqual(len(res), 3)
+        self.assertEqual(res[0], "minecraft")
+        self.assertEqual(res[2], "tutorial")
 
     # --- Temporal Features Tests ---
     def test_date_features(self):
@@ -59,6 +67,21 @@ class TestFeatureEngineering(unittest.TestCase):
         # Fri = 4, Sat = 5
         self.assertEqual(df['publish_day'].iloc[0], 4)
         self.assertEqual(df['is_weekend'].iloc[1], 1)
+
+    def test_velocity_features(self):
+        df = pd.DataFrame({
+            'channel_id': ['c1', 'c1', 'c1'],
+            'published_at': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03']),
+            'views': [100, 200, 300]
+        })
+        df = temporal_features.calculate_velocity_features(df, window=2)
+        
+        # Video 1: No history -> 0
+        self.assertEqual(df.iloc[0]['channel_avg_views_recent'], 0)
+        # Video 2: History is [100] -> 100
+        self.assertEqual(df.iloc[1]['channel_avg_views_recent'], 100)
+        # Video 3: History is [100, 200] -> 150
+        self.assertEqual(df.iloc[2]['channel_avg_views_recent'], 150)
 
 if __name__ == '__main__':
     unittest.main()

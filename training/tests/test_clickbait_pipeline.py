@@ -21,11 +21,12 @@ def sample_df():
         'duration_seconds': [60, 120]
     })
 
+@patch("training.pipelines.clickbait_pipeline.get_run_logger")
 @patch("training.pipelines.clickbait_pipeline.PIPELINE_CONFIG", {
     "labeling": {"engagement_threshold": 0.05, "min_views": 1000},
     "target": "is_clickbait"
 })
-def test_feature_engineering_task(sample_df):
+def test_feature_engineering_task(mock_logger, sample_df):
     # v1: views=20000 (>1000), likes=10. Ratio ~ 0.0005 (<0.05).
     # Should be clickbait (1).
     # v2: views=500 (<1000). Should be 0.
@@ -41,6 +42,7 @@ def test_feature_engineering_task(sample_df):
     assert df.iloc[0]['is_clickbait'] == 1
     assert df.iloc[1]['is_clickbait'] == 0
 
+@patch("training.pipelines.clickbait_pipeline.get_run_logger")
 @patch("training.pipelines.clickbait_pipeline.RandomizedSearchCV")
 @patch("training.pipelines.clickbait_pipeline.PIPELINE_CONFIG", {
     "target": "is_clickbait",
@@ -48,7 +50,7 @@ def test_feature_engineering_task(sample_df):
     "random_state": 42,
     "tuning": {"params": {}, "n_iter": 1, "cv": 2}
 })
-def test_train_and_tune_task(MockSearch):
+def test_train_and_tune_task(MockSearch, mock_logger):
     df = pd.DataFrame({
         'f1': [1, 2, 3, 4, 5],
         'f2': [1, 2, 3, 4, 5],
