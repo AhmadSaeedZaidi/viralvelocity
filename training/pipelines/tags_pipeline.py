@@ -59,11 +59,15 @@ def load_data():
         top_df = df.copy()
 
     if 'tags' in top_df.columns:
+        top_df['tags'] = top_df['tags'].fillna("").astype(str)
         initial_len = len(top_df)
-        top_df = top_df.dropna(subset=['tags'])
+        top_df = top_df[top_df['tags'].str.strip() != ""]
         dropped = initial_len - len(top_df)
         if dropped > 0:
-            logger.info(f"Dropped {dropped} rows with missing tags.")
+            logger.info(f"Dropped {dropped} rows with empty/missing tags.")
+            
+    if 'title' in top_df.columns:
+        top_df['title'] = top_df['title'].fillna("").astype(str).str.strip()
     
     if len(top_df) < 10:
         raise ValueError(
@@ -81,7 +85,7 @@ def prepare_features(df: pd.DataFrame):
     
     # Use modular text processing if applicable or standard logic
     if 'tags' in df.columns:
-        for tag_str in df['tags'].dropna():
+        for tag_str in df['tags']:
             tag_list = text_features.get_tags_list(tag_str)
             if len(tag_list) >= 2:
                 dataset.append(tag_list)
@@ -94,7 +98,10 @@ def prepare_features(df: pd.DataFrame):
 def run_integrity_checks(df: pd.DataFrame):
     logger = get_run_logger()
     
-    ds = Dataset(df, cat_features=[])
+    check_cols = ['tags', 'title', 'views', 'likes'] 
+    existing_cols = [c for c in check_cols if c in df.columns]
+    
+    ds = Dataset(df[existing_cols], cat_features=[])
     result = data_integrity().run(ds)
     
     report_path = "tags_integrity_report.html"
