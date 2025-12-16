@@ -52,6 +52,7 @@ jobs:
 
   test-api:
     name: 🧪 Test API
+    needs: lint-api
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -83,6 +84,7 @@ jobs:
 
   lint-training:
     name: 🧹 Lint Training
+    needs: test-api
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
@@ -101,6 +103,7 @@ jobs:
 
   test-training:
     name: 🧪 Test ${{ matrix.test_file }}
+    needs: lint-training
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
