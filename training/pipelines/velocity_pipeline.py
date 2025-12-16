@@ -17,6 +17,7 @@ from training.utils.notifications import send_discord_alert
 
 CONFIG_PATH = "training/config/training_config.yaml"
 
+
 def load_config():
     try:
         with open(CONFIG_PATH, "r") as f:
@@ -28,7 +29,9 @@ def load_config():
     except FileNotFoundError:
         return {}, {}
 
+
 VELOCITY_CONFIG, GLOBAL_CONFIG = load_config()
+
 
 @task(retries=3, retry_delay_seconds=30, name="Load Video Data")
 def load_data():
@@ -52,10 +55,11 @@ def load_data():
     
     return df
 
+
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
-    logger.info("Preparing features")
+    logger.info("Preparing features (Strictly No Data Leaks)")
     
     df = temporal_features.add_date_features(df, date_col="published_at")
     
@@ -68,15 +72,15 @@ def prepare_features(df: pd.DataFrame):
     
     df["published_at"] = pd.to_datetime(df["published_at"])
     df["start_time"] = pd.to_datetime(df["start_time"])
-    time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
     
-    # Clip age to 0.5 hours minimum to prevent log(0) or div/0 explosions
+    time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
     df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0.5)
 
-    # Physics features (Safe Log-Space)
-    # virality_index = Slope of log-log plot (Beta coefficient)
-    df["virality_index"] = np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
-    # interaction_density: weighted interactions normalized by view magnitude
+    # Initial Virality Slope (Log-Log Slope at T=0)
+    # Formula: log(current_views) / log(current_age)
+    df["initial_virality_slope"] = np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
+    
+    # Interaction Density (Log Space)
     interaction_num = np.log1p(df["start_likes"] + df["start_comments"] * 2)
     interaction_den = np.log1p(df["start_views"] + 1)
     df["interaction_density"] = interaction_num / interaction_den
@@ -87,7 +91,6 @@ def prepare_features(df: pd.DataFrame):
         except Exception:
                 df["title"] = df["title"].fillna("")
                 df["title_len"] = df["title"].str.len()
-                # vectorized caps ratio: count uppercase letters / (length + 1)
                 df["caps_ratio"] = (
                     df["title"].str.count(r"[A-Z]") / (df["title_len"] + 1)
                 )
@@ -104,7 +107,7 @@ def prepare_features(df: pd.DataFrame):
     features = [
         "hour_sin", "hour_cos", "publish_day", "is_weekend",
         "log_start_views", "log_duration",
-        "virality_index", "interaction_density",
+        "initial_virality_slope", "interaction_density", 
         "like_view_ratio", "comment_view_ratio",
         "video_age_hours",
         "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits",
@@ -119,13 +122,13 @@ def prepare_features(df: pd.DataFrame):
     final_df = df[available_features + [target_col]]
     final_df = base_features.clean_dataframe(final_df, fill_value=0)
 
-    # Use %-style logging to avoid very long f-strings exceeding line limits
     logger.info(
         "Features prepared: %d cols, %d rows",
         len(available_features),
         len(final_df),
     )
     return final_df
+
 
 @task(name="Deepchecks: Data Integrity")
 def run_integrity_checks(df: pd.DataFrame):
@@ -144,25 +147,20 @@ def run_integrity_checks(df: pd.DataFrame):
     report_path = "velocity_integrity_report.html"
     result.save_as_html(report_path)
 
-
     repo_id = GLOBAL_CONFIG.get("hf_repo_id")
     if repo_id:
         try:
             uploader = ModelUploader(repo_id)
-            # upload latest copy regardless of pass/fail for easier inspection
-            repo_latest = "velocity/reports/velocity_integrity_latest.html"
-            uploader.upload_file(report_path, repo_latest)
-            if not result.passed():
+            if result.passed():
+                uploader.upload_file(report_path, "velocity/reports/velocity_integrity_latest.html")
+            else:
                 logger.warning("Integrity issues found.")
-                # also archive the failed report for debugging
-                repo_failed = (
-                    "velocity/reports/velocity_integrity_FAILED.html"
-                )
-                uploader.upload_file(report_path, repo_failed)
+                uploader.upload_file(report_path, "velocity/reports/velocity_integrity_FAILED.html")
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
-
+            
     return report_path, result.passed()
+
 
 @task(name="Train CatBoost")
 def train_model(df: pd.DataFrame):
@@ -201,20 +199,29 @@ def train_model(df: pd.DataFrame):
 
     model.fit(X_train, y_train_log)
     
-    # Predict in Log Space
+    # 1. Predict in Log Space
     preds_log = model.predict(X_test)
-    
-    # SAFETY CLIP: e^25 is ~72 Billion views. 
-    # Anything higher is a mathematical explosion error, not a real prediction.
-    preds_log = np.clip(preds_log, 0, 25)
-    
-    # Inverse Transform
+    preds_log = np.clip(preds_log, 0, 25) # Safety Clip
+
+    # 2. Calculate LOG-SPACE Metrics (The "Physicists" View)
+    # This measures how well the model learned the exponential curve
+    # regardless of the massive scale differences.
+    y_test_log = np.log1p(y_test)
+    log_metrics = metrics.get_regression_metrics(y_test_log, preds_log)
+    # Rename with prefix
+    log_metrics = {f"log_{k}": v for k, v in log_metrics.items()}
+
+    # 3. Calculate REAL-SPACE Metrics (The "Business" View)
     preds = np.expm1(preds_log)
+    real_metrics = metrics.get_regression_metrics(y_test, preds)
     
-    eval_metrics = metrics.get_regression_metrics(y_test, preds)
-    logger.info(f"Metrics: {eval_metrics}")
+    # Merge metrics for reporting
+    eval_metrics = {**real_metrics, **log_metrics}
+    
+    logger.info(f"Metrics (Log & Real): {eval_metrics}")
 
     return model, X_train, X_test, y_train, y_test, eval_metrics
+
 
 @task(name="Deepchecks: Model Eval")
 def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
@@ -233,7 +240,7 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     
     wrapped_model = LogModelWrapper(model)
     
-    # Build Deepchecks datasets with clearer line breaks to satisfy linters
+    # Build Deepchecks datasets
     train_df = pd.concat([X_train, y_train], axis=1)
     test_df = pd.concat([X_test, y_test], axis=1)
 
@@ -253,7 +260,18 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     )
     report_path = "velocity_eval_report.html"
     result.save_as_html(report_path)
+
+    repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+    if repo_id:
+        try:
+            uploader = ModelUploader(repo_id)
+            uploader.upload_file(report_path, "velocity/reports/velocity_eval_latest.html")
+        except Exception as e:
+            logger = get_run_logger()
+            logger.warning(f"Failed to upload eval report: {e}")
+
     return report_path
+
 
 @task(name="Validate & Upload")
 def validate_and_upload(model, X_test, y_test, reports):
@@ -263,7 +281,7 @@ def validate_and_upload(model, X_test, y_test, reports):
         return "SKIPPED"
 
     validator = ModelValidator(repo_id)
-    old_model = validator.load_production_model("velocity/model.pkl")
+    old_model_raw = validator.load_production_model("velocity/model.pkl")
     metric_name = VELOCITY_CONFIG.get("metric", "r2_score")
     
     # Wrap model for validation comparison
@@ -275,10 +293,15 @@ def validate_and_upload(model, X_test, y_test, reports):
             p_log = np.clip(p_log, 0, 25)
             return np.expm1(p_log)
     
-    wrapped_model = LogModelWrapper(model)
+    wrapped_new = LogModelWrapper(model)
+    
+    # Wrap OLD Model (Critical Fix: Old model on disk is raw log-space)
+    wrapped_old = None
+    if old_model_raw is not None:
+        wrapped_old = LogModelWrapper(old_model_raw)
 
     passed, new_score, old_score = validator.compare_models(
-        wrapped_model, old_model, X_test, y_test, metric_name=metric_name
+        wrapped_new, wrapped_old, X_test, y_test, metric_name=metric_name
     )
 
     if passed:
@@ -290,10 +313,12 @@ def validate_and_upload(model, X_test, y_test, reports):
         return "PROMOTED"
     return "DISCARDED"
 
+
 @task(name="Notify")
 def notify(status, error_msg=None, metrics=None):
     msg = f"Finished. Error: {error_msg}" if error_msg else "Success"
     send_discord_alert(status, "Velocity Predictor", msg, metrics)
+
 
 @flow(name="Train Velocity Predictor", log_prints=True)
 def velocity_training_flow():
@@ -308,9 +333,7 @@ def velocity_training_flow():
 
         integrity_path, passed = run_integrity_checks(processed_df)
         if not passed:
-            logger.warning(
-                "Data Integrity Failed. Continuing pipeline to generate eval metrics..."
-            )
+            logger.warning("Data Integrity Failed. Continuing pipeline...")
 
         (
             model,
@@ -334,6 +357,7 @@ def velocity_training_flow():
         logger.error(f"Pipeline crashed: {e}")
         notify("FAILURE", error_msg=str(e), metrics=run_metrics)
         raise e
+
 
 if __name__ == "__main__":
     velocity_training_flow()
