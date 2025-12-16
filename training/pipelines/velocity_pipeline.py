@@ -78,7 +78,9 @@ def prepare_features(df: pd.DataFrame):
 
     # Initial Virality Slope (Log-Log Slope at T=0)
     # Formula: log(current_views) / log(current_age)
-    df["initial_virality_slope"] = np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
+    _ivs_num = np.log1p(df["start_views"])
+    _ivs_den = np.log1p(df["video_age_hours"])
+    df["initial_virality_slope"] = _ivs_num / _ivs_den
     
     # Interaction Density (Log Space)
     interaction_num = np.log1p(df["start_likes"] + df["start_comments"] * 2)
@@ -152,10 +154,16 @@ def run_integrity_checks(df: pd.DataFrame):
         try:
             uploader = ModelUploader(repo_id)
             if result.passed():
-                uploader.upload_file(report_path, "velocity/reports/velocity_integrity_latest.html")
+                repo_latest = (
+                    "velocity/reports/velocity_integrity_latest.html"
+                )
+                uploader.upload_file(report_path, repo_latest)
             else:
                 logger.warning("Integrity issues found.")
-                uploader.upload_file(report_path, "velocity/reports/velocity_integrity_FAILED.html")
+                repo_failed = (
+                    "velocity/reports/velocity_integrity_FAILED.html"
+                )
+                uploader.upload_file(report_path, repo_failed)
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
@@ -261,7 +269,8 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     if repo_id:
         try:
             uploader = ModelUploader(repo_id)
-            uploader.upload_file(report_path, "velocity/reports/velocity_eval_latest.html")
+            repo_eval = "velocity/reports/velocity_eval_latest.html"
+            uploader.upload_file(report_path, repo_eval)
         except Exception as e:
             logger = get_run_logger()
             logger.warning(f"Failed to upload eval report: {e}")
