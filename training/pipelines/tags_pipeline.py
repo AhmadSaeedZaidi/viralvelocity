@@ -57,6 +57,13 @@ def load_data():
     else:
         logger.warning("'views' column missing. Using all data.")
         top_df = df.copy()
+
+    if 'tags' in top_df.columns:
+        initial_len = len(top_df)
+        top_df = top_df.dropna(subset=['tags'])
+        dropped = initial_len - len(top_df)
+        if dropped > 0:
+            logger.info(f"Dropped {dropped} rows with missing tags.")
     
     if len(top_df) < 10:
         raise ValueError(
@@ -74,11 +81,8 @@ def prepare_features(df: pd.DataFrame):
     
     # Use modular text processing if applicable or standard logic
     if 'tags' in df.columns:
-        # text_features.get_tags_list is defined in the uploaded file content
-        # It handles string splitting and cleaning
         for tag_str in df['tags'].dropna():
             tag_list = text_features.get_tags_list(tag_str)
-            # Only include transactions with at least 2 tags
             if len(tag_list) >= 2:
                 dataset.append(tag_list)
     
