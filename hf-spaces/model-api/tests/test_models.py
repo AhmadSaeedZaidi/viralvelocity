@@ -47,7 +47,7 @@ def clickbait_input():
 # --- Tests ---
 
 def test_velocity_model_initialization(velocity_input):
-    model = VelocityPredictor("test_velocity")
+    model = VelocityPredictor("test_velocity", repo_path="/tmp/mock")
     model.load()  # Should trigger mock init
     assert model.is_loaded is True
     
@@ -56,7 +56,7 @@ def test_velocity_model_initialization(velocity_input):
     assert prediction >= 0
 
 def test_clickbait_logic(clickbait_input):
-    model = ClickbaitDetector("test_clickbait")
+    model = ClickbaitDetector("test_clickbait", repo_path="/tmp/mock")
     model.load()
     
     # Test the heuristic logic defined in business rules
@@ -68,7 +68,7 @@ def test_clickbait_logic(clickbait_input):
     assert 0 <= prob <= 1
 
 def test_genre_pca_pipeline():
-    model = GenreClassifier("test_genre")
+    model = GenreClassifier("test_genre", repo_path="/tmp/mock")
     model.load()
     
     input_data = GenreInput(title="Minecraft Speedrun", tags=["gaming", "glitch"])
@@ -78,7 +78,7 @@ def test_genre_pca_pipeline():
     assert isinstance(confidence, float)
 
 def test_tag_recommender():
-    model = TagRecommender("test_tags")
+    model = TagRecommender("test_tags", repo_path="/tmp/mock")
     model.load()
     
     # Test specific association rule defined in mock
@@ -89,7 +89,7 @@ def test_tag_recommender():
     assert "dream" in recs or "manhunt" in recs
 
 def test_viral_trend_prediction():
-    model = ViralTrendPredictor("test_viral")
+    model = ViralTrendPredictor("test_viral", repo_path="/tmp/mock")
     model.load()
     
     input_data = ViralInput(
@@ -102,7 +102,7 @@ def test_viral_trend_prediction():
     assert 0.0 <= prob <= 1.0
 
 def test_anomaly_detection():
-    model = AnomalyDetector("test_anomaly")
+    model = AnomalyDetector("test_anomaly", repo_path="/tmp/mock")
     model.load()
     
     input_data = AnomalyInput(
