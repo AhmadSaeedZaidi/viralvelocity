@@ -154,16 +154,18 @@ def run_integrity_checks(df: pd.DataFrame):
         try:
             uploader = ModelUploader(repo_id)
             if result.passed():
-                repo_latest = (
-                    "velocity/reports/velocity_integrity_latest.html"
+                uploader.upload_reports(
+                    {"integrity": report_path}, folder="velocity/reports"
                 )
-                uploader.upload_file(report_path, repo_latest)
             else:
                 logger.warning("Integrity issues found.")
-                repo_failed = (
-                    "velocity/reports/velocity_integrity_FAILED.html"
+                # Rename for failure indication before upload
+                failed_path = report_path.replace(".html", "_FAILED.html")
+                import os
+                os.rename(report_path, failed_path)
+                uploader.upload_reports(
+                    {"integrity": failed_path}, folder="velocity/reports"
                 )
-                uploader.upload_file(report_path, repo_failed)
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
@@ -269,8 +271,7 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     if repo_id:
         try:
             uploader = ModelUploader(repo_id)
-            repo_eval = "velocity/reports/velocity_eval_latest.html"
-            uploader.upload_file(report_path, repo_eval)
+            uploader.upload_reports({"eval": report_path}, folder="velocity/reports")
         except Exception as e:
             logger = get_run_logger()
             logger.warning(f"Failed to upload eval report: {e}")
@@ -305,7 +306,7 @@ def validate_and_upload(model, X_test, y_test, reports):
     if old_model_raw is not None:
         wrapped_old = LogModelWrapper(old_model_raw)
 
-    passed, new_score, old_score = validator.compare_models(
+    passed, new_score, old_score = validator.validate_supervised(
         wrapped_new, wrapped_old, X_test, y_test, metric_name=metric_name
     )
 

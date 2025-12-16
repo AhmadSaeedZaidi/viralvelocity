@@ -112,13 +112,16 @@ def run_integrity_checks(df: pd.DataFrame):
         try:
             uploader = ModelUploader(repo_id)
             if result.passed():
-                uploader.upload_file(
-                    report_path, "tags/reports/tags_integrity_latest.html"
+                uploader.upload_reports(
+                    {"integrity": report_path}, folder="tags/reports"
                 )
             else:
                 logger.warning("Data Integrity checks failed.")
-                uploader.upload_file(
-                    report_path, "tags/reports/tags_integrity_FAILED.html"
+                failed_path = report_path.replace(".html", "_FAILED.html")
+                import os
+                os.rename(report_path, failed_path)
+                uploader.upload_reports(
+                    {"integrity": failed_path}, folder="tags/reports"
                 )
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
@@ -222,23 +225,30 @@ def validate_and_upload(rules, rule_metrics, is_valid, reports):
         return "SKIPPED"
 
     try:
+        # Use standardized validator for unsupervised/rule-based checks
         validator = ModelValidator(repo_id)
-        old_rules = validator.load_production_model("tags/rules.pkl")
         
-        if old_rules is not None:
-            old_metrics = metrics.get_association_rule_metrics(old_rules)
-            logger.info(f"Previous Model Metrics: {old_metrics}")
+        # Define bounds for unsupervised validation
+        bounds = {
+            "rule_count": (5, 10000),
+            "avg_lift": (1.05, 100.0)
+        }
+        
+        passed = validator.validate_unsupervised(rule_metrics, bounds)
+        
+        if passed:
+            uploader = ModelUploader(repo_id)
             
-        uploader = ModelUploader(repo_id)
-        
-        local_path = "tag_rules.pkl"
-        joblib.dump(rules, local_path)
-        
-        uploader.upload_file(local_path, "tags/rules.pkl")
-        
-        uploader.upload_reports(reports, folder="tags/reports")
-        
-        return "PROMOTED"
+            local_path = "tag_rules.pkl"
+            joblib.dump(rules, local_path)
+            
+            uploader.upload_file(local_path, "tags/rules.pkl")
+            uploader.upload_reports(reports, folder="tags/reports")
+            
+            return "PROMOTED"
+        else:
+            return "DISCARDED"
+            
     except Exception as e:
         logger.warning(f"Upload failed: {e}")
         return "ERROR"

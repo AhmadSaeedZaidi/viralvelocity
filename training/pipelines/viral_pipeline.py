@@ -1,5 +1,4 @@
 import joblib
-import numpy as np
 import pandas as pd
 import yaml
 from deepchecks.tabular import Dataset
@@ -13,7 +12,7 @@ from training.evaluation import metrics
 from training.evaluation.validators import ModelValidator
 
 # --- Modular Imports ---
-from training.feature_engineering import temporal_features, text_features
+from training.feature_engineering import viral_features
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
 from training.utils.notifications import send_discord_alert
@@ -72,170 +71,19 @@ def load_data():
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
-
-    df["stat_time"] = pd.to_datetime(df["stat_time"])
-    df["published_at"] = pd.to_datetime(df["published_at"])
     
-    # --- 1. Static Features (Time & Text) ---
-    df = temporal_features.add_date_features(df, "published_at")
-    
-    # Calculate cyclic time features if available
-    if "publish_hour" in df.columns:
-        df["hour_sin"] = np.sin(2 * np.pi * df["publish_hour"] / 24)
-        df["hour_cos"] = np.cos(2 * np.pi * df["publish_hour"] / 24)
-    else:
-        df["hour_sin"] = 0
-        df["hour_cos"] = 0
-
-    # Extract text features if title exists
-    if "title" in df.columns:
-        try:
-            df = text_features.extract_title_features(df, title_col="title")
-        except Exception:
-            df["title"] = df["title"].fillna("")
-            df["title_len"] = df["title"].str.len()
-            # vectorized caps ratio: count uppercase letters / (length + 1)
-            df["caps_ratio"] = df["title"].str.count(r"[A-Z]") / (df["title_len"] + 1)
-            df["has_digits"] = df["title"].str.contains(r"\\d").astype(int)
-    else:
-        df["title_len"] = 0
-        df["caps_ratio"] = 0
-        df["has_digits"] = 0
+    # Use modular feature engineering
+    try:
+        final_df = viral_features.prepare_viral_features(df)
+    except ValueError as e:
+        # Re-raise with clear message for Prefect
+        raise ValueError(f"Feature Engineering Failed: {e}")
 
     total_videos = df["video_id"].nunique()
-    skipped_single_snapshot = 0
-    features_list = []
-    
-    all_velocities = []
-    
-    # Group by video to calculate velocities. We iterate once to define the
-    # threshold, then again to build the dataset. Two passes keep code clear.
-    
-    # First pass: Calculate View Velocities for Labeling
-    for vid, group in df.groupby("video_id"):
-        if len(group) < 2:
-            skipped_single_snapshot += 1
-            continue
-
-        group = group.sort_values("stat_time")
-        
-        # Calculate time span in hours
-        start_time = group["stat_time"].iloc[0]
-        end_time = group["stat_time"].iloc[-1]
-        time_diff_hours = (end_time - start_time).total_seconds() / 3600.0
-        
-        if time_diff_hours < 2:  # Need at least 2 hours of data
-            skipped_single_snapshot += 1
-            continue
-        
-        # View velocity = views gained per hour
-        view_diff = group["views"].iloc[-1] - group["views"].iloc[0]
-        view_velocity = view_diff / (time_diff_hours + 0.1)
-        all_velocities.append(view_velocity)
-    
-    if not all_velocities:
-        raise ValueError("No valid videos with sufficient time span found.")
-    
-    # Define "viral" threshold as top 20% of view velocities
-    viral_threshold = pd.Series(all_velocities).quantile(0.80)
-    logger.info(f"Viral threshold (top 20%): {viral_threshold:.0f} views/hour")
-    
-    # Second pass: Build Features
-    for vid, group in df.groupby("video_id"):
-        if len(group) < 2:
-            continue
-
-        group = group.sort_values("stat_time")
-
-        start_row = group.iloc[0]
-        end_row = group.iloc[-1]
-
-        # Time delta in hours
-        delta = end_row["stat_time"] - start_row["stat_time"]
-        time_diff_hours = delta.total_seconds() / 3600.0
-
-        if time_diff_hours < 2:
-            continue
-
-        # Core metrics
-        start_views = start_row["views"]
-        end_views = end_row["views"]
-        view_diff = end_views - start_views
-        view_velocity = view_diff / (time_diff_hours + 0.1)
-
-        # Engagement Velocities (slope)
-        denom = time_diff_hours + 0.1
-        like_velocity = (end_row["likes"] - start_row["likes"]) / denom
-        comment_velocity = (end_row["comments"] - start_row["comments"]) / denom
-
-        # Engagement ratios (quality) - use END values for current status summary
-        like_ratio = end_row["likes"] / (end_views + 1)
-        comment_ratio = end_row["comments"] / (end_views + 1)
-
-        # Age at START of tracking
-        delta_age = start_row["stat_time"] - start_row["published_at"]
-        video_age_hours = delta_age.total_seconds() / 3600.0
-        video_age_hours = max(0.5, video_age_hours)  # Safety clip
-
-        # 1. Initial Virality Slope (Log-Log Slope at T=0)
-        initial_virality_slope = np.log1p(start_views) / np.log1p(video_age_hours)
-
-        # 2. Interaction Density (Log Space)
-        interaction_num = np.log1p(start_row["likes"] + start_row["comments"] * 2)
-        interaction_den = np.log1p(start_views + 1)
-        interaction_density = interaction_num / interaction_den
-
-        # Duration
-        dur_val = start_row.get("duration_seconds", 0)
-        duration = dur_val if pd.notna(dur_val) else 0
-
-        # Label
-        is_viral = 1 if view_velocity >= viral_threshold else 0
-
-        # Static features (from first row)
-        hour_sin = start_row.get("hour_sin", 0)
-        hour_cos = start_row.get("hour_cos", 0)
-        title_len = start_row.get("title_len", 0)
-        caps_ratio = start_row.get("caps_ratio", 0)
-        has_digits = start_row.get("has_digits", 0)
-
-        features_list.append({
-            # Target
-            "is_viral": is_viral,
-            
-            # Explicitly Excluded (Leak): "view_velocity"
-            
-            # Predictive Features
-            "like_velocity": like_velocity,
-            "comment_velocity": comment_velocity,
-            "start_views": start_views,
-            "log_start_views": np.log1p(start_views), # Log transform included
-            "like_ratio": like_ratio,
-            "comment_ratio": comment_ratio,
-            "video_age_hours": video_age_hours,
-            "duration_seconds": duration,
-            "hours_tracked": time_diff_hours,
-            "snapshots": len(group),
-            
-            # Novel Features
-            "initial_virality_slope": initial_virality_slope,
-            "interaction_density": interaction_density,
-            "hour_sin": hour_sin,
-            "hour_cos": hour_cos,
-            "title_len": title_len,
-            "caps_ratio": caps_ratio,
-            "has_digits": has_digits
-        })
-
     logger.info(
         f"Feature engineering: {total_videos} unique videos, "
-        f"kept {len(features_list)} samples."
+        f"kept {len(final_df)} samples."
     )
-
-    if not features_list:
-        raise ValueError("No training samples found.")
-
-    final_df = pd.DataFrame(features_list)
     
     # Stats
     viral_count = final_df["is_viral"].sum()
@@ -259,10 +107,15 @@ def run_integrity(df: pd.DataFrame):
         try:
             uploader = ModelUploader(repo_id)
             if res.passed():
-                 uploader.upload_file(path, "viral/reports/integrity_latest.html")
+                 uploader.upload_reports({"integrity": path}, folder="viral/reports")
             else:
                  logger.warning("Integrity checks failed.")
-                 uploader.upload_file(path, "viral/reports/integrity_FAILED.html")
+                 failed_path = path.replace(".html", "_FAILED.html")
+                 import os
+                 os.rename(path, failed_path)
+                 uploader.upload_reports(
+                     {"integrity": failed_path}, folder="viral/reports"
+                 )
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
@@ -345,7 +198,7 @@ def run_eval(model, X_train, X_test, y_train, y_test):
     if repo_id:
         try:
             uploader = ModelUploader(repo_id)
-            uploader.upload_file(path, "viral/reports/eval_latest.html")
+            uploader.upload_reports({"eval": path}, folder="viral/reports")
         except Exception:
             pass
             
@@ -361,9 +214,9 @@ def validate_and_upload(model, X_test, y_test, reports):
 
     validator = ModelValidator(repo_id)
     old_model = validator.load_production_model("viral/model.pkl")
-    metric_name = VIRAL_CONFIG.get("metric", "accuracy")
+    metric_name = VIRAL_CONFIG.get("metric", "f1_score")
 
-    passed, new_score, old_score = validator.compare_models(
+    passed, new_score, old_score = validator.validate_supervised(
         model, old_model, X_test, y_test, metric_name=metric_name
     )
 
@@ -375,45 +228,52 @@ def validate_and_upload(model, X_test, y_test, reports):
         uploader.upload_reports(reports, folder="viral/reports")
         return "PROMOTED"
     
-    logger.info("Model did not improve.")
     return "DISCARDED"
 
 
 @task(name="Notify")
 def notify(status, error=None, metrics=None):
     msg = f"Finished. {error if error else ''}"
-    send_discord_alert(status, "Viral Trend Classifier", msg, metrics)
+    send_discord_alert(status, "Viral Predictor", msg, metrics)
 
 
-@flow(name="Train Viral Classifier", log_prints=True)
+@flow(name="Train Viral Predictor", log_prints=True)
 def viral_training_flow():
     logger = get_run_logger()
-    metrics = {}
+    run_metrics = {}
     try:
-        raw = load_data()
-        metrics["Raw_Rows"] = len(raw)
+        # 1. Load Data
+        raw_df = load_data()
+        run_metrics["Raw_Rows"] = len(raw_df)
         
-        df = prepare_features(raw)
-        metrics["Training_Samples"] = len(df)
-        metrics["Features"] = len(df.columns) - 1
-
-        int_path, passed = run_integrity(df)
+        # 2. Feature Engineering
+        df = prepare_features(raw_df)
+        run_metrics["Training_Samples"] = len(df)
+        run_metrics["Features"] = len(df.columns) - 1
+        
+        # 3. Integrity Checks
+        integrity_path, passed = run_integrity(df)
         if not passed:
-            logger.warning("Data Integrity failed. Continuing...")
+            logger.warning("Data Integrity Failed. Continuing pipeline...")
+            
+        # 4. Train Model
+        best_model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
+        run_metrics.update(eval_metrics)
 
-        model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
-        metrics.update(eval_metrics)
+        # 5. Evaluate
+        eval_path = run_eval(best_model, Xt, Xv, yt, yv)
 
-        eval_path = run_eval(model, Xt, Xv, yt, yv)
-
+        # 6. Validate & Upload
         status = validate_and_upload(
-            model, Xv, yv, {"integrity": int_path, "eval": eval_path}
+            best_model, Xv, yv, {"integrity": integrity_path, "eval": eval_path}
         )
-        metrics["Deployment"] = status
-        notify("SUCCESS", metrics=metrics)
-
+        
+        run_metrics["Deployment"] = status
+        notify("SUCCESS", metrics=run_metrics)
+            
     except Exception as e:
-        notify("FAILURE", error=str(e), metrics=metrics)
+        logger.error(f"Pipeline crashed: {e}")
+        notify("FAILURE", error=str(e), metrics=run_metrics)
         raise e
 
 

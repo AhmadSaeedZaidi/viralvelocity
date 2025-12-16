@@ -5,8 +5,8 @@ import yaml
 from deepchecks.tabular import Dataset
 from deepchecks.tabular.suites import data_integrity, model_evaluation
 from prefect import flow, get_run_logger, task
-from xgboost import XGBClassifier
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from xgboost import XGBClassifier
 
 from training.evaluation import metrics
 from training.evaluation.validators import ModelValidator
@@ -75,7 +75,9 @@ def prepare_features(df: pd.DataFrame):
             # Fallback
             df["title"] = df["title"].fillna("")
             df["title_len"] = df["title"].str.len()
-            df["caps_ratio"] = df["title"].apply(lambda x: sum(1 for c in str(x) if c.isupper()) / (len(str(x)) + 1))
+            df["caps_ratio"] = df["title"].apply(
+                lambda x: sum(1 for c in str(x) if c.isupper()) / (len(str(x)) + 1)
+            )
             df["exclamation_count"] = df["title"].str.count("!")
             df["question_count"] = df["title"].str.count("\?")
             df["has_digits"] = df["title"].str.contains(r'\d').astype(int)
@@ -92,7 +94,8 @@ def prepare_features(df: pd.DataFrame):
     # Select final feature set
     # Note: explicitly excluding 'views', 'likes', 'ratios' to prevent leakage.
     feature_cols = [
-        "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits", # Text
+        "title_len", "caps_ratio", "exclamation_count", 
+        "question_count", "has_digits", # Text
         "hour_sin", "hour_cos", "publish_day", "is_weekend" # Time
     ]
     
@@ -130,10 +133,17 @@ def run_integrity(df: pd.DataFrame):
         try:
             uploader = ModelUploader(repo_id)
             if result.passed():
-                uploader.upload_file(report_path, "clickbait/reports/integrity_latest.html")
+                uploader.upload_reports(
+                    {"integrity": report_path}, folder="clickbait/reports"
+                )
             else:
                 logger.warning("Integrity checks failed.")
-                uploader.upload_file(report_path, "clickbait/reports/integrity_FAILED.html")
+                failed_path = report_path.replace(".html", "_FAILED.html")
+                import os
+                os.rename(report_path, failed_path)
+                uploader.upload_reports(
+                    {"integrity": failed_path}, folder="clickbait/reports"
+                )
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
             
@@ -197,17 +207,25 @@ def run_eval(model, X_train, X_test, y_train, y_test):
     target_col = PIPELINE_CONFIG.get("target", "is_clickbait")
     
     train_ds = Dataset(
-        pd.concat([X_train.reset_index(drop=True), y_train.reset_index(drop=True)], axis=1),
+        pd.concat(
+            [X_train.reset_index(drop=True), y_train.reset_index(drop=True)], 
+            axis=1
+        ),
         label=target_col,
         cat_features=[],
     )
     test_ds = Dataset(
-        pd.concat([X_test.reset_index(drop=True), y_test.reset_index(drop=True)], axis=1),
+        pd.concat(
+            [X_test.reset_index(drop=True), y_test.reset_index(drop=True)], 
+            axis=1
+        ),
         label=target_col,
         cat_features=[],
     )
     
-    result = model_evaluation().run(train_dataset=train_ds, test_dataset=test_ds, model=model)
+    result = model_evaluation().run(
+        train_dataset=train_ds, test_dataset=test_ds, model=model
+    )
     path = "clickbait_eval.html"
     result.save_as_html(path)
     
@@ -215,7 +233,7 @@ def run_eval(model, X_train, X_test, y_train, y_test):
     if repo_id:
         try:
             uploader = ModelUploader(repo_id)
-            uploader.upload_file(path, "clickbait/reports/eval_latest.html")
+            uploader.upload_reports({"eval": path}, folder="clickbait/reports")
         except Exception:
             pass
             
@@ -232,7 +250,7 @@ def validate_and_upload(model, X_test, y_test, reports):
     old_model = validator.load_production_model("clickbait/model.pkl")
     metric_name = PIPELINE_CONFIG.get("metric", "f1_score")
 
-    passed, new_score, old_score = validator.compare_models(
+    passed, new_score, old_score = validator.validate_supervised(
         model, old_model, X_test, y_test, metric_name=metric_name
     )
 

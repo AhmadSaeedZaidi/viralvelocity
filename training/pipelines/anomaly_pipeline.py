@@ -7,6 +7,8 @@ from deepchecks.tabular.suites import data_integrity
 from prefect import flow, get_run_logger, task
 from sklearn.ensemble import IsolationForest
 
+from training.evaluation.validators import ModelValidator
+
 # --- Modular Imports ---
 from training.feature_engineering import base_features
 from training.utils.data_loader import DataLoader
@@ -140,7 +142,7 @@ def validate_model_logic(metrics: dict):
     return True
 
 @task(name="Validate & Upload")
-def validate_and_upload(model, integrity_report, is_valid):
+def validate_and_upload(model, integrity_report, is_valid, metrics):
     logger = get_run_logger()
     
     if not is_valid:
@@ -154,18 +156,35 @@ def validate_and_upload(model, integrity_report, is_valid):
         return "SAVED_LOCAL"
     
     try:
-        uploader = ModelUploader(repo_id)
+        # Use standardized validator for unsupervised checks
+        validator = ModelValidator(repo_id)
         
-        # Save and upload model
-        joblib.dump(model, "anomaly_model.pkl")
-        uploader.upload_file("anomaly_model.pkl", "anomaly/model.pkl")
+        # Define bounds (could also come from config)
+        bounds = {
+            "detected_rate": (
+                ANOMALY_CONFIG.get("validation", {}).get("min_rate", 0.001),
+                ANOMALY_CONFIG.get("validation", {}).get("max_rate", 0.10)
+            )
+        }
         
-        # Upload report
-        if integrity_report:
-            report_repo_path = "reports/anomaly_integrity_latest.html"
-            uploader.upload_file(integrity_report, report_repo_path)
+        passed = validator.validate_unsupervised(metrics, bounds)
+        
+        if passed:
+            uploader = ModelUploader(repo_id)
             
-        return "PROMOTED"
+            # Save and upload model
+            joblib.dump(model, "anomaly_model.pkl")
+            uploader.upload_file("anomaly_model.pkl", "anomaly/model.pkl")
+            
+            # Upload report
+            if integrity_report:
+                uploader.upload_reports(
+                    {"integrity": integrity_report}, folder="anomaly/reports"
+                )
+                
+            return "PROMOTED"
+        else:
+            return "DISCARDED"
         
     except Exception as e:
         logger.error(f"Upload failed: {e}")
@@ -202,7 +221,7 @@ def anomaly_training_flow():
         is_valid = validate_model_logic(train_metrics)
         
         # 6. Upload
-        status = validate_and_upload(model, integrity_path, is_valid)
+        status = validate_and_upload(model, integrity_path, is_valid, train_metrics)
         run_metrics["Deployment"] = status
         
         notify("SUCCESS", metrics=run_metrics)
