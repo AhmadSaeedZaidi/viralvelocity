@@ -201,11 +201,7 @@ def train_model(df: pd.DataFrame):
     
     # 1. Predict in Log Space
     preds_log = model.predict(X_test)
-    preds_log = np.clip(preds_log, 0, 25) # Safety Clip
-
-    # 2. Calculate LOG-SPACE Metrics (The "Physicists" View)
-    # This measures how well the model learned the exponential curve
-    # regardless of the massive scale differences.
+    preds_log = np.clip(preds_log, 0, 25)
     y_test_log = np.log1p(y_test)
     log_metrics = metrics.get_regression_metrics(y_test_log, preds_log)
     # Rename with prefix
