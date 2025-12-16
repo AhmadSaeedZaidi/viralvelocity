@@ -7,10 +7,8 @@ from prefect import flow, get_run_logger, task
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 
-from training.evaluation.metrics import get_classification_metrics
+from training.evaluation import metrics
 from training.evaluation.validators import ModelValidator
-
-# Import our new modules
 from training.feature_engineering import base_features
 from training.utils.data_loader import DataLoader
 from training.utils.model_uploader import ModelUploader
@@ -23,7 +21,7 @@ with open("training/config/training_config.yaml", "r") as f:
 PIPELINE_CONFIG = CONFIG["models"]["clickbait"]
 
 @task(name="Load Data")
-def load_data_task():
+def load_data():
     loader = DataLoader()
     df = loader.get_joined_data()
     
@@ -34,7 +32,7 @@ def load_data_task():
     return df
 
 @task(name="Feature Engineering")
-def feature_engineering_task(df: pd.DataFrame):
+def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
     
     # 1. Clean & Ratios (Needed for labeling)
@@ -54,8 +52,6 @@ def feature_engineering_task(df: pd.DataFrame):
     df[target_col] = df.apply(label_clickbait, axis=1)
     
     # 3. Prepare Features (X)
-    # This adds log_views, log_duration and selects the right columns
-    # Including log_views helps resolve conflicting labels/duplicates
     X = base_features.prepare_clickbait_features(df)
     
     # 4. Combine X and y
@@ -65,18 +61,16 @@ def feature_engineering_task(df: pd.DataFrame):
     return final_df
 
 @task(name="Deepchecks: Data Integrity")
-def run_integrity_checks(df: pd.DataFrame):
+def run_integrity(df: pd.DataFrame):
     logger = get_run_logger()
     target = PIPELINE_CONFIG["target"]
     
     # Create Deepchecks Dataset
     ds = Dataset(df, label=target, cat_features=[])
     
-    # Run Suite
     integ_suite = data_integrity()
     result = integ_suite.run(ds)
     
-    # Save Report
     report_path = "clickbait_integrity_report.html"
     result.save_as_html(report_path)
     
@@ -98,7 +92,7 @@ def run_integrity_checks(df: pd.DataFrame):
     return report_path, True
 
 @task(name="Hyperparameter Tuning")
-def train_and_tune_task(df: pd.DataFrame):
+def train_model(df: pd.DataFrame):
     logger = get_run_logger()
     
     target_col = PIPELINE_CONFIG["target"]
@@ -131,11 +125,16 @@ def train_and_tune_task(df: pd.DataFrame):
     
     best_model = search.best_estimator_
     logger.info(f"Best Params: {search.best_params_}")
+
+    # Calculate metrics
+    y_pred = best_model.predict(X_test)
+    eval_metrics = metrics.get_classification_metrics(y_test, y_pred)
+    logger.info(f"Validation Metrics: {eval_metrics}")
     
-    return best_model, X_train, X_test, y_train, y_test
+    return best_model, X_train, X_test, y_train, y_test, eval_metrics
 
 @task(name="Deepchecks: Model Eval")
-def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
+def run_eval(model, X_train, X_test, y_train, y_test):
     target_col = PIPELINE_CONFIG["target"]
     
     train_ds = Dataset(
@@ -155,90 +154,67 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     result.save_as_html(path)
     return path
 
-@task(name="Champion vs Challenger")
-def validate_model_task(new_model, X_test, y_test):
-    validator = ModelValidator(repo_id=CONFIG["global"]["hf_repo_id"])
-    
-    # Download current production model
-    old_model = validator.load_production_model("clickbait/model.pkl")
-    
-    # Compare
-    is_better, new_score, old_score = validator.compare_models(
-        new_model, old_model, X_test, y_test, metric_name=PIPELINE_CONFIG["metric"]
-    )
-    
-    return is_better, new_score, old_score
-
-@task(name="Deploy")
-def deploy_task(model, reports, force=False):
+@task(name="Validate & Upload")
+def validate_and_upload(model, X_test, y_test, reports):
     logger = get_run_logger()
-    if not force:
-        logger.info("Deploying NEW Champion Model...")
-    
-    joblib.dump(model, "clickbait_model.pkl")
-    
-    # Upload
-    try:
-        uploader = ModelUploader() # Uses env vars
+    repo_id = CONFIG["global"]["hf_repo_id"]
+    if not repo_id:
+        return "SKIPPED"
+
+    validator = ModelValidator(repo_id)
+    old_model = validator.load_production_model("clickbait/model.pkl")
+    metric_name = PIPELINE_CONFIG["metric"]
+
+    passed, new_score, old_score = validator.compare_models(
+        model, old_model, X_test, y_test, metric_name=metric_name
+    )
+
+    if passed:
+        logger.info(f"Promoting model. New {metric_name}: {new_score:.4f}")
+        joblib.dump(model, "clickbait_model.pkl")
+        uploader = ModelUploader(repo_id)
         uploader.upload_file("clickbait_model.pkl", "clickbait/model.pkl")
-        
-        # Use unified report uploader
         uploader.upload_reports(reports, folder="clickbait/reports")
-    except ValueError as e:
-        logger.error(f"Deployment failed: {e}")
+        return "PROMOTED"
+    
+    logger.info("Model did not improve.")
+    return "DISCARDED"
+
+@task(name="Notify")
+def notify(status, error=None, metrics=None):
+    msg = f"Finished. {error if error else ''}"
+    send_discord_alert(status, "Clickbait Pipeline", msg, metrics)
 
 @flow(name="Clickbait Pipeline (Modular)", log_prints=True)
 def clickbait_pipeline():
-    metrics = {}
+    run_metrics = {}
     try:
         # 1. ETL
-        raw_df = load_data_task()
-        df = feature_engineering_task(raw_df)
+        raw_df = load_data()
+        df = prepare_features(raw_df)
         
         # 2. Integrity Check (Deepchecks)
-        integrity_path, passed = run_integrity_checks(df)
+        integrity_path, passed = run_integrity(df)
         if not passed:
             print("Data Integrity Failed. Continuing pipeline as requested...")
         
         # 3. Train & Tune (AutoML)
-        best_model, Xt, Xv, yt, yv = train_and_tune_task(df)
+        best_model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
+        run_metrics.update(eval_metrics)
+
+        # 4. Generate Eval Report
+        eval_path = run_eval(best_model, Xt, Xv, yt, yv)
+
+        # 5. Validation & Deployment
+        status = validate_and_upload(
+            best_model, Xv, yv, {"integrity": integrity_path, "eval": eval_path}
+        )
         
-        # Calculate detailed metrics on validation set
-        y_pred = best_model.predict(Xv)
-        val_metrics = get_classification_metrics(yv, y_pred)
-        print(f"Validation Metrics: {val_metrics}")
-        
-        # 4. Validation (Beat the Champion)
-        is_champion, new_score, old_score = validate_model_task(best_model, Xv, yv)
-        
-        metrics = {
-            "new_f1": f"{new_score:.4f}",
-            "old_f1": f"{old_score:.4f}",
-            "deployed": is_champion,
-            **val_metrics # Include detailed metrics in alert
-        }
-        
-        if is_champion:
-            # Generate Eval Report
-            eval_path = run_evaluation_checks(best_model, Xt, Xv, yt, yv)
-            
-            deploy_task(best_model, {"integrity": integrity_path, "eval": eval_path})
-            send_discord_alert(
-                "SUCCESS",
-                "Clickbait Pipeline",
-                "New model promoted to production!",
-                metrics,
-            )
-        else:
-            send_discord_alert(
-                "SKIPPED",
-                "Clickbait Pipeline",
-                "New model failed to beat production model.",
-                metrics,
-            )
+        run_metrics["Deployment"] = status
+        notify("SUCCESS", metrics=run_metrics)
             
     except Exception as e:
-        send_discord_alert("FAILURE", "Clickbait Pipeline", str(e))
+        notify("FAILURE", error=str(e), metrics=run_metrics)
         raise e
 
 if __name__ == "__main__":

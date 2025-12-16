@@ -88,7 +88,8 @@ def prepare_anomaly_features(df: pd.DataFrame) -> pd.DataFrame:
 def prepare_clickbait_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Prepares features for clickbait classification.
-    Includes log_views to distinguish between low/high traffic videos (resolves conflicting labels).
+    Includes log_views to distinguish between low/high traffic videos.
+    This helps resolve conflicting labels when duplicates exist.
     """
     # Ensure basic cleaning/ratios if not already done
     if 'like_view_ratio' not in df.columns:

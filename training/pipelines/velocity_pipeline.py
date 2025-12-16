@@ -76,18 +76,24 @@ def prepare_features(df: pd.DataFrame):
     # Physics features (Safe Log-Space)
     # virality_index = Slope of log-log plot (Beta coefficient)
     df["virality_index"] = np.log1p(df["start_views"]) / np.log1p(df["video_age_hours"])
-    df["interaction_density"] = np.log1p(df["start_likes"] + df["start_comments"] * 2) / np.log1p(df["start_views"] + 1)
+    # interaction_density: weighted interactions normalized by view magnitude
+    interaction_num = np.log1p(df["start_likes"] + df["start_comments"] * 2)
+    interaction_den = np.log1p(df["start_views"] + 1)
+    df["interaction_density"] = interaction_num / interaction_den
 
     if "title" in df.columns:
         try:
             df = text_features.extract_title_features(df, title_col="title")
         except Exception:
-            df["title"] = df["title"].fillna("")
-            df["title_len"] = df["title"].str.len()
-            df["caps_ratio"] = df["title"].apply(lambda x: sum(1 for c in str(x) if c.isupper()) / (len(str(x)) + 1))
-            df["exclamation_count"] = df["title"].str.count("!")
-            df["question_count"] = df["title"].str.count("\?")
-            df["has_digits"] = df["title"].str.contains(r'\d').astype(int)
+                df["title"] = df["title"].fillna("")
+                df["title_len"] = df["title"].str.len()
+                # vectorized caps ratio: count uppercase letters / (length + 1)
+                df["caps_ratio"] = (
+                    df["title"].str.count(r"[A-Z]") / (df["title_len"] + 1)
+                )
+                df["exclamation_count"] = df["title"].str.count("!")
+                df["question_count"] = df["title"].str.count("\\?")
+                df["has_digits"] = df["title"].str.contains(r"\\d").astype(int)
 
     df["log_start_views"] = np.log1p(df["start_views"])
     df["log_duration"] = np.log1p(df["duration_seconds"])
@@ -112,8 +118,13 @@ def prepare_features(df: pd.DataFrame):
 
     final_df = df[available_features + [target_col]]
     final_df = base_features.clean_dataframe(final_df, fill_value=0)
-    
-    logger.info(f"Features prepared: {len(available_features)} cols, {len(final_df)} rows")
+
+    # Use %-style logging to avoid very long f-strings exceeding line limits
+    logger.info(
+        "Features prepared: %d cols, %d rows",
+        len(available_features),
+        len(final_df),
+    )
     return final_df
 
 @task(name="Deepchecks: Data Integrity")
@@ -124,29 +135,34 @@ def run_integrity_checks(df: pd.DataFrame):
     if len(df) < 50:
         return "skipped_small_dataset.html", True
     
-    validation_df = df.loc[:, df.nunique() > 1]
     potential_cat = ["publish_day", "is_weekend", "category_id"]
-    cat_features = [f for f in potential_cat if f in validation_df.columns]
+    cat_features = [f for f in potential_cat if f in df.columns]
     
-    ds = Dataset(validation_df, label=target_col, cat_features=cat_features)
+    ds = Dataset(df, label=target_col, cat_features=cat_features)
     result = data_integrity().run(ds)
 
     report_path = "velocity_integrity_report.html"
     result.save_as_html(report_path)
 
-    if not result.passed():
-        logger.warning("Integrity issues found.")
-        repo_id = GLOBAL_CONFIG.get("hf_repo_id")
-        if repo_id:
-            try:
-                uploader = ModelUploader(repo_id)
-                repo_path = "reports/velocity_integrity_FAILED.html"
-                uploader.upload_file(report_path, repo_path)
-            except Exception:
-                pass
-        return report_path, False
 
-    return report_path, True
+    repo_id = GLOBAL_CONFIG.get("hf_repo_id")
+    if repo_id:
+        try:
+            uploader = ModelUploader(repo_id)
+            # upload latest copy regardless of pass/fail for easier inspection
+            repo_latest = "velocity/reports/velocity_integrity_latest.html"
+            uploader.upload_file(report_path, repo_latest)
+            if not result.passed():
+                logger.warning("Integrity issues found.")
+                # also archive the failed report for debugging
+                repo_failed = (
+                    "velocity/reports/velocity_integrity_FAILED.html"
+                )
+                uploader.upload_file(report_path, repo_failed)
+        except Exception as e:
+            logger.warning(f"Failed to upload integrity report: {e}")
+
+    return report_path, result.passed()
 
 @task(name="Train CatBoost")
 def train_model(df: pd.DataFrame):
@@ -168,9 +184,8 @@ def train_model(df: pd.DataFrame):
 
     logger.info("Training CatBoost (Manual Log-Transform + Clip)")
 
-    # Manual Log Transform to allow for Safety Clipping
+    # Manual Log Transform to allow for Safety Clipping (train only)
     y_train_log = np.log1p(y_train)
-    y_test_log = np.log1p(y_test)
 
     model = CatBoostRegressor(
         iterations=2000,
@@ -218,10 +233,24 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     
     wrapped_model = LogModelWrapper(model)
     
-    train_ds = Dataset(pd.concat([X_train, y_train], axis=1), label=target_col, cat_features=cat_features)
-    test_ds = Dataset(pd.concat([X_test, y_test], axis=1), label=target_col, cat_features=cat_features)
+    # Build Deepchecks datasets with clearer line breaks to satisfy linters
+    train_df = pd.concat([X_train, y_train], axis=1)
+    test_df = pd.concat([X_test, y_test], axis=1)
 
-    result = model_evaluation().run(train_dataset=train_ds, test_dataset=test_ds, model=wrapped_model)
+    train_ds = Dataset(
+        train_df,
+        label=target_col,
+        cat_features=cat_features,
+    )
+    test_ds = Dataset(
+        test_df,
+        label=target_col,
+        cat_features=cat_features,
+    )
+
+    result = model_evaluation().run(
+        train_dataset=train_ds, test_dataset=test_ds, model=wrapped_model
+    )
     report_path = "velocity_eval_report.html"
     result.save_as_html(report_path)
     return report_path
@@ -278,6 +307,10 @@ def velocity_training_flow():
         run_metrics["Features"] = processed_df.shape[1] - 1
 
         integrity_path, passed = run_integrity_checks(processed_df)
+        if not passed:
+            logger.warning(
+                "Data Integrity Failed. Continuing pipeline to generate eval metrics..."
+            )
 
         (
             model,
