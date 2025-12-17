@@ -25,6 +25,11 @@ class BaseModelWrapper:
     def load(self):
         """Loads model from HF Hub or initializes a mock for the demo."""
         try:
+            if os.path.isabs(self.repo_path):
+                raise EntryNotFoundError(
+                    f"Local/absolute repo_path '{self.repo_path}' is not a Hub filename"
+                )
+
             # Ensure cache dir is present and writable. Spaces often have read-only
             # repo FS.
             cache_dir = settings.MODEL_DIR
@@ -76,6 +81,7 @@ class BaseModelWrapper:
             if settings.ENABLE_MOCK_INFERENCE:
                 logger.info(f"Initializing MOCK for {self.name}.")
                 self._init_mock_model()
+                setattr(self, "is_mock", True)
                 self.is_loaded = True
             else:
                 raise FileNotFoundError(
