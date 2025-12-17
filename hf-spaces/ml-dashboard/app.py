@@ -1,5 +1,11 @@
 import streamlit as st
-from pages import Drift_Detection, Feature_Analysis, Live_Predictions, Model_Configs, Model_Performance
+from pages import (
+    Drift_Detection,
+    Feature_Analysis,
+    Live_Predictions,
+    Model_Configs,
+    Model_Performance,
+)
 
 st.set_page_config(
     page_title="ML Dashboard",

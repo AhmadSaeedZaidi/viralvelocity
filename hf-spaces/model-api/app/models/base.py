@@ -25,7 +25,8 @@ class BaseModelWrapper:
     def load(self):
         """Loads model from HF Hub or initializes a mock for the demo."""
         try:
-            # Ensure cache dir is present and writable. Spaces often have read-only repo FS.
+            # Ensure cache dir is present and writable. Spaces often have read-only
+            # repo FS.
             cache_dir = settings.MODEL_DIR
             try:
                 os.makedirs(cache_dir, exist_ok=True)
@@ -36,7 +37,8 @@ class BaseModelWrapper:
             except Exception as dir_err:
                 fallback = "/tmp/hf_hub_cache"
                 logger.warning(
-                    "Configured MODEL_DIR '%s' is not writable (%s). Falling back to '%s'.",
+                    "Configured MODEL_DIR '%s' is not writable (%s). "
+                    "Falling back to '%s'.",
                     cache_dir,
                     dir_err,
                     fallback,

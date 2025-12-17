@@ -7,7 +7,11 @@ async def health_check(request: Request):
     """
     Simple heartbeat endpoint.
     """
-    models_loaded = len(request.app.state.models) if hasattr(request.app.state, "models") else 0
+    models_loaded = (
+        len(request.app.state.models)
+        if hasattr(request.app.state, "models")
+        else 0
+    )
     load_errors = (
         request.app.state.model_load_errors
         if hasattr(request.app.state, "model_load_errors")

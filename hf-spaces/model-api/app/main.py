@@ -56,7 +56,8 @@ async def lifespan(app: FastAPI):
     app.state.model_load_errors = load_errors
     if load_errors:
         logger.warning(
-            "Startup completed with %d model load failures. Health will report degraded state.",
+            "Startup completed with %d model load failures. "
+            "Health will report degraded state.",
             len(load_errors),
         )
     
