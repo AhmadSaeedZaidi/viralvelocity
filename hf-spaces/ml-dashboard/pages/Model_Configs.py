@@ -26,7 +26,7 @@ def render():
                 "type": "Model Class",
                 "backend": "Backend Engine"
             },
-            use_container_width=True
+            width='stretch'
         )
         
         st.info(

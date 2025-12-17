@@ -10,10 +10,16 @@ class VelocityPredictor(BaseModelWrapper):
         super().__init__(name, repo_path)
 
     def _init_mock_model(self):
-        self.model = xgb.XGBRegressor(n_estimators=10, max_depth=3)
-        X = np.random.rand(10, 5)
-        y = np.random.randint(1000, 50000, 10)
-        self.model.fit(X, y)
+        print(f"DEBUG: Initializing mock model for {self.name}")
+        try:
+            self.model = xgb.XGBRegressor(n_estimators=10, max_depth=3)
+            X = np.random.rand(10, 5)
+            y = np.random.randint(1000, 50000, 10)
+            self.model.fit(X, y)
+            print(f"DEBUG: Mock model for {self.name} initialized successfully")
+        except Exception as e:
+            print(f"DEBUG: Failed to init mock model for {self.name}: {e}")
+            raise e
 
     def predict(self, input_data: VelocityInput):
         features = np.array([[

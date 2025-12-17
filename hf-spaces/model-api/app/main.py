@@ -45,9 +45,11 @@ async def lifespan(app: FastAPI):
     load_errors: dict[str, str] = {}
     for name, model in model_instances.items():
         try:
+            print(f"DEBUG: Loading model {name}...")
             model.load()
             logger.info("Model %s ready.", name)
         except Exception as e:
+            print(f"DEBUG: Error loading {name}: {e}")
             load_errors[name] = str(e)
             logger.exception("Model %s failed to load at startup: %s", name, e)
     
