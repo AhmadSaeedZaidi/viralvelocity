@@ -10,8 +10,14 @@ DEFAULT_API_URL = "http://localhost:7860"
 def get_api_url() -> str:
     """Retrieves the API URL from secrets or environment variables."""
     # Check Streamlit secrets first (for HF deployment), then OS env, then default
-    if "API_URL" in st.secrets:
-        return st.secrets["API_URL"]
+    try:
+        if "API_URL" in st.secrets:
+            return st.secrets["API_URL"]
+    except FileNotFoundError:
+        pass  # Secrets file not found, fall back to env vars
+    except Exception:
+        pass # Handle other potential secrets errors gracefully
+
     return os.getenv("API_URL", DEFAULT_API_URL)
 
 class YoutubeMLClient:

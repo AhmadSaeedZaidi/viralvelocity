@@ -24,7 +24,7 @@ class Settings(BaseModel):
 
     # Hugging Face Model Registry
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")
-    HF_USERNAME: str = os.getenv("HF_USERNAME", "AhmadSaeedZaidi")
+    HF_USERNAME: str = os.getenv("HF_USERNAME", "Rolaficus")
     HF_MODEL_REPO: str = os.getenv("HF_MODEL_REPO", "viralvelocity-models")
 
 settings = Settings()
