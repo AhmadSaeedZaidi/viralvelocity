@@ -13,7 +13,7 @@ class VelocityPredictor(BaseModelWrapper):
         print(f"DEBUG: Initializing mock model for {self.name}")
         try:
             self.model = xgb.XGBRegressor(n_estimators=10, max_depth=3)
-            X = np.random.rand(10, 5)
+            X = np.random.rand(10, 17)
             y = np.random.randint(1000, 50000, 10)
             self.model.fit(X, y)
             self.is_loaded = True

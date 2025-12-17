@@ -53,6 +53,26 @@ def clickbait_input():
     )
 
 
+@pytest.fixture
+def viral_input():
+    return ViralInput(
+        view_velocity=100.0,
+        like_velocity=10.0,
+        comment_velocity=2.0,
+        like_ratio=0.1,
+        comment_ratio=0.02,
+        log_start_views=5.0,
+        video_age_hours=2.0,
+        duration_seconds=300,
+        hour_sin=0.5,
+        hour_cos=-0.8,
+        initial_virality_slope=1.5,
+        interaction_density=0.2,
+        title_len=40,
+        caps_ratio=0.1,
+        has_digits=0
+    )
+
 # --- Tests ---
 
 
@@ -64,6 +84,15 @@ def test_velocity_model_initialization(velocity_input):
     prediction = model.predict(velocity_input)
     assert isinstance(prediction, int)
     assert prediction >= 0
+
+def test_viral_trend_prediction(viral_input):
+    model = ViralTrendPredictor("test_viral", repo_path="/tmp/mock")
+    model.load()
+    
+    label, prob = model.predict(viral_input)
+    assert isinstance(label, int)
+    assert isinstance(prob, float)
+    assert 0 <= prob <= 1
 
 
 def test_clickbait_logic(clickbait_input):
@@ -100,33 +129,6 @@ def test_tag_recommender():
 
     assert isinstance(recs, list)
     assert "dream" in recs or "manhunt" in recs
-
-
-def test_viral_trend_prediction():
-    model = ViralTrendPredictor("test_viral", repo_path="/tmp/mock")
-    model.load()
-
-    input_data = ViralInput(
-        view_velocity=100.0,
-        like_velocity=10.0,
-        comment_velocity=2.0,
-        like_ratio=0.1,
-        comment_ratio=0.02,
-        log_start_views=5.0,
-        video_age_hours=2.0,
-        duration_seconds=60,
-        hour_sin=0.5,
-        hour_cos=-0.5,
-        initial_virality_slope=1.5,
-        interaction_density=0.2,
-        title_len=30,
-        caps_ratio=0.2,
-        has_digits=0,
-    )
-    label, prob = model.predict(input_data)
-
-    assert label in [0, 1]
-    assert 0.0 <= prob <= 1.0
 
 
 def test_anomaly_detection():

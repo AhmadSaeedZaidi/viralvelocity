@@ -8,7 +8,7 @@ from .base import BaseModelWrapper
 class ViralTrendPredictor(BaseModelWrapper):
     def _init_mock_model(self):
         self.model = LogisticRegression()
-        X = np.random.rand(10, 2)
+        X = np.random.rand(10, 17)
         y = [0, 1] * 5
         self.model.fit(X, y)
 
