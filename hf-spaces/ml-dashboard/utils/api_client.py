@@ -73,6 +73,17 @@ class YoutubeMLClient:
             )
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            # Better error handling for 422 validation errors
+            if e.response.status_code == 422:
+                try:
+                    error_detail = e.response.json()
+                    st.error(f"Validation Error: {error_detail}")
+                except:
+                    st.error(f"Validation Error: {e.response.text}")
+            else:
+                st.error(f"API Error ({e.response.status_code}): {e}")
+            return None
         except requests.exceptions.RequestException as e:
             st.error(f"API Connection Error: {e}")
             return None
@@ -82,6 +93,12 @@ class YoutubeMLClient:
             response = requests.get(f"{self.base_url}/api/v1/{endpoint}", timeout=5)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            # Don't show errors for feature importance if it's not available (404/503)
+            if endpoint.startswith("models/") and e.response.status_code in [404, 503]:
+                return {}
+            st.error(f"Failed to fetch {endpoint}: {e.response.status_code} - {e.response.text if hasattr(e.response, 'text') else str(e)}")
+            return {}
         except requests.exceptions.RequestException as e:
             st.error(f"Failed to fetch {endpoint}: {e}")
             return {}

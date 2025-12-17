@@ -23,6 +23,8 @@ class VelocityPredictor(BaseModelWrapper):
             raise e
 
     def get_feature_importance(self) -> dict:
+        if not self.is_loaded or self.model is None:
+            return {}
         feature_names = [
             "hour_sin", "hour_cos", "publish_day", "is_weekend",
             "log_start_views", "log_duration", "initial_virality_slope",
@@ -34,7 +36,8 @@ class VelocityPredictor(BaseModelWrapper):
             # XGBoost stores importances
             importances = self.model.feature_importances_
             return dict(zip(feature_names, [float(i) for i in importances]))
-        except Exception:
+        except Exception as e:
+            print(f"Error getting feature importance: {e}")
             return {}
 
     def predict(self, input_data: VelocityInput):
