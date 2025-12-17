@@ -208,7 +208,7 @@ def render():
             res = client.predict_viral(payload)
             if res:
                 st.metric("Viral Status", res["prediction"])
-                st.bar_chart({"Probability": [res["probability"]]})
+                st.metric("Confidence", f"{res['probability']:.2%}")
 
     # --- TAB 6: Anomaly ---
     with tabs[5]:

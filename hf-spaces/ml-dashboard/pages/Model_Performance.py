@@ -46,26 +46,23 @@ def render():
         # --- 1. Velocity Model ---
         # Payload
         vel_payload = {
-            "video_id": row["video_id"],
-            "title": row["title"],
-            "channel_id": "UC_mock_channel",
-            "publish_date": str(row["time"]),
-            "video_stats_24h": {
-                "views": int(
-                    row["views"] * 0.2
-                ),  # Assume 2h was 20% of current (mock history)
-                "likes": int(row["likes"] * 0.2),
-                "comments": int(row["comments"] * 0.2),
-                "duration_seconds": row["duration_seconds"],
-                "published_hour": row["time"].hour,
-            },
-            "channel_stats": {
-                "avg_views_last_5": int(row["views"]),
-                "subscriber_count": 10000,
-                "video_count": 50,
-            },
-            "slope_views": 10.5,
-            "slope_engagement": 0.05,
+            "log_start_views": float(np.log1p(row["views"] * 0.2)),
+            "log_duration": float(np.log1p(row["duration_seconds"])),
+            "initial_virality_slope": 10.5,
+            "interaction_density": 0.05,
+            "like_view_ratio": float(row["likes"] / (row["views"] + 1)),
+            "comment_view_ratio": float(row["comments"] / (row["views"] + 1)),
+            "video_age_hours": 24.0,
+            "hour_sin": float(np.sin(2 * np.pi * row["time"].hour / 24)),
+            "hour_cos": float(np.cos(2 * np.pi * row["time"].hour / 24)),
+            "publish_day": int(row["time"].dayofweek),
+            "is_weekend": 1 if row["time"].dayofweek >= 5 else 0,
+            "title_len": len(row["title"]),
+            "caps_ratio": 0.1,  # Mock
+            "exclamation_count": 0,
+            "question_count": 0,
+            "has_digits": 0,
+            "category_id": -1,
         }
         try:
             resp = client.predict_velocity(vel_payload)
