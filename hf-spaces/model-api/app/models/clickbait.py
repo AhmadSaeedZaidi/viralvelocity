@@ -12,7 +12,7 @@ class ClickbaitDetector(BaseModelWrapper):
     def _init_mock_model(self):
         self.model = RandomForestClassifier(n_estimators=10)
         X = np.random.rand(25, self.EXPECTED_FEATURES)
-        y = [0, 1] * 5
+        y = [0, 1] * 12 + [0]  # 25 labels to match 25 samples
         self.model.fit(X, y)
 
     def predict(self, input_data: ClickbaitInput):
