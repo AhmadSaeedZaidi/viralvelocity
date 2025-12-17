@@ -27,6 +27,9 @@ class ClickbaitInput(BaseModel):
     view_count: int
     like_count: int
     comment_count: int
+    publish_hour: int = 0
+    publish_day: int = 0
+    is_weekend: int = 0
 
 class GenreInput(BaseModel):
     title: str
