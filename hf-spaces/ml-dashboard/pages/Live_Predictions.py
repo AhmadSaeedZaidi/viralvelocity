@@ -19,34 +19,70 @@ def render():
             views_2h = st.number_input("Views (2h)", 1000, step=100)
             likes_2h = st.number_input("Likes (2h)", 100, step=10)
             comments_2h = st.number_input("Comments (2h)", 10, step=1)
-        with col2:
             duration = st.number_input("Duration (sec)", 300, step=30)
-            # Slopes are engineered features, calculated from 2h data
-            # For manual input, we can approximate or ask user
-            st.caption("Engineered Features (Auto-calculated in prod)")
-            slope_v = st.number_input("View Slope (views/hr)", views_2h / 2.0)
-            slope_e = st.number_input(
-                "Engagement Slope (eng/hr)", (likes_2h + comments_2h) / 2.0
+        with col2:
+            title = st.text_input("Title", "My Awesome Video")
+            publish_hour = st.slider("Publish Hour (0-23)", 0, 23, 12)
+            publish_day = st.selectbox(
+                "Day of Week",
+                range(7),
+                format_func=lambda x: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][
+                    x
+                ],
             )
+            is_weekend = 1 if publish_day >= 5 else 0
 
         if st.button("Forecast Velocity"):
+            import numpy as np
+
+            # Feature Engineering (Client-Side Simulation)
+            log_start_views = np.log1p(views_2h)
+            log_duration = np.log1p(duration)
+            video_age_hours = 2.0
+
+            # Initial Virality Slope
+            ivs = log_start_views / np.log1p(video_age_hours)
+
+            # Interaction Density
+            interaction_density = np.log1p(likes_2h + comments_2h * 2) / np.log1p(
+                views_2h + 1
+            )
+
+            # Ratios
+            like_view_ratio = likes_2h / (views_2h + 1)
+            comment_view_ratio = comments_2h / (views_2h + 1)
+
+            # Time
+            hour_sin = np.sin(2 * np.pi * publish_hour / 24)
+            hour_cos = np.cos(2 * np.pi * publish_hour / 24)
+
+            # Text
+            title_len = len(title)
+            caps_ratio = sum(1 for c in title if c.isupper()) / (title_len + 1)
+            exclamation_count = title.count("!")
+            question_count = title.count("?")
+            has_digits = 1 if any(c.isdigit() for c in title) else 0
+
             payload = {
-                "video_stats_24h": {
-                    "view_count": views_2h,
-                    "like_count": likes_2h,
-                    "comment_count": comments_2h,
-                    "duration_seconds": duration,
-                    "published_hour": 12,
-                    "published_day_of_week": 1,
-                },
-                "channel_stats": {
-                    "id": "demo",
-                    "avg_views_last_5": 5000,
-                    "subscriber_count": 1000,
-                },
-                "slope_views": slope_v,
-                "slope_engagement": slope_e,
+                "log_start_views": log_start_views,
+                "log_duration": log_duration,
+                "initial_virality_slope": ivs,
+                "interaction_density": interaction_density,
+                "like_view_ratio": like_view_ratio,
+                "comment_view_ratio": comment_view_ratio,
+                "video_age_hours": video_age_hours,
+                "hour_sin": hour_sin,
+                "hour_cos": hour_cos,
+                "publish_day": publish_day,
+                "is_weekend": is_weekend,
+                "title_len": title_len,
+                "caps_ratio": caps_ratio,
+                "exclamation_count": exclamation_count,
+                "question_count": question_count,
+                "has_digits": has_digits,
+                "category_id": -1,
             }
+
             res = client.predict_velocity(payload)
             if res:
                 formatted_pred = format_large_number(res["prediction"])
@@ -84,7 +120,7 @@ def render():
     with tabs[2]:
         st.subheader("Genre Classifier (PCA + MLP)")
         g_title = st.text_input("Title", "Minecraft Speedrun World Record")
-        g_tags = st.text_input("Tags (comma separated)", "gaming, minecraft, glitch")
+        g_tags = st.text_input("Tags (comma separated)", "minecraft, glitch")
 
         if st.button("Classify Genre"):
             payload = {"title": g_title, "tags": clean_tags_input(g_tags)}
@@ -108,15 +144,67 @@ def render():
     # --- TAB 5: Viral ---
     with tabs[4]:
         st.subheader("Viral Trend Probability")
-        ranks = st.text_input(
-            "Rank History (comma sep, last 7 days)",
-            "10, 8, 6, 5, 3, 2, 1",
-        )
-        velocity = st.number_input("Rank Velocity", -1.5)
+        col1, col2 = st.columns(2)
+        with col1:
+            v_views = st.number_input("Views (Current)", 5000)
+            v_likes = st.number_input("Likes (Current)", 500)
+            v_comments = st.number_input("Comments (Current)", 50)
+            v_duration = st.number_input("Duration (s)", 60)
+        with col2:
+            v_title = st.text_input("Title", "Viral Video Candidate")
+            v_age_hours = st.number_input("Video Age (Hours)", 2.0)
+            v_hour = st.slider("Publish Hour", 0, 23, 12)
 
         if st.button("Predict Viral Status"):
-            rank_list = [int(x.strip()) for x in ranks.split(",")]
-            payload = {"discovery_rank_history": rank_list, "rank_velocity": velocity}
+            import numpy as np
+
+            # Feature Engineering (Client-Side Simulation)
+            # Assuming 2 snapshots: T=0 (0 views) and T=Current
+            # Velocities
+            view_velocity = v_views / v_age_hours
+            like_velocity = v_likes / v_age_hours
+            comment_velocity = v_comments / v_age_hours
+
+            # Log Features
+            log_start_views = np.log1p(v_views)
+
+            # Ratios
+            like_ratio = v_likes / (v_views + 1)
+            comment_ratio = v_comments / (v_views + 1)
+
+            # Advanced
+            ivs = log_start_views / np.log1p(v_age_hours)
+            interaction_density = np.log1p(v_likes + v_comments * 2) / np.log1p(
+                v_views + 1
+            )
+
+            # Time
+            hour_sin = np.sin(2 * np.pi * v_hour / 24)
+            hour_cos = np.cos(2 * np.pi * v_hour / 24)
+
+            # Text
+            title_len = len(v_title)
+            caps_ratio = sum(1 for c in v_title if c.isupper()) / (title_len + 1)
+            has_digits = 1 if any(c.isdigit() for c in v_title) else 0
+
+            payload = {
+                "view_velocity": view_velocity,
+                "like_velocity": like_velocity,
+                "comment_velocity": comment_velocity,
+                "like_ratio": like_ratio,
+                "comment_ratio": comment_ratio,
+                "log_start_views": log_start_views,
+                "video_age_hours": v_age_hours,
+                "duration_seconds": v_duration,
+                "hour_sin": hour_sin,
+                "hour_cos": hour_cos,
+                "initial_virality_slope": ivs,
+                "interaction_density": interaction_density,
+                "title_len": title_len,
+                "caps_ratio": caps_ratio,
+                "has_digits": has_digits,
+            }
+
             res = client.predict_viral(payload)
             if res:
                 st.metric("Viral Status", res["prediction"])

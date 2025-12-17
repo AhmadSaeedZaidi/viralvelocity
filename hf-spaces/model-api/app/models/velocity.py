@@ -23,17 +23,40 @@ class VelocityPredictor(BaseModelWrapper):
             raise e
 
     def predict(self, input_data: VelocityInput):
+        # Construct feature array in the exact order expected by the model
+        # Order from pipeline:
+        # hour_sin, hour_cos, publish_day, is_weekend, log_start_views, log_duration,
+        # initial_virality_slope, interaction_density, like_view_ratio,
+        #  comment_view_ratio, video_age_hours, title_len, caps_ratio, 
+        # exclamation_count, question_count, has_digits, category_id
+
         features = np.array(
             [
                 [
-                    input_data.slope_views,
-                    input_data.slope_engagement,
-                    input_data.video_stats_24h.duration_seconds,
-                    input_data.channel_stats.avg_views_last_5,
-                    input_data.video_stats_24h.published_hour,
+                    input_data.hour_sin,
+                    input_data.hour_cos,
+                    input_data.publish_day,
+                    input_data.is_weekend,
+                    input_data.log_start_views,
+                    input_data.log_duration,
+                    input_data.initial_virality_slope,
+                    input_data.interaction_density,
+                    input_data.like_view_ratio,
+                    input_data.comment_view_ratio,
+                    input_data.video_age_hours,
+                    input_data.title_len,
+                    input_data.caps_ratio,
+                    input_data.exclamation_count,
+                    input_data.question_count,
+                    input_data.has_digits,
+                    input_data.category_id,
                 ]
             ]
         )
 
-        pred = self.model.predict(features)[0]
-        return max(0, int(pred))
+        # Prediction is in log space (log1p)
+        pred_log = self.model.predict(features)[0]
+
+        # Convert back to real space
+        pred_real = np.expm1(pred_log)
+        return max(0, int(pred_real))

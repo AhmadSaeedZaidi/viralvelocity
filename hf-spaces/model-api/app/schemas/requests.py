@@ -19,10 +19,32 @@ class ChannelStats(BaseModel):
 
 
 class VelocityInput(BaseModel):
-    video_stats_24h: VideoStats
-    channel_stats: ChannelStats
-    slope_views: float
-    slope_engagement: float
+    # Core Features
+    log_start_views: float
+    log_duration: float
+    initial_virality_slope: float
+    interaction_density: float
+
+    # Ratios
+    like_view_ratio: float
+    comment_view_ratio: float
+
+    # Temporal
+    video_age_hours: float
+    hour_sin: float
+    hour_cos: float
+    publish_day: int
+    is_weekend: int
+
+    # Text
+    title_len: int
+    caps_ratio: float
+    exclamation_count: int
+    question_count: int
+    has_digits: int
+
+    # Category
+    category_id: int = -1
 
 
 class ClickbaitInput(BaseModel):
@@ -45,8 +67,30 @@ class TagInput(BaseModel):
 
 
 class ViralInput(BaseModel):
-    discovery_rank_history: List[int]
-    rank_velocity: float
+    # Core metrics
+    view_velocity: float
+    like_velocity: float
+    comment_velocity: float
+
+    # Ratios & Log features
+    like_ratio: float
+    comment_ratio: float
+    log_start_views: float
+
+    # Temporal & Meta
+    video_age_hours: float
+    duration_seconds: int
+    hour_sin: float
+    hour_cos: float
+
+    # Advanced Features
+    initial_virality_slope: float
+    interaction_density: float
+
+    # Text Features
+    title_len: int
+    caps_ratio: float
+    has_digits: int
 
 
 class AnomalyInput(BaseModel):

@@ -13,10 +13,31 @@ class ViralTrendPredictor(BaseModelWrapper):
         self.model.fit(X, y)
 
     def predict(self, input_data: ViralInput):
-        avg_rank = sum(input_data.discovery_rank_history) / len(
-            input_data.discovery_rank_history
+        features = np.array(
+            [
+                [
+                    input_data.like_velocity,
+                    input_data.comment_velocity,
+                    input_data.log_start_views,
+                    # input_data.start_views, 
+                    # Missing in schema, derived from log_start_views if needed
+                    np.expm1(input_data.log_start_views),
+                    input_data.like_ratio,
+                    input_data.comment_ratio,
+                    input_data.video_age_hours,
+                    input_data.duration_seconds,
+                    2.0,  # hours_tracked placeholder
+                    2,  # snapshots placeholder
+                    input_data.initial_virality_slope,
+                    input_data.interaction_density,
+                    input_data.hour_sin,
+                    input_data.hour_cos,
+                    input_data.title_len,
+                    input_data.caps_ratio,
+                    input_data.has_digits,
+                ]
+            ]
         )
-        features = np.array([[avg_rank, input_data.rank_velocity]])
 
         pred = self.model.predict(features)[0]
         prob = self.model.predict_proba(features)[0][1]
