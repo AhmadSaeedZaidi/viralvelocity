@@ -27,7 +27,7 @@ class VelocityPredictor(BaseModelWrapper):
         # Order from pipeline:
         # hour_sin, hour_cos, publish_day, is_weekend, log_start_views, log_duration,
         # initial_virality_slope, interaction_density, like_view_ratio,
-        #  comment_view_ratio, video_age_hours, title_len, caps_ratio, 
+        #  comment_view_ratio, video_age_hours, title_len, caps_ratio,
         # exclamation_count, question_count, has_digits, category_id
 
         features = np.array(

@@ -19,7 +19,7 @@ class ViralTrendPredictor(BaseModelWrapper):
                     input_data.like_velocity,
                     input_data.comment_velocity,
                     input_data.log_start_views,
-                    # input_data.start_views, 
+                    # input_data.start_views,
                     # Missing in schema, derived from log_start_views if needed
                     np.expm1(input_data.log_start_views),
                     input_data.like_ratio,

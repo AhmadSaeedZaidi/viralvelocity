@@ -10,12 +10,10 @@ from app.models import (
 )
 from app.schemas import (
     AnomalyInput,
-    ChannelStats,
     ClickbaitInput,
     GenreInput,
     TagInput,
     VelocityInput,
-    VideoStats,
     ViralInput,
 )
 
@@ -41,7 +39,7 @@ def velocity_input():
         exclamation_count=1,
         question_count=0,
         has_digits=0,
-        category_id=10
+        category_id=10,
     )
 
 
@@ -123,7 +121,7 @@ def test_viral_trend_prediction():
         interaction_density=0.2,
         title_len=30,
         caps_ratio=0.2,
-        has_digits=0
+        has_digits=0,
     )
     label, prob = model.predict(input_data)
 

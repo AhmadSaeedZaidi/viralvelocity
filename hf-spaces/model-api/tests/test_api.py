@@ -44,7 +44,7 @@ def test_predict_velocity_endpoint(client):
         "exclamation_count": 1,
         "question_count": 0,
         "has_digits": 0,
-        "category_id": 10
+        "category_id": 10,
     }
     response = client.post("/api/v1/predict/velocity", json=payload)
     assert response.status_code == 200
