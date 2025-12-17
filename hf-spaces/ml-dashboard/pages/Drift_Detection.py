@@ -6,7 +6,7 @@ import streamlit as st
 from utils.db_client import DatabaseClient
 
 def render():
-    st.title("📉 Data Drift Monitor")
+    st.title("Data Drift Monitor")
     st.markdown(
         "Detect distribution shifts between **Training Data** (Historical) and "
         "**Live Production Data** (Last 24h)."
@@ -71,7 +71,13 @@ def render():
             hist_data, group_labels, bin_size=(max(ref_data.max(), curr_data.max()) - min(ref_data.min(), curr_data.min())) / 20, 
             colors=colors, show_rug=False
         )
-        fig_dist.update_layout(title_text="Distribution Shift Detected")
+        
+        x_label = f"{feature_label} (Log Scale)" if feature_col in ["views", "likes", "comments"] else feature_label
+        fig_dist.update_layout(
+            title_text="Distribution Shift Detected",
+            xaxis_title=x_label,
+            yaxis_title="Density"
+        )
         st.plotly_chart(fig_dist, use_container_width=True)
 
         # --- Statistical Test (KS Test Simulation) ---

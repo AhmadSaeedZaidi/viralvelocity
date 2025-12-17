@@ -5,7 +5,7 @@ from utils.api_client import YoutubeMLClient
 def render():
     client = YoutubeMLClient()
 
-    st.title("🔧 System Configuration")
+    st.title("System Configuration")
 
     st.subheader("Microservice Status")
     health = client.get_health()

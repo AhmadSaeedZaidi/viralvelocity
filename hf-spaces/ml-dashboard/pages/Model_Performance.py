@@ -50,9 +50,9 @@ def render():
             "channel_id": "UC_mock_channel",
             "publish_date": str(row['time']),
             "video_stats_24h": {
-                "views": int(row['views'] * 0.8),
-                "likes": int(row['likes'] * 0.8),
-                "comments": int(row['comments'] * 0.8),
+                "views": int(row['views'] * 0.2), # Assume 2h was 20% of current (mock history)
+                "likes": int(row['likes'] * 0.2),
+                "comments": int(row['comments'] * 0.2),
                 "duration_seconds": row['duration_seconds'],
                 "published_hour": row['time'].hour
             },
@@ -66,8 +66,8 @@ def render():
         }
         try:
             resp = client.predict_velocity(vel_payload)
-            if resp and "predicted_views_7d" in resp:
-                results["velocity"]["pred"].append(resp["predicted_views_7d"])
+            if resp and "prediction" in resp:
+                results["velocity"]["pred"].append(resp["prediction"])
                 results["velocity"]["true"].append(row['views'])
         except Exception:
             pass
@@ -203,7 +203,11 @@ def render():
     # --- Data Volume ---
     st.subheader("Data Volume Analysis")
     st.metric("Total Video Stats Analyzed", format_large_number(len(df)))
-    fig = px.line(df, x='time', y='views', title='Recent View Counts (Real Data)')
+    fig = px.line(
+        df, x='time', y='views', 
+        title='Recent View Counts (Real Data)',
+        labels={'time': 'Time', 'views': 'View Count'}
+    )
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
@@ -232,12 +236,17 @@ def render():
             fig_scatter = px.scatter(
                 eval_df, x='Actual', y='Predicted', 
                 title="Actual vs Predicted Views (Log Scale)",
-                log_x=True, log_y=True, trendline="ols"
+                log_x=True, log_y=True, trendline="ols",
+                labels={'Actual': 'Actual Views', 'Predicted': 'Predicted Views'}
             )
             st.plotly_chart(fig_scatter, use_container_width=True)
             
             residuals = np.array(results["velocity"]["true"]) - np.array(results["velocity"]["pred"])
-            fig_resid = px.histogram(residuals, nbins=30, title="Residual Distribution")
+            fig_resid = px.histogram(
+                residuals, nbins=30, title="Residual Distribution",
+                labels={'value': 'Residual (Actual - Predicted)'}
+            )
+            fig_resid.update_layout(yaxis_title="Frequency")
             st.plotly_chart(fig_resid, use_container_width=True)
         else:
             st.warning("No data for Velocity evaluation.")
@@ -252,7 +261,7 @@ def render():
             
             fig_cm = px.imshow(
                 cm,
-                labels=dict(x="Predicted", y="Actual", color="Count"),
+                labels=dict(x="Predicted Label", y="Actual Label", color="Count"),
                 x=['Solid', 'Clickbait'], y=['Solid', 'Clickbait'],
                 text_auto=True, title="Confusion Matrix"
             )
@@ -267,7 +276,11 @@ def render():
         if results["genre"]["true"]:
             # Simple bar chart of counts
             pred_counts = pd.Series(results["genre"]["pred"]).value_counts()
-            fig_bar = px.bar(pred_counts, title="Predicted Genre Distribution")
+            fig_bar = px.bar(
+                pred_counts, title="Predicted Genre Distribution",
+                labels={'index': 'Genre', 'value': 'Count'}
+            )
+            fig_bar.update_layout(showlegend=False)
             st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.warning("No data for Genre evaluation.")
@@ -289,6 +302,7 @@ def render():
                 title="Anomaly Score Distribution",
                 labels={'value': 'Anomaly Score'}
             )
+            fig_anom.update_layout(yaxis_title="Frequency")
             fig_anom.add_vline(x=0.6, line_dash="dash", line_color="red", annotation_text="Threshold")
             st.plotly_chart(fig_anom, use_container_width=True)
         else:

@@ -28,7 +28,7 @@ async def predict_velocity(input_data: VelocityInput, request: Request):
         "model_name": "Velocity Predictor",
         "prediction": prediction,
         "processing_time_ms": duration,
-        "metadata": {"unit": "views_7_days"}
+        "metadata": {"unit": "views_24h"}
     }
 
 @router.post("/clickbait", response_model=PredictionResponse)

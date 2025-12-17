@@ -5,30 +5,33 @@ from utils.data_processing import clean_tags_input, format_large_number
 def render():
     client = YoutubeMLClient()
 
-    st.title("⚡ Live Model Inference")
+    st.title("Live Model Inference")
 
     # Tabbed interface for models
     tabs = st.tabs(["Velocity", "Clickbait", "Genre", "Tags", "Viral", "Anomaly"])
 
     # --- TAB 1: Velocity ---
     with tabs[0]:
-        st.subheader("Predict 7-Day View Count")
+        st.subheader("Predict 24-Hour View Count")
         col1, col2 = st.columns(2)
         with col1:
-            views_24h = st.number_input("Views (24h)", 1000, step=100)
-            likes_24h = st.number_input("Likes (24h)", 100, step=10)
-            comments_24h = st.number_input("Comments (24h)", 10, step=1)
+            views_2h = st.number_input("Views (2h)", 1000, step=100)
+            likes_2h = st.number_input("Likes (2h)", 100, step=10)
+            comments_2h = st.number_input("Comments (2h)", 10, step=1)
         with col2:
             duration = st.number_input("Duration (sec)", 300, step=30)
-            slope_v = st.number_input("View Slope", 10.0)
-            slope_e = st.number_input("Engagement Slope", 0.5)
+            # Slopes are engineered features, calculated from 2h data
+            # For manual input, we can approximate or ask user
+            st.caption("Engineered Features (Auto-calculated in prod)")
+            slope_v = st.number_input("View Slope (views/hr)", views_2h / 2.0)
+            slope_e = st.number_input("Engagement Slope (eng/hr)", (likes_2h + comments_2h) / 2.0)
 
         if st.button("Forecast Velocity"):
             payload = {
                 "video_stats_24h": {
-                    "view_count": views_24h,
-                    "like_count": likes_24h,
-                    "comment_count": comments_24h,
+                    "view_count": views_2h,
+                    "like_count": likes_2h,
+                    "comment_count": comments_2h,
                     "duration_seconds": duration,
                     "published_hour": 12,
                     "published_day_of_week": 1,
@@ -45,7 +48,7 @@ def render():
             if res:
                 formatted_pred = format_large_number(res['prediction'])
                 message = (
-                    f"Predicted Views (7 Days): **{formatted_pred}** "
+                    f"Predicted Views (24 Hours): **{formatted_pred}** "
                     f"({res['prediction']})"
                 )
                 st.success(message)

@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 def render():
-    st.title("🔍 Global Feature Analysis")
+    st.title("Global Feature Analysis")
     st.markdown("Understand which input variables drive your model predictions.")
 
     # Model Selector
@@ -51,7 +51,8 @@ def render():
     fig_imp = px.bar(
         df_imp, x="Importance", y="Feature", orientation='h',
         title="Global Feature Importance (SHAP Approximation)",
-        color="Importance", color_continuous_scale="Viridis"
+        color="Importance", color_continuous_scale="Viridis",
+        labels={'Importance': 'Importance Score', 'Feature': 'Feature Name'}
     )
     st.plotly_chart(fig_imp, use_container_width=True)
 
@@ -80,6 +81,10 @@ def render():
         colorscale='RdBu',
         zmin=-1, zmax=1
     ))
+    fig_corr.update_layout(
+        xaxis_title="Features",
+        yaxis_title="Features"
+    )
     st.plotly_chart(fig_corr, use_container_width=True)
 
 if __name__ == "__main__":
