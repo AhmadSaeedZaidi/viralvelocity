@@ -23,6 +23,7 @@ logger = logging.getLogger("YoutubeML-API")
 
 # --- App Lifecycle & State ---
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -30,7 +31,7 @@ async def lifespan(app: FastAPI):
     On Shutdown: Clear memory.
     """
     logger.info("Starting up... Initializing models.")
-    
+
     # Initialize instances with their HF Hub paths
     model_instances = {
         "velocity": VelocityPredictor("velocity_v1", "velocity/model.pkl"),
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI):
             print(f"DEBUG: Error loading {name}: {e}")
             load_errors[name] = str(e)
             logger.exception("Model %s failed to load at startup: %s", name, e)
-    
+
     # Attach to app state for access in Routers
     app.state.models = model_instances
     app.state.model_load_errors = load_errors
@@ -62,20 +63,21 @@ async def lifespan(app: FastAPI):
             "Health will report degraded state.",
             len(load_errors),
         )
-    
+
     yield
-    
+
     # Cleanup
     app.state.models.clear()
     if hasattr(app.state, "model_load_errors"):
         app.state.model_load_errors.clear()
     logger.info("Shutting down... Models cleared.")
 
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="Hosting 6 custom ML models for YouTube analytics on HF Spaces.",
     version=settings.VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # --- Error Handlers ---
@@ -87,11 +89,12 @@ app.include_router(metrics.router)
 app.include_router(models.router)
 app.include_router(predictions.router)
 
+
 # Root endpoint for convenience
 @app.get("/", tags=["Info"])
 def root():
     return {
-        "message": "Welcome to ViralVelocity Model API", 
+        "message": "Welcome to ViralVelocity Model API",
         "docs": "/docs",
-        "health": "/health"
+        "health": "/health",
     }

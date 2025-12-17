@@ -8,9 +8,7 @@ from pages import (
 )
 
 st.set_page_config(
-    page_title="ML Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="ML Dashboard", layout="wide", initial_sidebar_state="expanded"
 )
 
 st.sidebar.title("ML Dashboard Navigation")
@@ -21,8 +19,8 @@ page = st.sidebar.radio(
         "Model Performance",
         "Feature Analysis",
         "Drift Detection",
-        "Model Configs"
-    )
+        "Model Configs",
+    ),
 )
 
 if page == "Live Predictions":

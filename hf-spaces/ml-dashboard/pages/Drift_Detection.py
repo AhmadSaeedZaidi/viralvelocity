@@ -1,9 +1,8 @@
 import numpy as np
-import pandas as pd
-import plotly.express as px
 import plotly.figure_factory as ff
 import streamlit as st
 from utils.db_client import DatabaseClient
+
 
 def render():
     st.title("Data Drift Monitor")
@@ -33,13 +32,10 @@ def render():
         "View Count Distribution": "views",
         "Like Count Distribution": "likes",
         "Comment Count Distribution": "comments",
-        "Video Duration": "duration_seconds"
+        "Video Duration": "duration_seconds",
     }
-    
-    feature_label = st.selectbox(
-        "Select Feature to Monitor",
-        list(feature_map.keys())
-    )
+
+    feature_label = st.selectbox("Select Feature to Monitor", list(feature_map.keys()))
     feature_col = feature_map[feature_label]
 
     # Time Range (Visual only for now, query is fixed)
@@ -48,7 +44,7 @@ def render():
     st.divider()
 
     # --- Real Data Logic ---
-    
+
     # Clean data (drop NaNs)
     ref_data = ref_df[feature_col].dropna().values
     curr_data = curr_df[feature_col].dropna().values
@@ -64,19 +60,30 @@ def render():
 
     if len(ref_data) > 0 and len(curr_data) > 0:
         hist_data = [ref_data, curr_data]
-        group_labels = ['Training Data (Reference)', 'Live Data (Current)']
-        colors = ['#3339FF', '#FF3333']
+        group_labels = ["Training Data (Reference)", "Live Data (Current)"]
+        colors = ["#3339FF", "#FF3333"]
 
         fig_dist = ff.create_distplot(
-            hist_data, group_labels, bin_size=(max(ref_data.max(), curr_data.max()) - min(ref_data.min(), curr_data.min())) / 20, 
-            colors=colors, show_rug=False
+            hist_data,
+            group_labels,
+            bin_size=(
+                max(ref_data.max(), curr_data.max())
+                - min(ref_data.min(), curr_data.min())
+            )
+            / 20,
+            colors=colors,
+            show_rug=False,
         )
-        
-        x_label = f"{feature_label} (Log Scale)" if feature_col in ["views", "likes", "comments"] else feature_label
+
+        x_label = (
+            f"{feature_label} (Log Scale)"
+            if feature_col in ["views", "likes", "comments"]
+            else feature_label
+        )
         fig_dist.update_layout(
             title_text="Distribution Shift Detected",
             xaxis_title=x_label,
-            yaxis_title="Density"
+            yaxis_title="Density",
         )
         st.plotly_chart(fig_dist, use_container_width=True)
 
@@ -87,20 +94,18 @@ def render():
 
         # Kolmogorov-Smirnov Statistic
         from scipy.stats import ks_2samp
+
         ks_stat, p_value = ks_2samp(ref_data, curr_data)
-        
-        # Tune sensitivity: Require both statistical significance AND meaningful effect size (KS > 0.1)
-        # Large datasets can have tiny p-values even for negligible differences.
         is_significant = p_value < 0.05
         is_meaningful = ks_stat > 0.1
         drift_detected = is_significant and is_meaningful
 
         with col1:
             st.metric(
-                "KS Statistic", 
-                f"{ks_stat:.3f}", 
+                "KS Statistic",
+                f"{ks_stat:.3f}",
                 delta="Drift Detected" if drift_detected else "Stable",
-                delta_color="inverse"
+                delta_color="inverse",
             )
             st.caption(f"P-Value: {p_value:.4f}")
 
@@ -109,9 +114,9 @@ def render():
 
         with col3:
             st.metric(
-                "Current Mean (Log)", 
-                f"{np.mean(curr_data):.2f}", 
-                delta=f"{np.mean(curr_data) - np.mean(ref_data):.2f}"
+                "Current Mean (Log)",
+                f"{np.mean(curr_data):.2f}",
+                delta=f"{np.mean(curr_data) - np.mean(ref_data):.2f}",
             )
 
         if drift_detected:
@@ -125,9 +130,7 @@ def render():
                 "but magnitude is small. Monitor closely."
             )
         else:
-            st.success(
-                "✅ **Stable:** Data distribution is within expected bounds."
-            )
+            st.success("✅ **Stable:** Data distribution is within expected bounds.")
     else:
         st.warning("Insufficient data points for distribution plot.")
 
@@ -136,6 +139,7 @@ def render():
     # --- Timeline View (Placeholder for now as we need time-series aggregation) ---
     # st.subheader("Drift Over Time")
     # ... (Requires more complex query to get drift over time)
+
 
 if __name__ == "__main__":
     render()

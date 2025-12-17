@@ -17,7 +17,7 @@ class ViralTrendPredictor(BaseModelWrapper):
             input_data.discovery_rank_history
         )
         features = np.array([[avg_rank, input_data.rank_velocity]])
-        
+
         pred = self.model.predict(features)[0]
         prob = self.model.predict_proba(features)[0][1]
         return int(pred), float(prob)

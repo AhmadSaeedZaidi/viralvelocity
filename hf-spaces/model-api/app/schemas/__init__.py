@@ -19,5 +19,5 @@ __all__ = [
     "TagInput",
     "ViralInput",
     "AnomalyInput",
-    "PredictionResponse"
+    "PredictionResponse",
 ]

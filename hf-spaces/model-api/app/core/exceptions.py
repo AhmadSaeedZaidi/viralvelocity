@@ -4,15 +4,21 @@ from fastapi.responses import JSONResponse
 
 class ModelError(Exception):
     """Base exception for model-related errors"""
+
     pass
+
 
 class ModelNotLoadedError(ModelError):
     """Raised when trying to predict with a model that isn't loaded"""
+
     pass
+
 
 class PredictionError(ModelError):
     """Raised when the inference step fails"""
+
     pass
+
 
 async def model_exception_handler(request: Request, exc: ModelError):
     """
@@ -24,6 +30,6 @@ async def model_exception_handler(request: Request, exc: ModelError):
         content={
             "error": exc.__class__.__name__,
             "message": str(exc),
-            "path": request.url.path
+            "path": request.url.path,
         },
     )

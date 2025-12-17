@@ -12,15 +12,19 @@ class AnomalyDetector(BaseModelWrapper):
         self.model.fit(X)
 
     def predict(self, input_data: AnomalyInput):
-        features = np.array([[
-            input_data.view_count, 
-            input_data.like_count, 
-            input_data.comment_count, 
-            input_data.duration_seconds
-        ]])
-        
+        features = np.array(
+            [
+                [
+                    input_data.view_count,
+                    input_data.like_count,
+                    input_data.comment_count,
+                    input_data.duration_seconds,
+                ]
+            ]
+        )
+
         pred = self.model.predict(features)[0]
         score = self.model.decision_function(features)[0]
-        
+
         is_anomaly = True if pred == -1 else False
         return is_anomaly, float(score)

@@ -12,3 +12,7 @@ testpaths = [
     "training/evaluation/tests"
 ]
 python_files = "test_*.py"
+
+[tool.black]
+line-length = 88
+target-version = ['py310']

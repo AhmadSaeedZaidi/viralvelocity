@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 
 router = APIRouter(prefix="/api/v1/models", tags=["Models"])
 
+
 @router.get("/status", response_model=Dict[str, Any])
 async def get_models_status(request: Request):
     """
@@ -16,6 +17,6 @@ async def get_models_status(request: Request):
             status[name] = {
                 "loaded": wrapper.is_loaded,
                 "type": wrapper.__class__.__name__,
-                "backend": "mock" if getattr(wrapper, "is_mock", False) else "joblib"
+                "backend": "mock" if getattr(wrapper, "is_mock", False) else "joblib",
             }
     return status

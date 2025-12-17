@@ -5,10 +5,7 @@ import requests
 
 
 def send_discord_alert(
-    status: str, 
-    pipeline_name: str, 
-    message: str = "", 
-    details: dict = None
+    status: str, pipeline_name: str, message: str = "", details: dict = None
 ):
     """
     Sends a formatted alert to a Discord Webhook.
@@ -19,24 +16,21 @@ def send_discord_alert(
         print("DISCORD_WEBHOOK_URL not set. Skipping notification.")
         return
 
-    color = 5763719 if status == "SUCCESS" else 15548997 # Green vs Red
-    
+    color = 5763719 if status == "SUCCESS" else 15548997  # Green vs Red
+
     embed = {
         "title": f"Pipeline {status}: {pipeline_name}",
         "description": message,
         "color": color,
         "timestamp": datetime.utcnow().isoformat(),
-        "fields": []
+        "fields": [],
     }
 
     if details:
         for key, value in details.items():
             embed["fields"].append({"name": key, "value": str(value), "inline": True})
 
-    payload = {
-        "username": "ML Orchestrator",
-        "embeds": [embed]
-    }
+    payload = {"username": "ML Orchestrator", "embeds": [embed]}
 
     try:
         response = requests.post(webhook_url, json=payload)

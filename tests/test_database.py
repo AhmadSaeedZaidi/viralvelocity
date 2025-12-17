@@ -9,16 +9,21 @@ from collector.models import Base, SearchDiscovery, TrendingDiscovery, Video, Vi
 
 # --- Fixtures ---
 
+
 @pytest.fixture(scope="module")
 def engine():
-    db_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/test_db")
+    db_url = os.environ.get(
+        "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/test_db"
+    )
     return create_engine(db_url)
+
 
 @pytest.fixture(scope="module")
 def tables(engine):
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)
+
 
 @pytest.fixture
 def session(engine, tables):
@@ -28,7 +33,9 @@ def session(engine, tables):
     session.rollback()
     session.close()
 
+
 # --- Tests ---
+
 
 def test_video_creation(session):
     """Test creating a Video (Metadata) record."""
@@ -38,7 +45,7 @@ def test_video_creation(session):
         description="A test description",
         published_at=datetime.now(timezone.utc),
         duration_seconds=120,
-        made_for_kids=False
+        made_for_kids=False,
     )
     session.add(new_video)
     session.commit()
@@ -47,6 +54,7 @@ def test_video_creation(session):
     assert stored_video is not None
     assert stored_video.title == "Test Video"
     assert stored_video.made_for_kids is False
+
 
 def test_video_stats_relationship(session):
     """Test linking Time-Series stats to a Video."""
@@ -61,7 +69,7 @@ def test_video_stats_relationship(session):
         views=100,
         likes=10,
         comments=5,
-        time=datetime.now(timezone.utc)
+        time=datetime.now(timezone.utc),
     )
     session.add(stat_entry)
     session.commit()
@@ -71,6 +79,7 @@ def test_video_stats_relationship(session):
     assert len(stats) == 1
     assert stats[0].views == 100
 
+
 def test_discovery_logs(session):
     """Test that discovery logs can reference videos."""
     vid = Video(video_id="disc_vid", title="Discovery Test")
@@ -79,7 +88,7 @@ def test_discovery_logs(session):
 
     search_log = SearchDiscovery(video_id="disc_vid", query="Minecraft")
     trend_log = TrendingDiscovery(video_id="disc_vid", rank=1)
-    
+
     session.add_all([search_log, trend_log])
     session.commit()
 

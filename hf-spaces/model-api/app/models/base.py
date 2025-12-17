@@ -10,6 +10,7 @@ from ..core.config import settings
 
 logger = logging.getLogger("YoutubeML-Models")
 
+
 class BaseModelWrapper:
     def __init__(self, name: str, repo_path: str):
         """
@@ -56,14 +57,14 @@ class BaseModelWrapper:
                 f"Attempting to download {self.name} from HF Hub: "
                 f"{settings.HF_USERNAME}/{settings.HF_MODEL_REPO} -> {self.repo_path}"
             )
-            
+
             model_path = hf_hub_download(
                 repo_id=f"{settings.HF_USERNAME}/{settings.HF_MODEL_REPO}",
                 filename=self.repo_path,
-                token=settings.HF_TOKEN or None, # Use token if available, else public
+                token=settings.HF_TOKEN or None,  # Use token if available, else public
                 cache_dir=cache_dir,
             )
-            
+
             self.model = joblib.load(model_path)
             self.is_loaded = True
             logger.info(f"Successfully loaded real model: {self.name}")
@@ -77,7 +78,7 @@ class BaseModelWrapper:
                 self.repo_path,
                 e,
             )
-            
+
             if settings.ENABLE_MOCK_INFERENCE:
                 logger.info(f"Initializing MOCK for {self.name}.")
                 self._init_mock_model()

@@ -26,18 +26,18 @@ class Video(Base):
     published_at = Column(DateTime(timezone=True), nullable=True)
     channel_id = Column(String, nullable=True)
     category_id = Column(String, nullable=True)
-    
+
     # Technical Specs
     duration_seconds = Column(Integer, nullable=True)
     definition = Column(String, nullable=True)
-    
+
     # Static Content Features
     made_for_kids = Column(Boolean, nullable=True)
     audio_language = Column(String, nullable=True)
-    
+
     # Assets
     thumbnail_url = Column(String, nullable=True)
-    
+
     # System Metadata
     first_seen_at = Column(DateTime(timezone=True), default=func.now())
 
@@ -46,6 +46,7 @@ class Video(Base):
     def video_link(self):
         return f"https://www.youtube.com/watch?v={self.video_id}"
 
+
 # --- 2. The Statistics Table (Time Series) ---
 class VideoStat(Base):
     __tablename__ = "video_stats"
@@ -53,32 +54,33 @@ class VideoStat(Base):
     # Composite PK: (video_id, time)
     time = Column(DateTime(timezone=True), default=func.now(), nullable=False)
     video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
-    
+
     # The Numbers
     views = Column(BigInteger, nullable=False)
     likes = Column(BigInteger, nullable=False)
     comments = Column(BigInteger, nullable=False)
-    
-    __table_args__ = (
-        PrimaryKeyConstraint('video_id', 'time'),
-    )
+
+    __table_args__ = (PrimaryKeyConstraint("video_id", "time"),)
+
 
 # --- 3. Discovery Logs ---
 class SearchDiscovery(Base):
     __tablename__ = "search_discovery"
-    
+
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
     query = Column(String, nullable=False)
     discovered_at = Column(DateTime(timezone=True), default=func.now(), index=True)
 
+
 class TrendingDiscovery(Base):
     __tablename__ = "trending_discovery"
-    
+
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
     rank = Column(Integer, nullable=False)
     discovered_at = Column(DateTime(timezone=True), default=func.now(), index=True)
+
 
 def init_db():
     try:

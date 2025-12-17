@@ -7,6 +7,7 @@ import streamlit as st
 # Default to local uvicorn port
 DEFAULT_API_URL = "http://localhost:8000"
 
+
 def get_api_url() -> str:
     """Retrieves the API URL from secrets or environment variables."""
     # Check Streamlit secrets first (for HF deployment), then OS env, then default
@@ -16,13 +17,14 @@ def get_api_url() -> str:
     except FileNotFoundError:
         pass  # Secrets file not found, fall back to env vars
     except Exception:
-        pass # Handle other potential secrets errors gracefully
+        pass  # Handle other potential secrets errors gracefully
 
     return os.getenv("API_URL", DEFAULT_API_URL)
 
+
 def _fix_hf_url(url: str) -> str:
     """Converts HF Spaces web URL to direct API URL if needed."""
-    # Example: https://huggingface.co/spaces/Rolaficus/ViralVelocity-api 
+    # Example: https://huggingface.co/spaces/Rolaficus/ViralVelocity-api
     # Becomes: https://rolaficus-viralvelocity-api.hf.space
     if "huggingface.co/spaces/" in url:
         try:
@@ -35,8 +37,9 @@ def _fix_hf_url(url: str) -> str:
                 # HF Spaces URLs are lowercase and use hyphens
                 return f"https://{user.lower()}-{space.lower()}.hf.space"
         except Exception:
-            return url # Fallback to original if parsing fails
+            return url  # Fallback to original if parsing fails
     return url
+
 
 class YoutubeMLClient:
     def __init__(self):
@@ -44,7 +47,7 @@ class YoutubeMLClient:
         self.base_url = _fix_hf_url(raw_url).rstrip("/")
         # Optional: Display connected API in sidebar for debugging
         # st.sidebar.caption(f"API: {self.base_url}")
-    
+
     def _post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             response = requests.post(
@@ -88,7 +91,7 @@ class YoutubeMLClient:
         return self._post("anomaly", data)
 
     # --- System Methods ---
-    
+
     def get_health(self):
         try:
             return requests.get(f"{self.base_url}/health", timeout=3).json()
@@ -98,23 +101,21 @@ class YoutubeMLClient:
     def get_model_status(self):
         return self._get("models/status")
 
-    def evaluate_metrics(self, y_true: list, y_pred: list, task_type: str = "regression"):
+    def evaluate_metrics(
+        self, y_true: list, y_pred: list, task_type: str = "regression"
+    ):
         """Calls the API to calculate standard ML metrics."""
         try:
             response = requests.post(
                 f"{self.base_url}/api/v1/evaluate",
-                json={
-                    "y_true": y_true,
-                    "y_pred": y_pred,
-                    "task_type": task_type
-                },
-                timeout=5
+                json={"y_true": y_true, "y_pred": y_pred, "task_type": task_type},
+                timeout=5,
             )
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             st.error(f"Metric Evaluation Failed: {e}")
             return {}
-    
+
     def get_metrics(self):
         return self._get("metrics")

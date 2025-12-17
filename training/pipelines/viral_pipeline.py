@@ -40,38 +40,38 @@ def load_data():
     logger = get_run_logger()
     loader = DataLoader()
     df = loader.get_viral_training_data()
-    
+
     if df.empty:
         raise ValueError(
             "No training data found. Ensure search_discovery and "
             "video_stats tables have data. Run collector for a few cycles."
         )
-    
+
     # Diagnostic logging
     logger.info(f"Loaded {len(df)} total stat rows")
     logger.info(f"Unique videos: {df['video_id'].nunique()}")
-    
+
     # Count videos with multiple stat snapshots (needed for velocity calculation)
-    stat_counts = df.groupby('video_id').size()
+    stat_counts = df.groupby("video_id").size()
     videos_with_multiple = (stat_counts >= 2).sum()
     logger.info(
         f"Videos with 2+ stat snapshots (usable for training): {videos_with_multiple}"
     )
-    
+
     if videos_with_multiple == 0:
         raise ValueError(
             f"Found {len(df)} rows, but NO videos have 2+ stat snapshots. "
             "The viral model needs repeated observations to calculate view velocity. "
             "Wait for more data collection cycles."
         )
-    
+
     return df
 
 
 @task(name="Feature Engineering")
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
-    
+
     # Use modular feature engineering
     try:
         final_df = viral_features.prepare_viral_features(df)
@@ -84,11 +84,11 @@ def prepare_features(df: pd.DataFrame):
         f"Feature engineering: {total_videos} unique videos, "
         f"kept {len(final_df)} samples."
     )
-    
+
     # Stats
     viral_count = final_df["is_viral"].sum()
     logger.info(f"Viral: {viral_count} ({100 * viral_count / len(final_df):.1f}%)")
-    
+
     return final_df
 
 
@@ -107,53 +107,63 @@ def run_integrity(df: pd.DataFrame):
         try:
             uploader = ModelUploader(repo_id)
             if res.passed():
-                 uploader.upload_reports({"integrity": path}, folder="viral/reports")
+                uploader.upload_reports({"integrity": path}, folder="viral/reports")
             else:
-                 logger.warning("Integrity checks failed.")
-                 failed_path = path.replace(".html", "_FAILED.html")
-                 import os
-                 os.rename(path, failed_path)
-                 uploader.upload_reports(
-                     {"integrity": failed_path}, folder="viral/reports"
-                 )
+                logger.warning("Integrity checks failed.")
+                failed_path = path.replace(".html", "_FAILED.html")
+                import os
+
+                os.rename(path, failed_path)
+                uploader.upload_reports(
+                    {"integrity": failed_path}, folder="viral/reports"
+                )
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
-            
+
     return path, res.passed()
 
 
 @task(name="Train Logistic Regression")
 def train_model(df: pd.DataFrame):
     logger = get_run_logger()
-    
+
     # Strictly define features to avoid leakage
     feature_cols = [
-        "like_velocity", "comment_velocity",
-        "log_start_views", "start_views", # Include both? Linear model might prefer log
-        "like_ratio", "comment_ratio",
-        "video_age_hours", "duration_seconds",
-        "hours_tracked", "snapshots",
+        "like_velocity",
+        "comment_velocity",
+        "log_start_views",
+        "start_views",  # Include both? Linear model might prefer log
+        "like_ratio",
+        "comment_ratio",
+        "video_age_hours",
+        "duration_seconds",
+        "hours_tracked",
+        "snapshots",
         # New Features
-        "initial_virality_slope", "interaction_density",
-        "hour_sin", "hour_cos",
-        "title_len", "caps_ratio", "has_digits"
+        "initial_virality_slope",
+        "interaction_density",
+        "hour_sin",
+        "hour_cos",
+        "title_len",
+        "caps_ratio",
+        "has_digits",
     ]
-    
+
     # Ensure columns exist
     feature_cols = [c for c in feature_cols if c in df.columns]
-    
+
     X = df[feature_cols].fillna(0)
     y = df["is_viral"]
-    
+
     logger.info(f"Training with {len(feature_cols)} features: {feature_cols}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
-    
+
     # Tuning Config
     tuning_conf = VIRAL_CONFIG.get("tuning", {})
-    
+
     if tuning_conf:
         base_model = LogisticRegression(max_iter=1000, class_weight="balanced")
         search = RandomizedSearchCV(
@@ -161,9 +171,9 @@ def train_model(df: pd.DataFrame):
             param_distributions=tuning_conf.get("params", {}),
             n_iter=tuning_conf.get("n_iter", 10),
             cv=tuning_conf.get("cv", 3),
-            scoring='f1',
+            scoring="f1",
             n_jobs=-1,
-            verbose=1
+            verbose=1,
         )
         search.fit(X_train, y_train)
         model = search.best_estimator_
@@ -171,9 +181,9 @@ def train_model(df: pd.DataFrame):
     else:
         model = LogisticRegression(class_weight="balanced", max_iter=1000)
         model.fit(X_train, y_train)
-    
+
     preds = model.predict(X_test)
-    
+
     # Classification Metrics
     eval_metrics = metrics.get_classification_metrics(y_test, preds)
     report = classification_report(y_test, preds)
@@ -192,7 +202,7 @@ def run_eval(model, X_train, X_test, y_train, y_test):
     res = suite.run(train_dataset=train_ds, test_dataset=test_ds, model=model)
     path = "viral_eval.html"
     res.save_as_html(path)
-    
+
     # Always upload report
     repo_id = GLOBAL_CONFIG.get("hf_repo_id")
     if repo_id:
@@ -201,7 +211,7 @@ def run_eval(model, X_train, X_test, y_train, y_test):
             uploader.upload_reports({"eval": path}, folder="viral/reports")
         except Exception:
             pass
-            
+
     return path
 
 
@@ -227,7 +237,7 @@ def validate_and_upload(model, X_test, y_test, reports):
         uploader.upload_file("viral_model.pkl", "viral/model.pkl")
         uploader.upload_reports(reports, folder="viral/reports")
         return "PROMOTED"
-    
+
     return "DISCARDED"
 
 
@@ -245,17 +255,17 @@ def viral_training_flow():
         # 1. Load Data
         raw_df = load_data()
         run_metrics["Raw_Rows"] = len(raw_df)
-        
+
         # 2. Feature Engineering
         df = prepare_features(raw_df)
         run_metrics["Training_Samples"] = len(df)
         run_metrics["Features"] = len(df.columns) - 1
-        
+
         # 3. Integrity Checks
         integrity_path, passed = run_integrity(df)
         if not passed:
             logger.warning("Data Integrity Failed. Continuing pipeline...")
-            
+
         # 4. Train Model
         best_model, Xt, Xv, yt, yv, eval_metrics = train_model(df)
         run_metrics.update(eval_metrics)
@@ -267,10 +277,10 @@ def viral_training_flow():
         status = validate_and_upload(
             best_model, Xv, yv, {"integrity": integrity_path, "eval": eval_path}
         )
-        
+
         run_metrics["Deployment"] = status
         notify("SUCCESS", metrics=run_metrics)
-            
+
     except Exception as e:
         logger.error(f"Pipeline crashed: {e}")
         notify("FAILURE", error=str(e), metrics=run_metrics)

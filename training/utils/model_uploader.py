@@ -14,14 +14,14 @@ class ModelUploader:
     def __init__(self, repo_id=None):
         """
         Initialize the uploader.
-        
+
         Args:
-            repo_id (str, optional): Explicit repository ID. 
+            repo_id (str, optional): Explicit repository ID.
                 If None, constructs it from env vars.
         """
         self.api = HfApi()
         self.token = os.getenv("HF_TOKEN")
-        
+
         if repo_id:
             self.repo_id = repo_id
         else:
@@ -39,19 +39,20 @@ class ModelUploader:
         If yes, downloads it and re-uploads it to 'archive/{path}-{timestamp}'.
         """
         print(f"Checking for existing file to archive: {path_in_repo}...")
-        
+
         try:
             # Attempt to download the existing file from the Hub
             # We use a temporary local directory to store the old file
             temp_download_dir = "/tmp/viralvelocity_archive_buffer"
             os.makedirs(temp_download_dir, exist_ok=True)
-            
+
             local_old_file = hf_hub_download(
                 repo_id=self.repo_id,
                 filename=path_in_repo,
                 token=self.token,
                 local_dir=temp_download_dir,
-                local_dir_use_symlinks=False  # Ensure we get a real file, not a symlink
+                # Ensure we get a real file, not a symlink
+                local_dir_use_symlinks=False,
             )
 
             # Construct the archive path
@@ -59,7 +60,7 @@ class ModelUploader:
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             directory, filename = os.path.split(path_in_repo)
             name, ext = os.path.splitext(filename)
-            
+
             archive_filename = f"{name}-{timestamp}{ext}"
             archive_path_in_repo = os.path.join("archive", directory, archive_filename)
 
@@ -72,15 +73,15 @@ class ModelUploader:
                 repo_id=self.repo_id,
                 repo_type="model",
                 token=self.token,
-                commit_message=f"Archive previous version of {filename}"
+                commit_message=f"Archive previous version of {filename}",
             )
-            
+
             # Clean up the temp file to save space
             try:
                 os.remove(local_old_file)
             except OSError:
                 pass
-                
+
         except (EntryNotFoundError, RepositoryNotFoundError):
             # This is normal for the very first run
             print("No existing file found (or repo new). Skipping archive step.")
@@ -92,7 +93,7 @@ class ModelUploader:
         """
         Uploads a file to HF Hub.
         Automatically archives the previous version if it exists.
-        
+
         Args:
             local_path (str): Path to the local file to upload.
             path_in_repo (str): Destination path in the repository.
@@ -102,19 +103,19 @@ class ModelUploader:
 
         # 1. Archive the old one
         self._archive_existing_file(path_in_repo)
-        
+
         # 2. Upload the new one
         print(f"Uploading new model {local_path} to {self.repo_id}/{path_in_repo}...")
-        
+
         self.api.upload_file(
             path_or_fileobj=local_path,
             path_in_repo=path_in_repo,
             repo_id=self.repo_id,
             repo_type="model",
             token=self.token,
-            commit_message=f"Update model {path_in_repo}"
+            commit_message=f"Update model {path_in_repo}",
         )
-        
+
         print("Upload complete.")
 
     def upload_reports(self, reports, folder="reports"):
@@ -128,11 +129,11 @@ class ModelUploader:
             if not os.path.exists(local_path):
                 print(f"Warning: Report {local_path} not found. Skipping.")
                 continue
-                
+
             # Construct path in repo
             # Standardize naming: {name}_latest.html
             filename = f"{name}_latest.html"
             path_in_repo = f"{folder}/{filename}"
-            
+
             # Use the standard upload logic (which handles archiving)
             self.upload_file(local_path, path_in_repo)

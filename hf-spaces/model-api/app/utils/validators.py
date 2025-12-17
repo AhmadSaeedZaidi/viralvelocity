@@ -7,9 +7,10 @@ def validate_video_stats(views: int, duration: int):
     """
     if views < 0:
         raise HTTPException(status_code=400, detail="View count cannot be negative.")
-    
+
     if duration <= 0:
         raise HTTPException(status_code=400, detail="Duration must be positive.")
+
 
 def validate_rank_history(ranks: list):
     """
@@ -17,9 +18,10 @@ def validate_rank_history(ranks: list):
     """
     if not ranks:
         raise HTTPException(status_code=400, detail="Rank history cannot be empty.")
-    
+
     if any(r < 1 for r in ranks):
         raise HTTPException(status_code=400, detail="Ranks must be >= 1.")
+
 
 def check_model_compatibility(
     model_name: str, input_features: int, expected_features: int

@@ -38,21 +38,21 @@ def load_data():
     logger = get_run_logger()
     logger.info("Loading velocity data")
     loader = DataLoader()
-    
+
     MIN_TRACKING_HOURS = 2
     df = loader.get_velocity_training_data(min_hours=MIN_TRACKING_HOURS)
-    
+
     if df.empty:
         df = loader.get_training_pairs_flexible()
         if df.empty:
             raise ValueError("No training data found.")
-    
+
     # Filter noise
-    df = df[df['start_views'] >= 10]
-    
-    df['target_views'] = df['target_views'].clip(lower=0)
-    df['start_views'] = df['start_views'].clip(lower=0)
-    
+    df = df[df["start_views"] >= 10]
+
+    df["target_views"] = df["target_views"].clip(lower=0)
+    df["start_views"] = df["start_views"].clip(lower=0)
+
     return df
 
 
@@ -60,19 +60,19 @@ def load_data():
 def prepare_features(df: pd.DataFrame):
     logger = get_run_logger()
     logger.info("Preparing features (Strictly No Data Leaks)")
-    
+
     df = temporal_features.add_date_features(df, date_col="published_at")
-    
+
     if "publish_hour" in df.columns:
         df["hour_sin"] = np.sin(2 * np.pi * df["publish_hour"] / 24)
         df["hour_cos"] = np.cos(2 * np.pi * df["publish_hour"] / 24)
-    
+
     df["like_view_ratio"] = df["start_likes"] / (df["start_views"] + 1)
     df["comment_view_ratio"] = df["start_comments"] / (df["start_views"] + 1)
-    
+
     df["published_at"] = pd.to_datetime(df["published_at"])
     df["start_time"] = pd.to_datetime(df["start_time"])
-    
+
     time_delta = (df["start_time"] - df["published_at"]).dt.total_seconds()
     df["video_age_hours"] = (time_delta / 3600.0).clip(lower=0.5)
 
@@ -81,7 +81,7 @@ def prepare_features(df: pd.DataFrame):
     _ivs_num = np.log1p(df["start_views"])
     _ivs_den = np.log1p(df["video_age_hours"])
     df["initial_virality_slope"] = _ivs_num / _ivs_den
-    
+
     # Interaction Density (Log Space)
     interaction_num = np.log1p(df["start_likes"] + df["start_comments"] * 2)
     interaction_den = np.log1p(df["start_views"] + 1)
@@ -91,14 +91,12 @@ def prepare_features(df: pd.DataFrame):
         try:
             df = text_features.extract_title_features(df, title_col="title")
         except Exception:
-                df["title"] = df["title"].fillna("")
-                df["title_len"] = df["title"].str.len()
-                df["caps_ratio"] = (
-                    df["title"].str.count(r"[A-Z]") / (df["title_len"] + 1)
-                )
-                df["exclamation_count"] = df["title"].str.count("!")
-                df["question_count"] = df["title"].str.count("\\?")
-                df["has_digits"] = df["title"].str.contains(r"\\d").astype(int)
+            df["title"] = df["title"].fillna("")
+            df["title_len"] = df["title"].str.len()
+            df["caps_ratio"] = df["title"].str.count(r"[A-Z]") / (df["title_len"] + 1)
+            df["exclamation_count"] = df["title"].str.count("!")
+            df["question_count"] = df["title"].str.count("\\?")
+            df["has_digits"] = df["title"].str.contains(r"\\d").astype(int)
 
     df["log_start_views"] = np.log1p(df["start_views"])
     df["log_duration"] = np.log1p(df["duration_seconds"])
@@ -107,17 +105,27 @@ def prepare_features(df: pd.DataFrame):
     df[target_col] = df["target_views"]
 
     features = [
-        "hour_sin", "hour_cos", "publish_day", "is_weekend",
-        "log_start_views", "log_duration",
-        "initial_virality_slope", "interaction_density", 
-        "like_view_ratio", "comment_view_ratio",
+        "hour_sin",
+        "hour_cos",
+        "publish_day",
+        "is_weekend",
+        "log_start_views",
+        "log_duration",
+        "initial_virality_slope",
+        "interaction_density",
+        "like_view_ratio",
+        "comment_view_ratio",
         "video_age_hours",
-        "title_len", "caps_ratio", "exclamation_count", "question_count", "has_digits",
-        "category_id"
+        "title_len",
+        "caps_ratio",
+        "exclamation_count",
+        "question_count",
+        "has_digits",
+        "category_id",
     ]
-    
+
     available_features = [f for f in features if f in df.columns]
-    
+
     if "category_id" in df.columns:
         df["category_id"] = df["category_id"].fillna(-1).astype(int)
 
@@ -136,13 +144,13 @@ def prepare_features(df: pd.DataFrame):
 def run_integrity_checks(df: pd.DataFrame):
     logger = get_run_logger()
     target_col = VELOCITY_CONFIG.get("target", "views")
-    
+
     if len(df) < 50:
         return "skipped_small_dataset.html", True
-    
+
     potential_cat = ["publish_day", "is_weekend", "category_id"]
     cat_features = [f for f in potential_cat if f in df.columns]
-    
+
     ds = Dataset(df, label=target_col, cat_features=cat_features)
     result = data_integrity().run(ds)
 
@@ -162,13 +170,14 @@ def run_integrity_checks(df: pd.DataFrame):
                 # Rename for failure indication before upload
                 failed_path = report_path.replace(".html", "_FAILED.html")
                 import os
+
                 os.rename(report_path, failed_path)
                 uploader.upload_reports(
                     {"integrity": failed_path}, folder="velocity/reports"
                 )
         except Exception as e:
             logger.warning(f"Failed to upload integrity report: {e}")
-            
+
     return report_path, result.passed()
 
 
@@ -200,15 +209,15 @@ def train_model(df: pd.DataFrame):
         learning_rate=0.02,
         depth=6,
         l2_leaf_reg=5,
-        loss_function='Huber:delta=1.0',
+        loss_function="Huber:delta=1.0",
         verbose=0,
         random_seed=42,
         allow_writing_files=False,
-        cat_features=cat_features if cat_features else None
+        cat_features=cat_features if cat_features else None,
     )
 
     model.fit(X_train, y_train_log)
-    
+
     # 1. Predict in Log Space
     preds_log = model.predict(X_test)
     preds_log = np.clip(preds_log, 0, 25)
@@ -220,10 +229,10 @@ def train_model(df: pd.DataFrame):
     # 3. Calculate REAL-SPACE Metrics (The "Business" View)
     preds = np.expm1(preds_log)
     real_metrics = metrics.get_regression_metrics(y_test, preds)
-    
+
     # Merge metrics for reporting
     eval_metrics = {**real_metrics, **log_metrics}
-    
+
     logger.info(f"Metrics (Log & Real): {eval_metrics}")
 
     return model, X_train, X_test, y_train, y_test, eval_metrics
@@ -234,18 +243,19 @@ def run_evaluation_checks(model, X_train, X_test, y_train, y_test):
     target_col = VELOCITY_CONFIG.get("target", "views")
     potential_cat = ["publish_day", "is_weekend", "category_id"]
     cat_features = [f for f in potential_cat if f in X_train.columns]
-    
+
     # Manual wrapper to allow Deepchecks to call predict() naturally
     class LogModelWrapper:
         def __init__(self, internal_model):
             self.model = internal_model
+
         def predict(self, X):
             p_log = self.model.predict(X)
-            p_log = np.clip(p_log, 0, 25) # Apply safety clip here too
+            p_log = np.clip(p_log, 0, 25)  # Apply safety clip here too
             return np.expm1(p_log)
-    
+
     wrapped_model = LogModelWrapper(model)
-    
+
     # Build Deepchecks datasets
     train_df = pd.concat([X_train, y_train], axis=1)
     test_df = pd.concat([X_test, y_test], axis=1)
@@ -289,18 +299,19 @@ def validate_and_upload(model, X_test, y_test, reports):
     validator = ModelValidator(repo_id)
     old_model_raw = validator.load_production_model("velocity/model.pkl")
     metric_name = VELOCITY_CONFIG.get("metric", "r2_score")
-    
+
     # Wrap model for validation comparison
     class LogModelWrapper:
         def __init__(self, internal_model):
             self.model = internal_model
+
         def predict(self, X):
             p_log = self.model.predict(X)
             p_log = np.clip(p_log, 0, 25)
             return np.expm1(p_log)
-    
+
     wrapped_new = LogModelWrapper(model)
-    
+
     # Wrap OLD Model (Critical Fix: Old model on disk is raw log-space)
     wrapped_old = None
     if old_model_raw is not None:
@@ -312,7 +323,7 @@ def validate_and_upload(model, X_test, y_test, reports):
 
     if passed:
         logger.info(f"Promoting model ({new_score:.4f} vs {old_score:.4f})")
-        joblib.dump(model, "velocity_model.pkl") 
+        joblib.dump(model, "velocity_model.pkl")
         uploader = ModelUploader(repo_id)
         uploader.upload_file("velocity_model.pkl", "velocity/model.pkl")
         uploader.upload_reports(reports, folder="velocity/reports")
@@ -352,7 +363,7 @@ def velocity_training_flow():
         run_metrics.update(eval_metrics)
 
         eval_path = run_evaluation_checks(model, X_train, X_test, y_train, y_test)
-        
+
         status = validate_and_upload(
             model, X_test, y_test, {"integrity": integrity_path, "eval": eval_path}
         )

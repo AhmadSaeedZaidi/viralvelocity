@@ -6,6 +6,7 @@ import joblib
 
 logger = logging.getLogger("YoutubeML-Utils")
 
+
 def load_pickle_model(filepath: str) -> Optional[Any]:
     """
     Safely loads a pickle file with error handling.
@@ -13,7 +14,7 @@ def load_pickle_model(filepath: str) -> Optional[Any]:
     if not os.path.exists(filepath):
         logger.warning(f"File not found: {filepath}")
         return None
-        
+
     try:
         model = joblib.load(filepath)
         logger.info(f"Successfully loaded model from {filepath}")
@@ -21,6 +22,7 @@ def load_pickle_model(filepath: str) -> Optional[Any]:
     except Exception as e:
         logger.error(f"Corrupt or incompatible model file at {filepath}: {e}")
         return None
+
 
 def get_model_size_mb(filepath: str) -> float:
     """

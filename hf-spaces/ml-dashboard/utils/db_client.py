@@ -1,7 +1,9 @@
 import os
+
 import pandas as pd
-from sqlalchemy import create_engine, text
 import streamlit as st
+from sqlalchemy import create_engine, text
+
 
 class DatabaseClient:
     def __init__(self):
@@ -9,28 +11,15 @@ class DatabaseClient:
         if not self.db_url:
             raise ValueError("DATABASE_URL environment variable is not set.")
         self.engine = create_engine(self.db_url)
-        print(f"✅ Connected to Database: {self.db_url.split('@')[-1]}") # Log connection (masking auth)
+        print(
+            f"✅ Connected to Database: {self.db_url.split('@')[-1]}"
+        )  # Log connection (masking auth)
 
     @st.cache_data(ttl=300)  # Cache results for 5 minutes
     def get_video_stats(_self, days=7):
         """Fetch video statistics for the last N days."""
-        query = text("""
-            SELECT 
-                v.video_id,
-                v.title,
-                v.duration_seconds,
-                vs.views,
-                vs.likes,
-                vs.comments,
-                vs.time
-            FROM video_stats vs
-            JOIN videos v ON vs.video_id = v.video_id
-            WHERE vs.time >= NOW() - INTERVAL ':days days'
-            ORDER BY vs.time DESC
-        """)
-        # Note: SQLAlchemy text() parameter binding for INTERVAL is tricky, 
-        # so we'll use python f-string for the interval value safely since 'days' is an int.
-        safe_query = text(f"""
+        safe_query = text(
+            f"""
             SELECT 
                 v.video_id,
                 v.title,
@@ -43,8 +32,9 @@ class DatabaseClient:
             JOIN videos v ON vs.video_id = v.video_id
             WHERE vs.time >= NOW() - INTERVAL '{int(days)} days'
             ORDER BY vs.time DESC
-        """)
-        
+        """
+        )
+
         with _self.engine.connect() as conn:
             df = pd.read_sql(safe_query, conn)
         return df
@@ -58,7 +48,8 @@ class DatabaseClient:
         """
         # Modified: Take data older than 24 hours as reference (instead of 7 days)
         # to ensure we have data to show even in early stages of deployment.
-        query = text("""
+        query = text(
+            """
             SELECT 
                 vs.views,
                 vs.likes,
@@ -68,7 +59,8 @@ class DatabaseClient:
             JOIN videos v ON vs.video_id = v.video_id
             WHERE vs.time < NOW() - INTERVAL '24 hours'
             LIMIT 5000
-        """)
+        """
+        )
         with _self.engine.connect() as conn:
             df = pd.read_sql(query, conn)
         return df
@@ -76,7 +68,8 @@ class DatabaseClient:
     @st.cache_data(ttl=300)
     def get_live_data_distribution(_self):
         """Fetch recent data to compare against baseline."""
-        query = text("""
+        query = text(
+            """
             SELECT 
                 vs.views,
                 vs.likes,
@@ -86,7 +79,8 @@ class DatabaseClient:
             JOIN videos v ON vs.video_id = v.video_id
             WHERE vs.time >= NOW() - INTERVAL '24 hours'
             LIMIT 2000
-        """)
+        """
+        )
         with _self.engine.connect() as conn:
             df = pd.read_sql(query, conn)
         return df

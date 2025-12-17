@@ -2,6 +2,7 @@ import streamlit as st
 from utils.api_client import YoutubeMLClient
 from utils.data_processing import clean_tags_input, format_large_number
 
+
 def render():
     client = YoutubeMLClient()
 
@@ -24,7 +25,9 @@ def render():
             # For manual input, we can approximate or ask user
             st.caption("Engineered Features (Auto-calculated in prod)")
             slope_v = st.number_input("View Slope (views/hr)", views_2h / 2.0)
-            slope_e = st.number_input("Engagement Slope (eng/hr)", (likes_2h + comments_2h) / 2.0)
+            slope_e = st.number_input(
+                "Engagement Slope (eng/hr)", (likes_2h + comments_2h) / 2.0
+            )
 
         if st.button("Forecast Velocity"):
             payload = {
@@ -46,7 +49,7 @@ def render():
             }
             res = client.predict_velocity(payload)
             if res:
-                formatted_pred = format_large_number(res['prediction'])
+                formatted_pred = format_large_number(res["prediction"])
                 message = (
                     f"Predicted Views (24 Hours): **{formatted_pred}** "
                     f"({res['prediction']})"
@@ -61,7 +64,7 @@ def render():
         c_views = st.number_input("Current Views", 50000)
         c_likes = st.number_input("Current Likes", 100)
         c_comments = st.number_input("Current Comments", 50)
-        
+
         if st.button("Check Clickbait"):
             payload = {
                 "title": title,
@@ -71,10 +74,10 @@ def render():
             }
             res = client.predict_clickbait(payload)
             if res:
-                color = "red" if res['prediction'] == "Clickbait" else "green"
+                color = "red" if res["prediction"] == "Clickbait" else "green"
                 st.markdown(f"Verdict: :{color}[**{res['prediction']}**]")
                 st.progress(
-                    res['probability'], text=f"Probability: {res['probability']:.2f}"
+                    res["probability"], text=f"Probability: {res['probability']:.2f}"
                 )
 
     # --- TAB 3: Genre ---
@@ -82,7 +85,7 @@ def render():
         st.subheader("Genre Classifier (PCA + MLP)")
         g_title = st.text_input("Title", "Minecraft Speedrun World Record")
         g_tags = st.text_input("Tags (comma separated)", "gaming, minecraft, glitch")
-        
+
         if st.button("Classify Genre"):
             payload = {"title": g_title, "tags": clean_tags_input(g_tags)}
             res = client.predict_genre(payload)
@@ -94,13 +97,13 @@ def render():
     with tabs[3]:
         st.subheader("Tag Recommender")
         current_tags = st.text_input("Current Tags", "python, tutorial")
-        
+
         if st.button("Get Recommendations"):
             payload = {"current_tags": clean_tags_input(current_tags)}
             res = client.predict_tags(payload)
             if res:
                 st.write("Recommended Tags:")
-                st.write(res['prediction'])
+                st.write(res["prediction"])
 
     # --- TAB 5: Viral ---
     with tabs[4]:
@@ -110,14 +113,14 @@ def render():
             "10, 8, 6, 5, 3, 2, 1",
         )
         velocity = st.number_input("Rank Velocity", -1.5)
-        
+
         if st.button("Predict Viral Status"):
             rank_list = [int(x.strip()) for x in ranks.split(",")]
             payload = {"discovery_rank_history": rank_list, "rank_velocity": velocity}
             res = client.predict_viral(payload)
             if res:
-                st.metric("Viral Status", res['prediction'])
-                st.bar_chart({"Probability": [res['probability']]})
+                st.metric("Viral Status", res["prediction"])
+                st.bar_chart({"Probability": [res["probability"]]})
 
     # --- TAB 6: Anomaly ---
     with tabs[5]:
@@ -126,7 +129,7 @@ def render():
         a_likes = st.number_input("Likes", 10)
         a_comments = st.number_input("Comments", 0)
         a_dur = st.number_input("Duration", 60)
-        
+
         if st.button("Scan for Anomalies"):
             payload = {
                 "view_count": a_views,
@@ -136,11 +139,12 @@ def render():
             }
             res = client.predict_anomaly(payload)
             if res:
-                if "ANOMALY" in res['prediction']:
+                if "ANOMALY" in res["prediction"]:
                     st.error(f"⚠️ {res['prediction']}")
                 else:
                     st.success(f"✅ {res['prediction']}")
                 st.metric("Anomaly Score", f"{res['anomaly_score']:.4f}")
+
 
 if __name__ == "__main__":
     render()

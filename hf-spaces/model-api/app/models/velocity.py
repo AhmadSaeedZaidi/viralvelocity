@@ -23,13 +23,17 @@ class VelocityPredictor(BaseModelWrapper):
             raise e
 
     def predict(self, input_data: VelocityInput):
-        features = np.array([[
-            input_data.slope_views,
-            input_data.slope_engagement,
-            input_data.video_stats_24h.duration_seconds,
-            input_data.channel_stats.avg_views_last_5,
-            input_data.video_stats_24h.published_hour
-        ]])
-        
+        features = np.array(
+            [
+                [
+                    input_data.slope_views,
+                    input_data.slope_engagement,
+                    input_data.video_stats_24h.duration_seconds,
+                    input_data.channel_stats.avg_views_last_5,
+                    input_data.video_stats_24h.published_hour,
+                ]
+            ]
+        )
+
         pred = self.model.predict(features)[0]
         return max(0, int(pred))
