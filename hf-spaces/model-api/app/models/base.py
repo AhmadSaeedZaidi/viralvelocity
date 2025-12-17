@@ -4,7 +4,7 @@ from typing import Any
 
 import joblib
 from huggingface_hub import hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError, RepositoryNotFoundError
+from huggingface_hub.utils import EntryNotFoundError
 
 from ..core.config import settings
 
