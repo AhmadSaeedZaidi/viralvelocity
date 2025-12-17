@@ -82,7 +82,12 @@ def render():
         # Kolmogorov-Smirnov Statistic
         from scipy.stats import ks_2samp
         ks_stat, p_value = ks_2samp(ref_data, curr_data)
-        drift_detected = p_value < 0.05 # Standard significance level
+        
+        # Tune sensitivity: Require both statistical significance AND meaningful effect size (KS > 0.1)
+        # Large datasets can have tiny p-values even for negligible differences.
+        is_significant = p_value < 0.05
+        is_meaningful = ks_stat > 0.1
+        drift_detected = is_significant and is_meaningful
 
         with col1:
             st.metric(
@@ -107,6 +112,11 @@ def render():
             st.error(
                 "🚨 **Drift Alert:** The live data distribution has significantly "
                 "deviated from the training set. Recommended Action: **Retrain Model**."
+            )
+        elif is_significant:
+            st.warning(
+                "⚠️ **Minor Shift:** Statistically significant difference detected, "
+                "but magnitude is small. Monitor closely."
             )
         else:
             st.success(
