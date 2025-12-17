@@ -49,17 +49,29 @@ def render():
             views = float(row["views"]) if pd.notna(row["views"]) else 0.0
             likes = float(row["likes"]) if pd.notna(row["likes"]) else 0.0
             comments = float(row["comments"]) if pd.notna(row["comments"]) else 0.0
-            duration = float(row["duration_seconds"]) if pd.notna(row["duration_seconds"]) else 300.0
+            duration = (
+                float(row["duration_seconds"])
+                if pd.notna(row["duration_seconds"])
+                else 300.0
+            )
             title = str(row["title"]) if pd.notna(row["title"]) else ""
-            
+
             # Calculate features
             video_age_hours = 24.0
             views_2h = views * 0.2
             log_start_views = np.log1p(max(0, views_2h))
             log_duration = np.log1p(max(1, duration))
-            ivs = log_start_views / np.log1p(video_age_hours) if video_age_hours > 0 else 0.0
-            interaction_density = np.log1p(likes + comments * 2) / np.log1p(views + 1) if views > 0 else 0.0
-            
+            ivs = (
+                log_start_views / np.log1p(video_age_hours)
+                if video_age_hours > 0
+                else 0.0
+            )
+            interaction_density = (
+                np.log1p(likes + comments * 2) / np.log1p(views + 1)
+                if views > 0
+                else 0.0
+            )
+
             vel_payload = {
                 "log_start_views": float(log_start_views),
                 "log_duration": float(log_duration),
@@ -73,18 +85,22 @@ def render():
                 "publish_day": int(row["time"].dayofweek),
                 "is_weekend": 1 if row["time"].dayofweek >= 5 else 0,
                 "title_len": int(len(title)),
-                "caps_ratio": float(sum(1 for c in title if c.isupper()) / (len(title) + 1)) if title else 0.0,
+                "caps_ratio": (
+                    float(sum(1 for c in title if c.isupper()) / (len(title) + 1))
+                    if title
+                    else 0.0
+                ),
                 "exclamation_count": int(title.count("!")),
                 "question_count": int(title.count("?")),
                 "has_digits": 1 if any(c.isdigit() for c in title) else 0,
                 "category_id": -1,
             }
-            
+
             resp = client.predict_velocity(vel_payload)
             if resp and "prediction" in resp and resp["prediction"] is not None:
                 results["velocity"]["pred"].append(resp["prediction"])
                 results["velocity"]["true"].append(float(views))
-        except Exception as e:
+        except Exception:
             # Silently skip on errors to avoid spam
             pass
 
@@ -96,7 +112,7 @@ def render():
             likes = float(row["likes"]) if pd.notna(row["likes"]) else 0.0
             comments = float(row["comments"]) if pd.notna(row["comments"]) else 0.0
             title = str(row["title"]) if pd.notna(row["title"]) else ""
-            
+
             engagement = (likes + comments) / (views + 1)
             is_clickbait_gt = 1 if (views > 100 and engagement < 0.05) else 0
 
@@ -120,7 +136,9 @@ def render():
         # --- 3. Genre Model ---
         # Ground Truth: Simple keyword matching on tags (Heuristic)
         try:
-            tags_str = str(row.get("tags", "")).lower() if pd.notna(row.get("tags")) else ""
+            tags_str = (
+                str(row.get("tags", "")).lower() if pd.notna(row.get("tags")) else ""
+            )
             if "minecraft" in tags_str:
                 genre_gt = "Gaming"
             elif "music" in tags_str:
@@ -156,22 +174,36 @@ def render():
             views = float(row["views"]) if pd.notna(row["views"]) else 0.0
             likes = float(row["likes"]) if pd.notna(row["likes"]) else 0.0
             comments = float(row["comments"]) if pd.notna(row["comments"]) else 0.0
-            duration = float(row["duration_seconds"]) if pd.notna(row["duration_seconds"]) else 300.0
+            duration = (
+                float(row["duration_seconds"])
+                if pd.notna(row["duration_seconds"])
+                else 300.0
+            )
             title = str(row["title"]) if pd.notna(row["title"]) else ""
-            
+
             is_viral_gt = 1 if views > 10000 else 0
 
             # Calculate viral features
             video_age_hours = 24.0
             view_velocity = views / video_age_hours if video_age_hours > 0 else 0.0
             like_velocity = likes / video_age_hours if video_age_hours > 0 else 0.0
-            comment_velocity = comments / video_age_hours if video_age_hours > 0 else 0.0
+            comment_velocity = (
+                comments / video_age_hours if video_age_hours > 0 else 0.0
+            )
             log_start_views = np.log1p(views)
             like_ratio = likes / (views + 1) if views > 0 else 0.0
             comment_ratio = comments / (views + 1) if views > 0 else 0.0
-            ivs = log_start_views / np.log1p(video_age_hours) if video_age_hours > 0 else 0.0
-            interaction_density = np.log1p(likes + comments * 2) / np.log1p(views + 1) if views > 0 else 0.0
-            
+            ivs = (
+                log_start_views / np.log1p(video_age_hours)
+                if video_age_hours > 0
+                else 0.0
+            )
+            interaction_density = (
+                np.log1p(likes + comments * 2) / np.log1p(views + 1)
+                if views > 0
+                else 0.0
+            )
+
             viral_payload = {
                 "view_velocity": float(view_velocity),
                 "like_velocity": float(like_velocity),
@@ -186,7 +218,11 @@ def render():
                 "initial_virality_slope": float(ivs),
                 "interaction_density": float(interaction_density),
                 "title_len": int(len(title)),
-                "caps_ratio": float(sum(1 for c in title if c.isupper()) / (len(title) + 1)) if title else 0.0,
+                "caps_ratio": (
+                    float(sum(1 for c in title if c.isupper()) / (len(title) + 1))
+                    if title
+                    else 0.0
+                ),
                 "has_digits": 1 if any(c.isdigit() for c in title) else 0,
             }
             resp = client.predict_viral(viral_payload)
@@ -203,8 +239,12 @@ def render():
             views = float(row["views"]) if pd.notna(row["views"]) else 0.0
             likes = float(row["likes"]) if pd.notna(row["likes"]) else 0.0
             comments = float(row["comments"]) if pd.notna(row["comments"]) else 0.0
-            duration = float(row["duration_seconds"]) if pd.notna(row["duration_seconds"]) else 300.0
-            
+            duration = (
+                float(row["duration_seconds"])
+                if pd.notna(row["duration_seconds"])
+                else 300.0
+            )
+
             anom_payload = {
                 "view_count": int(views),
                 "like_count": int(likes),

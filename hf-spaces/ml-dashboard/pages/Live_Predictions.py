@@ -146,13 +146,21 @@ def render():
         st.subheader("Viral Trend Probability")
         col1, col2 = st.columns(2)
         with col1:
-            v_views = st.number_input("Views (Current)", min_value=0, value=100, step=10)
+            v_views = st.number_input(
+                "Views (Current)", min_value=0, value=100, step=10
+            )
             v_likes = st.number_input("Likes (Current)", min_value=0, value=10, step=1)
-            v_comments = st.number_input("Comments (Current)", min_value=0, value=2, step=1)
-            v_duration = st.number_input("Duration (s)", min_value=1, value=300, step=30)
+            v_comments = st.number_input(
+                "Comments (Current)", min_value=0, value=2, step=1
+            )
+            v_duration = st.number_input(
+                "Duration (s)", min_value=1, value=300, step=30
+            )
         with col2:
             v_title = st.text_input("Title", "Viral Video Candidate")
-            v_age_hours = st.number_input("Video Age (Hours)", min_value=0.1, value=2.0, step=0.5)
+            v_age_hours = st.number_input(
+                "Video Age (Hours)", min_value=0.1, value=2.0, step=0.5
+            )
             v_hour = st.slider("Publish Hour", 0, 23, 12)
 
         if st.button("Predict Viral Status"):

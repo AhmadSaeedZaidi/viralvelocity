@@ -26,11 +26,23 @@ class VelocityPredictor(BaseModelWrapper):
         if not self.is_loaded or self.model is None:
             return {}
         feature_names = [
-            "hour_sin", "hour_cos", "publish_day", "is_weekend",
-            "log_start_views", "log_duration", "initial_virality_slope",
-            "interaction_density", "like_view_ratio", "comment_view_ratio",
-            "video_age_hours", "title_len", "caps_ratio", "exclamation_count",
-            "question_count", "has_digits", "category_id"
+            "hour_sin",
+            "hour_cos",
+            "publish_day",
+            "is_weekend",
+            "log_start_views",
+            "log_duration",
+            "initial_virality_slope",
+            "interaction_density",
+            "like_view_ratio",
+            "comment_view_ratio",
+            "video_age_hours",
+            "title_len",
+            "caps_ratio",
+            "exclamation_count",
+            "question_count",
+            "has_digits",
+            "category_id",
         ]
         try:
             # XGBoost stores importances
@@ -48,7 +60,7 @@ class VelocityPredictor(BaseModelWrapper):
             # initial_virality_slope, interaction_density, like_view_ratio,
             #  comment_view_ratio, video_age_hours, title_len, caps_ratio,
             # exclamation_count, question_count, has_digits, category_id
-            
+
             features = np.array(
                 [
                     [

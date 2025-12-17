@@ -33,12 +33,17 @@ async def explain_model(model_name: str, request: Request):
     model = request.app.state.models.get(model_name)
     if not model:
         raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
-    
+
     if not model.is_loaded:
-        raise HTTPException(status_code=503, detail=f"Model '{model_name}' is not loaded")
+        raise HTTPException(
+            status_code=503, detail=f"Model '{model_name}' is not loaded"
+        )
 
     importance = model.get_feature_importance()
     if not importance:
-        raise HTTPException(status_code=404, detail=f"Feature importance not available for '{model_name}'")
-    
+        raise HTTPException(
+            status_code=404,
+            detail=f"Feature importance not available for '{model_name}'",
+        )
+
     return importance

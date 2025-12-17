@@ -66,8 +66,10 @@ def render():
 
         if internal_name == "velocity":
             st.info(
-                ("**Insight:** 'log_start_views' and "
-                "'initial_virality_slope' are typically dominant predictors.")
+                (
+                    "**Insight:** 'log_start_views' and "
+                    "'initial_virality_slope' are typically dominant predictors."
+                )
             )
 
     st.divider()
