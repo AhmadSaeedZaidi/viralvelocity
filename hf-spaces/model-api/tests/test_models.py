@@ -1,5 +1,6 @@
 import pytest
 
+from app.core.config import settings
 from app.models import (
     AnomalyDetector,
     ClickbaitDetector,
@@ -16,7 +17,6 @@ from app.schemas import (
     VelocityInput,
     ViralInput,
 )
-from app.core.config import settings
 
 # --- Fixtures for reusable input data ---
 
