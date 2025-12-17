@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Any
 
 import joblib
@@ -24,6 +25,25 @@ class BaseModelWrapper:
     def load(self):
         """Loads model from HF Hub or initializes a mock for the demo."""
         try:
+            # Ensure cache dir is present and writable. Spaces often have read-only repo FS.
+            cache_dir = settings.MODEL_DIR
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+                testfile = os.path.join(cache_dir, ".write_test")
+                with open(testfile, "w", encoding="utf-8") as f:
+                    f.write("ok")
+                os.remove(testfile)
+            except Exception as dir_err:
+                fallback = "/tmp/hf_hub_cache"
+                logger.warning(
+                    "Configured MODEL_DIR '%s' is not writable (%s). Falling back to '%s'.",
+                    cache_dir,
+                    dir_err,
+                    fallback,
+                )
+                os.makedirs(fallback, exist_ok=True)
+                cache_dir = fallback
+
             # 1. Try to download from Hugging Face Hub
             logger.info(
                 f"Attempting to download {self.name} from HF Hub: "
@@ -34,7 +54,7 @@ class BaseModelWrapper:
                 repo_id=f"{settings.HF_USERNAME}/{settings.HF_MODEL_REPO}",
                 filename=self.repo_path,
                 token=settings.HF_TOKEN or None, # Use token if available, else public
-                cache_dir=settings.MODEL_DIR
+                cache_dir=cache_dir,
             )
             
             self.model = joblib.load(model_path)
@@ -42,7 +62,14 @@ class BaseModelWrapper:
             logger.info(f"Successfully loaded real model: {self.name}")
 
         except (EntryNotFoundError, RepositoryNotFoundError, Exception) as e:
-            logger.warning(f"Failed to load {self.name} from Hub: {e}")
+            logger.warning(
+                "Failed to load %s from Hub (repo=%s/%s, path=%s): %s",
+                self.name,
+                settings.HF_USERNAME,
+                settings.HF_MODEL_REPO,
+                self.repo_path,
+                e,
+            )
             
             if settings.ENABLE_MOCK_INFERENCE:
                 logger.info(f"Initializing MOCK for {self.name}.")

@@ -6,6 +6,9 @@ from .base import BaseModelWrapper
 
 
 class VelocityPredictor(BaseModelWrapper):
+    def __init__(self, name: str, repo_path: str = "velocity/model.pkl"):
+        super().__init__(name, repo_path)
+
     def _init_mock_model(self):
         self.model = xgb.XGBRegressor(n_estimators=10, max_depth=3)
         X = np.random.rand(10, 5)

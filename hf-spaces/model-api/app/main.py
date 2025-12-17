@@ -42,18 +42,30 @@ async def lifespan(app: FastAPI):
         "anomaly": AnomalyDetector("anomaly_v1", "anomaly/model.pkl"),
     }
 
-    # Load them
+    load_errors: dict[str, str] = {}
     for name, model in model_instances.items():
-        model.load()
-        logger.info(f"Model {name} ready.")
+        try:
+            model.load()
+            logger.info("Model %s ready.", name)
+        except Exception as e:
+            load_errors[name] = str(e)
+            logger.exception("Model %s failed to load at startup: %s", name, e)
     
     # Attach to app state for access in Routers
     app.state.models = model_instances
+    app.state.model_load_errors = load_errors
+    if load_errors:
+        logger.warning(
+            "Startup completed with %d model load failures. Health will report degraded state.",
+            len(load_errors),
+        )
     
     yield
     
     # Cleanup
     app.state.models.clear()
+    if hasattr(app.state, "model_load_errors"):
+        app.state.model_load_errors.clear()
     logger.info("Shutting down... Models cleared.")
 
 app = FastAPI(
