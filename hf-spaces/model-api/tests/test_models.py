@@ -70,8 +70,9 @@ def viral_input():
         interaction_density=0.2,
         title_len=40,
         caps_ratio=0.1,
-        has_digits=0
+        has_digits=0,
     )
+
 
 # --- Tests ---
 
@@ -85,10 +86,11 @@ def test_velocity_model_initialization(velocity_input):
     assert isinstance(prediction, int)
     assert prediction >= 0
 
+
 def test_viral_trend_prediction(viral_input):
     model = ViralTrendPredictor("test_viral", repo_path="/tmp/mock")
     model.load()
-    
+
     label, prob = model.predict(viral_input)
     assert isinstance(label, int)
     assert isinstance(prob, float)

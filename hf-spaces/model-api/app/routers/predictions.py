@@ -98,7 +98,7 @@ async def predict_viral(input_data: ViralInput, request: Request):
 
     return {
         "model_name": "Viral Trend Classifier",
-        "prediction": "Viral" if is_viral == 1 else "Normal",
+        "prediction": "Viral" if is_viral == 1 else "Not Viral",
         "probability": prob,
         "processing_time_ms": duration,
     }

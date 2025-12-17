@@ -1,6 +1,7 @@
 import os
 from typing import Any, Dict
 
+import numpy as np
 import requests
 import streamlit as st
 
@@ -41,6 +42,20 @@ def _fix_hf_url(url: str) -> str:
     return url
 
 
+def _to_native(obj):
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: _to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_to_native(i) for i in obj]
+    return obj
+
+
 class YoutubeMLClient:
     def __init__(self):
         raw_url = get_api_url()
@@ -49,6 +64,7 @@ class YoutubeMLClient:
         # st.sidebar.caption(f"API: {self.base_url}")
 
     def _post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = _to_native(data)
         try:
             response = requests.post(
                 f"{self.base_url}/api/v1/predict/{endpoint}",
@@ -101,10 +117,16 @@ class YoutubeMLClient:
     def get_model_status(self):
         return self._get("models/status")
 
+    def get_model_explanation(self, model_name: str):
+        return self._get(f"models/{model_name}/explain")
+
     def evaluate_metrics(
         self, y_true: list, y_pred: list, task_type: str = "regression"
     ):
         """Calls the API to calculate standard ML metrics."""
+        y_true = _to_native(y_true)
+        y_pred = _to_native(y_pred)
+
         try:
             response = requests.post(
                 f"{self.base_url}/api/v1/evaluate",

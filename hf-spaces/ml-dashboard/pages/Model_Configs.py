@@ -20,6 +20,11 @@ def render():
     if status:
         # Convert nested JSON to DataFrame for nice table
         df = pd.DataFrame.from_dict(status, orient="index")
+
+        # Ensure loaded is boolean for CheckboxColumn
+        if "loaded" in df.columns:
+            df["loaded"] = df["loaded"].astype(bool)
+
         st.dataframe(
             df,
             column_config={

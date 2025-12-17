@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(prefix="/api/v1/models", tags=["Models"])
 
@@ -20,3 +20,18 @@ async def get_models_status(request: Request):
                 "backend": "mock" if getattr(wrapper, "is_mock", False) else "joblib",
             }
     return status
+
+
+@router.get("/{model_name}/explain", response_model=Dict[str, float])
+async def explain_model(model_name: str, request: Request):
+    """
+    Returns feature importance for the specified model if available.
+    """
+    if not hasattr(request.app.state, "models"):
+        raise HTTPException(status_code=503, detail="Models not initialized")
+
+    model = request.app.state.models.get(model_name)
+    if not model:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
+
+    return model.get_feature_importance()

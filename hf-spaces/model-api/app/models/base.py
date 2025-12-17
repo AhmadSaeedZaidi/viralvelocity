@@ -95,3 +95,7 @@ class BaseModelWrapper:
 
     def predict(self, data: Any) -> Any:
         raise NotImplementedError
+
+    def get_feature_importance(self) -> dict:
+        """Returns feature importance if applicable."""
+        return {}
