@@ -69,14 +69,16 @@ class BaseModelWrapper:
             self.is_loaded = True
             logger.info(f"Successfully loaded real model: {self.name}")
 
-        except (EntryNotFoundError, RepositoryNotFoundError, Exception) as e:
-            logger.warning(
-                "Failed to load %s from Hub (repo=%s/%s, path=%s): %s",
-                self.name,
-                settings.HF_USERNAME,
-                settings.HF_MODEL_REPO,
-                self.repo_path,
-                e,
+        except Exception as e:
+            # Catch ALL exceptions to ensure we log the full error details
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(
+                f"CRITICAL ERROR loading {self.name} from Hub.\n"
+                f"Repo: {settings.HF_USERNAME}/{settings.HF_MODEL_REPO}\n"
+                f"Path: {self.repo_path}\n"
+                f"Error: {e}\n"
+                f"Traceback: {error_details}"
             )
 
             if settings.ENABLE_MOCK_INFERENCE:
@@ -85,9 +87,8 @@ class BaseModelWrapper:
                 setattr(self, "is_mock", True)
                 self.is_loaded = True
             else:
-                raise FileNotFoundError(
-                    f"Model {self.name} not found and mocks disabled."
-                )
+                # Re-raise with a clear message so it shows up in API startup logs
+                raise RuntimeError(f"Failed to load model {self.name}: {e}") from e
 
     def _init_mock_model(self):
         """Initializes a dummy model for valid API responses."""

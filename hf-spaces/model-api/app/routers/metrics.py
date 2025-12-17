@@ -17,8 +17,8 @@ router = APIRouter(prefix="/api/v1", tags=["Metrics"])
 
 
 class EvaluationRequest(BaseModel):
-    y_true: List[float]
-    y_pred: List[float]
+    y_true: List[Any]
+    y_pred: List[Any]
     task_type: str = "regression"  # regression, classification, binary
 
 

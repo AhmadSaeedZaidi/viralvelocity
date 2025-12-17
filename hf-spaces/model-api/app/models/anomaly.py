@@ -39,3 +39,8 @@ class AnomalyDetector(BaseModelWrapper):
 
         is_anomaly = True if pred == -1 else False
         return is_anomaly, float(score)
+
+    def get_feature_importance(self) -> dict:
+        # Isolation Forest doesn't have standard feature importance
+        # But we can return empty or a message
+        return {}

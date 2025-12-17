@@ -42,3 +42,37 @@ class ViralTrendPredictor(BaseModelWrapper):
         pred = self.model.predict(features)[0]
         prob = self.model.predict_proba(features)[0][1]
         return int(pred), float(prob)
+
+    def get_feature_importance(self) -> dict:
+        if not self.is_loaded or self.model is None:
+            return {}
+        
+        feature_names = [
+            "like_velocity",
+            "comment_velocity",
+            "log_start_views",
+            "start_views",
+            "like_ratio",
+            "comment_ratio",
+            "video_age_hours",
+            "duration_seconds",
+            "hours_tracked",
+            "snapshots",
+            "initial_virality_slope",
+            "interaction_density",
+            "hour_sin",
+            "hour_cos",
+            "title_len",
+            "caps_ratio",
+            "has_digits",
+        ]
+        
+        try:
+            # Logistic Regression uses coefficients
+            if hasattr(self.model, "coef_"):
+                # coef_ is shape (1, n_features) for binary classification
+                importances = np.abs(self.model.coef_[0])
+                return dict(zip(feature_names, [float(i) for i in importances]))
+        except Exception:
+            pass
+        return {}

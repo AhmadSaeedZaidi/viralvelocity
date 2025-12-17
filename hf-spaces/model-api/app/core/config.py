@@ -36,9 +36,7 @@ class Settings(BaseModel):
 
     # Model Settings
     MODEL_DIR: str = _default_model_dir()
-    ENABLE_MOCK_INFERENCE: bool = (
-        os.getenv("ENABLE_MOCK_INFERENCE", "True").lower() == "true"
-    )
+    ENABLE_MOCK_INFERENCE: bool = False
 
     # Hardware/Performance
     MAX_THREADS: int = int(os.getenv("MAX_THREADS", "2"))

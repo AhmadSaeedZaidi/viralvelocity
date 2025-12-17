@@ -67,3 +67,27 @@ class ClickbaitDetector(BaseModelWrapper):
         pred = self.model.predict(features)[0]
         prob = self.model.predict_proba(features)[0][1]
         return int(pred), float(prob)
+
+    def get_feature_importance(self) -> dict:
+        if not self.is_loaded or self.model is None:
+            return {}
+        
+        feature_names = [
+            "title_len",
+            "caps_ratio",
+            "exclamation_count",
+            "question_count",
+            "has_digits",
+            "hour_sin",
+            "hour_cos",
+            "publish_day",
+            "is_weekend",
+        ]
+        
+        try:
+            if hasattr(self.model, "feature_importances_"):
+                importances = self.model.feature_importances_
+                return dict(zip(feature_names, [float(i) for i in importances]))
+        except Exception:
+            pass
+        return {}
