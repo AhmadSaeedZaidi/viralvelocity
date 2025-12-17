@@ -16,6 +16,7 @@ from app.schemas import (
     VelocityInput,
     ViralInput,
 )
+from app.core.config import settings
 
 # --- Fixtures for reusable input data ---
 
@@ -72,6 +73,15 @@ def viral_input():
         caps_ratio=0.1,
         has_digits=0,
     )
+
+
+@pytest.fixture(autouse=True)
+def enable_mock_inference():
+    """Force mock inference for all tests in this module."""
+    original_value = settings.ENABLE_MOCK_INFERENCE
+    settings.ENABLE_MOCK_INFERENCE = True
+    yield
+    settings.ENABLE_MOCK_INFERENCE = original_value
 
 
 # --- Tests ---
