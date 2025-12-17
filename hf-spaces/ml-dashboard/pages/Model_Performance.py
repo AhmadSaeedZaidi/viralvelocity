@@ -266,29 +266,41 @@ def render():
     # --- Calculate Metrics ---
 
     # Velocity
-    vel_metrics = client.evaluate_metrics(
-        results["velocity"]["true"], results["velocity"]["pred"], "regression"
-    )
+    if results["velocity"]["true"]:
+        vel_metrics = client.evaluate_metrics(
+            results["velocity"]["true"], results["velocity"]["pred"], "regression"
+        )
+    else:
+        vel_metrics = {}
     vel_mape = vel_metrics.get("mape", 0.0)
     vel_r2 = vel_metrics.get("r2", 0.0)
 
     # Clickbait
-    cb_metrics = client.evaluate_metrics(
-        results["clickbait"]["true"], results["clickbait"]["pred"], "classification"
-    )
+    if results["clickbait"]["true"]:
+        cb_metrics = client.evaluate_metrics(
+            results["clickbait"]["true"], results["clickbait"]["pred"], "classification"
+        )
+    else:
+        cb_metrics = {}
     cb_f1 = cb_metrics.get("f1", 0.0)
     cb_acc = cb_metrics.get("accuracy", 0.0)
 
     # Genre
-    genre_metrics = client.evaluate_metrics(
-        results["genre"]["true"], results["genre"]["pred"], "classification"
-    )
+    if results["genre"]["true"]:
+        genre_metrics = client.evaluate_metrics(
+            results["genre"]["true"], results["genre"]["pred"], "classification"
+        )
+    else:
+        genre_metrics = {}
     genre_acc = genre_metrics.get("accuracy", 0.0)
 
     # Viral
-    viral_metrics = client.evaluate_metrics(
-        results["viral"]["true"], results["viral"]["pred"], "classification"
-    )
+    if results["viral"]["true"]:
+        viral_metrics = client.evaluate_metrics(
+            results["viral"]["true"], results["viral"]["pred"], "classification"
+        )
+    else:
+        viral_metrics = {}
     viral_prec = viral_metrics.get("precision", 0.0)
     viral_rec = viral_metrics.get("recall", 0.0)
 

@@ -98,8 +98,10 @@ class YoutubeMLClient:
             if endpoint.startswith("models/") and e.response.status_code in [404, 503]:
                 return {}
             st.error(
-                (f"Failed to fetch {endpoint}: {e.response.status_code} - "
-                "{e.response.text if hasattr(e.response, 'text') else str(e)}")
+                (
+                    f"Failed to fetch {endpoint}: {e.response.status_code} - "
+                    "{e.response.text if hasattr(e.response, 'text') else str(e)}"
+                )
             )
             return {}
         except requests.exceptions.RequestException as e:

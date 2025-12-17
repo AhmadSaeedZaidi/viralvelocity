@@ -121,16 +121,16 @@ def render():
 
         if drift_detected:
             st.error(
-                "🚨 **Drift Alert:** The live data distribution has significantly "
+                "**Drift Alert:** The live data distribution has significantly "
                 "deviated from the training set. Recommended Action: **Retrain Model**."
             )
         elif is_significant:
             st.warning(
-                "⚠️ **Minor Shift:** Statistically significant difference detected, "
+                "**Minor Shift:** Statistically significant difference detected, "
                 "but magnitude is small. Monitor closely."
             )
         else:
-            st.success("✅ **Stable:** Data distribution is within expected bounds.")
+            st.success("**Stable:** Data distribution is within expected bounds.")
     else:
         st.warning("Insufficient data points for distribution plot.")
 

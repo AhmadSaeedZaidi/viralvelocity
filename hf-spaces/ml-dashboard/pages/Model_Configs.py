@@ -23,12 +23,21 @@ def render():
 
         # Ensure loaded is boolean for CheckboxColumn
         if "loaded" in df.columns:
-            df["loaded"] = df["loaded"].astype(bool)
+            # Robust conversion to boolean
+            df["loaded"] = df["loaded"].apply(
+                lambda x: (
+                    str(x).lower() in ("true", "1", "yes")
+                    if isinstance(x, (str, int))
+                    else bool(x)
+                )
+            )
 
         st.dataframe(
             df,
             column_config={
-                "loaded": st.column_config.CheckboxColumn("Memory Loaded"),
+                "loaded": st.column_config.CheckboxColumn(
+                    "Memory Loaded", default=False
+                ),
                 "type": "Model Class",
                 "backend": "Backend Engine",
             },

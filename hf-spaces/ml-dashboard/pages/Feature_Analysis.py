@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import YoutubeMLClient
+from utils.db_client import DatabaseClient
 
 
 def render():
@@ -43,8 +44,6 @@ def render():
         st.warning(
             f"Feature importance not available for {model_choice} or model not loaded."
         )
-        # Fallback for demo purposes if needed, or just stop
-        # features = {}
 
     if features:
         # Create Dataframe
@@ -77,25 +76,59 @@ def render():
     # --- Section 2: Feature Correlation Heatmap ---
     st.subheader("Feature Correlation Heatmap")
 
-    if features:
-        st.write("Analyze how input features interact with each other.")
-        # Generate dummy correlation matrix based on actual features
-        cols = list(features.keys())
-        # ... (rest of code using cols)
-        data = np.random.rand(len(cols), len(cols))
-        # Make it symmetric for a valid correlation matrix
-        corr_matrix = (data + data.T) / 2
-        np.fill_diagonal(corr_matrix, 1.0)
+    try:
+        db = DatabaseClient()
+        df_data = db.get_training_data_distribution()
 
-        fig_corr = go.Figure(
-            data=go.Heatmap(
-                z=corr_matrix, x=cols, y=cols, colorscale="RdBu", zmin=-1, zmax=1
+        if not df_data.empty:
+            st.write(
+                "Analyze how input features interact with each other."
             )
-        )
-        fig_corr.update_layout(xaxis_title="Features", yaxis_title="Features")
-        st.plotly_chart(fig_corr, use_container_width=True)
-    else:
-        st.write("Correlation data unavailable.")
+
+            # Calculate basic features to match some model inputs
+            # Avoid log(0)
+            df_data["log_views"] = np.log1p(df_data["views"])
+            df_data["log_likes"] = np.log1p(df_data["likes"])
+            df_data["log_comments"] = np.log1p(df_data["comments"])
+            df_data["log_duration"] = np.log1p(df_data["duration_seconds"])
+
+            # Select numeric columns relevant for analysis
+            cols_to_corr = [
+                "views",
+                "likes",
+                "comments",
+                "duration_seconds",
+                "log_views",
+                "log_likes",
+                "log_comments",
+                "log_duration",
+            ]
+
+            # Filter columns that exist
+            cols_to_corr = [c for c in cols_to_corr if c in df_data.columns]
+
+            numeric_df = df_data[cols_to_corr]
+
+            # Calculate correlation
+            corr_matrix = numeric_df.corr()
+
+            fig_corr = go.Figure(
+                data=go.Heatmap(
+                    z=corr_matrix.values,
+                    x=corr_matrix.columns,
+                    y=corr_matrix.columns,
+                    colorscale="RdBu",
+                    zmin=-1,
+                    zmax=1,
+                )
+            )
+            fig_corr.update_layout(xaxis_title="Features", yaxis_title="Features")
+            st.plotly_chart(fig_corr, use_container_width=True)
+        else:
+            st.warning("Insufficient data for correlation analysis.")
+
+    except Exception as e:
+        st.error(f"Could not calculate correlations: {e}")
 
 
 if __name__ == "__main__":

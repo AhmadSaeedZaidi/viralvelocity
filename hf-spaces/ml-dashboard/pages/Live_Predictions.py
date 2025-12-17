@@ -228,18 +228,23 @@ def render():
 
         if st.button("Scan for Anomalies"):
             payload = {
-                "view_count": a_views,
-                "like_count": a_likes,
-                "comment_count": a_comments,
-                "duration_seconds": a_dur,
+                "view_count": int(a_views),
+                "like_count": int(a_likes),
+                "comment_count": int(a_comments),
+                "duration_seconds": int(a_dur),
             }
             res = client.predict_anomaly(payload)
             if res:
-                if "ANOMALY" in res["prediction"]:
-                    st.error(f"⚠️ {res['prediction']}")
+                st.subheader("Anomaly Analysis")
+                prediction_text = res.get("prediction", "Unknown")
+                score = res.get("confidence_score", 0.0)
+
+                if "ANOMALY" in prediction_text:
+                    st.error(f"⚠️ {prediction_text} (Score: {score:.4f})")
                 else:
-                    st.success(f"✅ {res['prediction']}")
-                st.metric("Anomaly Score", f"{res['anomaly_score']:.4f}")
+                    st.success(f"✅ {prediction_text} (Score: {score:.4f})")
+
+                st.json(res)
 
 
 if __name__ == "__main__":
