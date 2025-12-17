@@ -97,6 +97,24 @@ class YoutubeMLClient:
 
     def get_model_status(self):
         return self._get("models/status")
+
+    def evaluate_metrics(self, y_true: list, y_pred: list, task_type: str = "regression"):
+        """Calls the API to calculate standard ML metrics."""
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/evaluate",
+                json={
+                    "y_true": y_true,
+                    "y_pred": y_pred,
+                    "task_type": task_type
+                },
+                timeout=5
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            st.error(f"Metric Evaluation Failed: {e}")
+            return {}
     
     def get_metrics(self):
         return self._get("metrics")

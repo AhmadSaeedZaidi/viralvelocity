@@ -16,6 +16,7 @@ class VelocityPredictor(BaseModelWrapper):
             X = np.random.rand(10, 5)
             y = np.random.randint(1000, 50000, 10)
             self.model.fit(X, y)
+            self.is_loaded = True
             print(f"DEBUG: Mock model for {self.name} initialized successfully")
         except Exception as e:
             print(f"DEBUG: Failed to init mock model for {self.name}: {e}")

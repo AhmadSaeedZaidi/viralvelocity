@@ -12,8 +12,8 @@ class DatabaseClient:
         print(f"✅ Connected to Database: {self.db_url.split('@')[-1]}") # Log connection (masking auth)
 
     @st.cache_data(ttl=300)  # Cache results for 5 minutes
-    def get_video_stats(_self, limit=1000):
-        """Fetch recent video statistics."""
+    def get_video_stats(_self, days=7):
+        """Fetch video statistics for the last N days."""
         query = text("""
             SELECT 
                 v.video_id,
@@ -25,11 +25,28 @@ class DatabaseClient:
                 vs.time
             FROM video_stats vs
             JOIN videos v ON vs.video_id = v.video_id
+            WHERE vs.time >= NOW() - INTERVAL ':days days'
             ORDER BY vs.time DESC
-            LIMIT :limit
         """)
+        # Note: SQLAlchemy text() parameter binding for INTERVAL is tricky, 
+        # so we'll use python f-string for the interval value safely since 'days' is an int.
+        safe_query = text(f"""
+            SELECT 
+                v.video_id,
+                v.title,
+                v.duration_seconds,
+                vs.views,
+                vs.likes,
+                vs.comments,
+                vs.time
+            FROM video_stats vs
+            JOIN videos v ON vs.video_id = v.video_id
+            WHERE vs.time >= NOW() - INTERVAL '{int(days)} days'
+            ORDER BY vs.time DESC
+        """)
+        
         with _self.engine.connect() as conn:
-            df = pd.read_sql(query, conn, params={"limit": limit})
+            df = pd.read_sql(safe_query, conn)
         return df
 
     @st.cache_data(ttl=3600)  # Cache for 1 hour
