@@ -3,78 +3,101 @@ import pandas as pd
 import plotly.express as px
 import plotly.figure_factory as ff
 import streamlit as st
+from utils.db_client import DatabaseClient
 
 def render():
     st.title("📉 Data Drift Monitor")
     st.markdown(
-        "Detect distribution shifts between **Training Data** and "
-        "**Live Production Data**."
+        "Detect distribution shifts between **Training Data** (Historical) and "
+        "**Live Production Data** (Last 24h)."
     )
+
+    try:
+        db = DatabaseClient()
+        ref_df = db.get_training_data_distribution()
+        curr_df = db.get_live_data_distribution()
+    except Exception as e:
+        st.error(f"Failed to connect to database: {e}")
+        return
+
+    if ref_df.empty or curr_df.empty:
+        st.warning("Not enough data in database to perform drift analysis.")
+        return
 
     # Feature Selector
-    feature = st.selectbox(
+    feature_map = {
+        "View Count Distribution": "views",
+        "Like Count Distribution": "likes",
+        "Comment Count Distribution": "comments",
+        "Video Duration": "duration_seconds"
+    }
+    
+    feature_label = st.selectbox(
         "Select Feature to Monitor",
-        ["View Count Distribution", "Engagement Score", "Title Length", "Video Duration"]
+        list(feature_map.keys())
     )
+    feature_col = feature_map[feature_label]
 
-    # Time Range
-    days = st.slider("Lookback Window (Days)", 7, 90, 30)
+    # Time Range (Visual only for now, query is fixed)
+    # days = st.slider("Lookback Window (Days)", 7, 90, 30)
 
     st.divider()
 
-    # --- Simulation Logic ---
-    # In a real app, you would query your Neon DB here.
-    # For now, we simulate a "Drift" scenario where production data has shifted.
+    # --- Real Data Logic ---
+    
+    # Clean data (drop NaNs)
+    ref_data = ref_df[feature_col].dropna().values
+    curr_data = curr_df[feature_col].dropna().values
 
-    np.random.seed(42)
-
-    # Generate Reference Data (Training) - Normal Distribution
-    ref_data = np.random.normal(loc=50, scale=10, size=1000)
-
-    # Generate Current Data (Production) - Shifted Mean (Drift!)
-    curr_data = np.random.normal(loc=55, scale=12, size=500)
+    # Log transform for skewed metrics (views, likes)
+    if feature_col in ["views", "likes", "comments"]:
+        ref_data = np.log1p(ref_data)
+        curr_data = np.log1p(curr_data)
+        st.caption("Note: Data is Log-Transformed (log1p) for better visualization.")
 
     # --- Visualization: Distribution Plot ---
-    st.subheader(f"Distribution Comparison: {feature}")
+    st.subheader(f"Distribution Comparison: {feature_label}")
 
-    hist_data = [ref_data, curr_data]
-    group_labels = ['Training Data (Reference)', 'Live Data (Current)']
-    colors = ['#3339FF', '#FF3333']
+    if len(ref_data) > 0 and len(curr_data) > 0:
+        hist_data = [ref_data, curr_data]
+        group_labels = ['Training Data (Reference)', 'Live Data (Current)']
+        colors = ['#3339FF', '#FF3333']
 
-    fig_dist = ff.create_distplot(
-        hist_data, group_labels, bin_size=2, 
-        colors=colors, show_rug=False
-    )
-    fig_dist.update_layout(title_text="Distribution Shift Detected")
-    st.plotly_chart(fig_dist, use_container_width=True)
-
-    # --- Statistical Test (KS Test Simulation) ---
-    st.subheader("Statistical Drift Metrics")
-
-    col1, col2, col3 = st.columns(3)
-
-    # Kolmogorov-Smirnov Statistic (Distance between distributions)
-    # 0.0 = Identical, 1.0 = Completely different
-    ks_stat = 0.15 
-    drift_detected = ks_stat > 0.10
-
-    with col1:
-        st.metric(
-            "KS Statistic", 
-            f"{ks_stat:.3f}", 
-            delta="Drift Detected" if drift_detected else "Stable",
-            delta_color="inverse"
+        fig_dist = ff.create_distplot(
+            hist_data, group_labels, bin_size=(max(ref_data.max(), curr_data.max()) - min(ref_data.min(), curr_data.min())) / 20, 
+            colors=colors, show_rug=False
         )
+        fig_dist.update_layout(title_text="Distribution Shift Detected")
+        st.plotly_chart(fig_dist, use_container_width=True)
 
-    with col2:
-        st.metric("Reference Mean", f"{np.mean(ref_data):.2f}")
+        # --- Statistical Test (KS Test Simulation) ---
+        st.subheader("Statistical Drift Metrics")
 
-    with col3:
-        st.metric(
-            "Current Mean", 
-            f"{np.mean(curr_data):.2f}", 
-            delta=f"{np.mean(curr_data) - np.mean(ref_data):.2f}"
-        )
+        col1, col2, col3 = st.columns(3)
+
+        # Kolmogorov-Smirnov Statistic
+        from scipy.stats import ks_2samp
+        ks_stat, p_value = ks_2samp(ref_data, curr_data)
+        drift_detected = p_value < 0.05 # Standard significance level
+
+        with col1:
+            st.metric(
+                "KS Statistic", 
+                f"{ks_stat:.3f}", 
+                delta="Drift Detected" if drift_detected else "Stable",
+                delta_color="inverse"
+            )
+            st.caption(f"P-Value: {p_value:.4f}")
+
+        with col2:
+            st.metric("Reference Mean (Log)", f"{np.mean(ref_data):.2f}")
+
+        with col3:
+            st.metric(
+                "Current Mean (Log)", 
+                f"{np.mean(curr_data):.2f}", 
+                delta=f"{np.mean(curr_data) - np.mean(ref_data):.2f}"
+            )
 
         if drift_detected:
             st.error(
@@ -85,27 +108,14 @@ def render():
             st.success(
                 "✅ **Stable:** Data distribution is within expected bounds."
             )
+    else:
+        st.warning("Insufficient data points for distribution plot.")
 
     st.divider()
 
-    # --- Timeline View ---
-    st.subheader("Drift Over Time")
-    dates = pd.date_range(end=pd.Timestamp.today(), periods=days)
-    drift_scores = np.linspace(0.02, 0.15, days) + np.random.normal(0, 0.01, days)
-
-    df_timeline = pd.DataFrame({"Date": dates, "Drift Score": drift_scores})
-
-    fig_timeline = px.line(
-        df_timeline, x="Date", y="Drift Score",
-        title="Drift Score Trend (Last 30 Days)",
-        markers=True
-    )
-    # Add threshold line
-    fig_timeline.add_hline(
-        y=0.10, line_dash="dash", line_color="red", 
-        annotation_text="Drift Threshold"
-    )
-    st.plotly_chart(fig_timeline, use_container_width=True)
+    # --- Timeline View (Placeholder for now as we need time-series aggregation) ---
+    # st.subheader("Drift Over Time")
+    # ... (Requires more complex query to get drift over time)
 
 if __name__ == "__main__":
     render()
