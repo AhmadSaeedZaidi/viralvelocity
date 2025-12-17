@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'hf-spaces/model-api/**'
+      - 'hf-spaces/ml-dashboard/**'
       - 'training/**'
       - 'tests/**'
       - '.github/workflows/**'
@@ -13,6 +14,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'hf-spaces/model-api/**'
+      - 'hf-spaces/ml-dashboard/**'
       - 'training/**'
       - 'tests/**'
       - '.github/workflows/**'
