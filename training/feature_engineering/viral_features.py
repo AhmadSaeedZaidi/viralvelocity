@@ -108,6 +108,7 @@ def prepare_viral_features(
         features_list.append(
             {
                 "is_viral": is_viral,
+                "view_velocity": view_velocity,  # Added view_velocity
                 "like_velocity": like_velocity,
                 "comment_velocity": comment_velocity,
                 "start_views": start_views,

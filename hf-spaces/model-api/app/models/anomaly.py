@@ -8,17 +8,28 @@ from .base import BaseModelWrapper
 class AnomalyDetector(BaseModelWrapper):
     def _init_mock_model(self):
         self.model = IsolationForest(contamination=0.1)
-        X = np.random.rand(20, 4)
+        # Mock training with 3 features to match real model
+        X = np.random.rand(20, 3)
         self.model.fit(X)
 
     def predict(self, input_data: AnomalyInput):
+        # Features must match training/feature_engineering/base_features.py:
+        # prepare_anomaly_features
+        # Features: ["log_views", "like_view_ratio", "comment_view_ratio"]
+
+        log_views = np.log1p(input_data.view_count)
+
+        # Avoid division by zero
+        safe_views = max(1, input_data.view_count)
+        like_view_ratio = input_data.like_count / safe_views
+        comment_view_ratio = input_data.comment_count / safe_views
+
         features = np.array(
             [
                 [
-                    input_data.view_count,
-                    input_data.like_count,
-                    input_data.comment_count,
-                    input_data.duration_seconds,
+                    log_views,
+                    like_view_ratio,
+                    comment_view_ratio,
                 ]
             ]
         )

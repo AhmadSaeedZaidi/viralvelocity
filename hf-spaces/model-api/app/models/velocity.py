@@ -20,6 +20,7 @@ class VelocityPredictor(BaseModelWrapper):
             print(f"DEBUG: Mock model for {self.name} initialized successfully")
         except Exception as e:
             print(f"DEBUG: Failed to init mock model for {self.name}: {e}")
+            self.model = None
             raise e
 
     def get_feature_importance(self) -> dict:
@@ -53,6 +54,10 @@ class VelocityPredictor(BaseModelWrapper):
             return {}
 
     def predict(self, input_data: VelocityInput):
+        if not self.is_loaded or self.model is None:
+            print(f"Error: Model {self.name} is not loaded or is None.")
+            return 0
+
         try:
             # Construct feature array in the exact order expected by the model
             # Order from pipeline: hour_sin,

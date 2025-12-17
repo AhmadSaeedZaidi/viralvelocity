@@ -61,7 +61,7 @@ def render():
             color_continuous_scale="Viridis",
             labels={"Importance": "Importance Score", "Feature": "Feature Name"},
         )
-        st.plotly_chart(fig_imp, use_container_width=True)
+        st.plotly_chart(fig_imp, width="stretch")
 
         if internal_name == "velocity":
             st.info(
@@ -81,9 +81,7 @@ def render():
         df_data = db.get_training_data_distribution()
 
         if not df_data.empty:
-            st.write(
-                "Analyze how input features interact with each other."
-            )
+            st.write("Analyze how input features interact with each other.")
 
             # Calculate basic features to match some model inputs
             # Avoid log(0)
@@ -123,7 +121,7 @@ def render():
                 )
             )
             fig_corr.update_layout(xaxis_title="Features", yaxis_title="Features")
-            st.plotly_chart(fig_corr, use_container_width=True)
+            st.plotly_chart(fig_corr, width="stretch")
         else:
             st.warning("Insufficient data for correlation analysis.")
 

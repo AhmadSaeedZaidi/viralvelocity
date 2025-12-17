@@ -8,3 +8,4 @@ scipy
 sqlalchemy
 psycopg2-binary
 statsmodels
+scikit-learn

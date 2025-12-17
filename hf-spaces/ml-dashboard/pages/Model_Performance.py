@@ -309,19 +309,19 @@ def render():
     with col1:
         st.plotly_chart(
             plot_accuracy_metric("Velocity MAPE (Live)", vel_mape, 15.0),
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(f"R² Score: {vel_r2:.3f}")
     with col2:
         st.plotly_chart(
             plot_accuracy_metric("Clickbait F1 (Live)", cb_f1, 0.85),
-            use_container_width=True,
+            width="stretch",
         )
         st.caption(f"Accuracy: {cb_acc:.3f}")
     with col3:
         st.plotly_chart(
             plot_accuracy_metric("Genre Accuracy (Live)", genre_acc, 0.91),
-            use_container_width=True,
+            width="stretch",
         )
 
     st.divider()
@@ -336,7 +336,7 @@ def render():
         title="Recent View Counts (Real Data)",
         labels={"time": "Time", "views": "View Count"},
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.divider()
 
@@ -375,7 +375,7 @@ def render():
                 trendline="ols",
                 labels={"Actual": "Actual Views", "Predicted": "Predicted Views"},
             )
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            st.plotly_chart(fig_scatter, width="stretch")
 
             residuals = np.array(results["velocity"]["true"]) - np.array(
                 results["velocity"]["pred"]
@@ -387,7 +387,7 @@ def render():
                 labels={"value": "Residual (Actual - Predicted)"},
             )
             fig_resid.update_layout(yaxis_title="Frequency")
-            st.plotly_chart(fig_resid, use_container_width=True)
+            st.plotly_chart(fig_resid, width="stretch")
         else:
             st.warning("No data for Velocity evaluation.")
 
@@ -412,7 +412,7 @@ def render():
                 text_auto=True,
                 title="Confusion Matrix",
             )
-            st.plotly_chart(fig_cm, use_container_width=True)
+            st.plotly_chart(fig_cm, width="stretch")
         else:
             st.warning("No data for Clickbait evaluation.")
 
@@ -431,7 +431,7 @@ def render():
                 labels={"index": "Genre", "value": "Count"},
             )
             fig_bar.update_layout(showlegend=False)
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, width="stretch")
         else:
             st.warning("No data for Genre evaluation.")
 
@@ -457,7 +457,7 @@ def render():
             fig_anom.add_vline(
                 x=0.6, line_dash="dash", line_color="red", annotation_text="Threshold"
             )
-            st.plotly_chart(fig_anom, use_container_width=True)
+            st.plotly_chart(fig_anom, width="stretch")
         else:
             st.warning("No data for Anomaly evaluation.")
 
