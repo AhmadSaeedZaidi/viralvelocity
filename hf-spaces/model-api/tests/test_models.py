@@ -25,19 +25,23 @@ from app.schemas import (
 @pytest.fixture
 def velocity_input():
     return VelocityInput(
-        video_stats_24h=VideoStats(
-            view_count=1000,
-            like_count=100,
-            comment_count=10,
-            duration_seconds=300,
-            published_hour=14,
-            published_day_of_week=2,
-        ),
-        channel_stats=ChannelStats(
-            id="123", avg_views_last_5=5000, subscriber_count=1000
-        ),
-        slope_views=10.5,
-        slope_engagement=0.5,
+        log_start_views=6.9,
+        log_duration=5.7,
+        initial_virality_slope=1.2,
+        interaction_density=0.1,
+        like_view_ratio=0.05,
+        comment_view_ratio=0.01,
+        video_age_hours=2.0,
+        hour_sin=0.5,
+        hour_cos=-0.8,
+        publish_day=1,
+        is_weekend=0,
+        title_len=50,
+        caps_ratio=0.1,
+        exclamation_count=1,
+        question_count=0,
+        has_digits=0,
+        category_id=10
     )
 
 
@@ -105,7 +109,21 @@ def test_viral_trend_prediction():
     model.load()
 
     input_data = ViralInput(
-        discovery_rank_history=[10, 8, 6, 4, 2], rank_velocity=-2.0  # Climbing rank
+        view_velocity=100.0,
+        like_velocity=10.0,
+        comment_velocity=2.0,
+        like_ratio=0.1,
+        comment_ratio=0.02,
+        log_start_views=5.0,
+        video_age_hours=2.0,
+        duration_seconds=60,
+        hour_sin=0.5,
+        hour_cos=-0.5,
+        initial_virality_slope=1.5,
+        interaction_density=0.2,
+        title_len=30,
+        caps_ratio=0.2,
+        has_digits=0
     )
     label, prob = model.predict(input_data)
 

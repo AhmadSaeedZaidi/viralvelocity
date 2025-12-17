@@ -28,21 +28,23 @@ def test_model_status(client):
 
 def test_predict_velocity_endpoint(client):
     payload = {
-        "video_stats_24h": {
-            "view_count": 1000,
-            "like_count": 100,
-            "comment_count": 50,
-            "duration_seconds": 300,
-            "published_hour": 12,
-            "published_day_of_week": 1,
-        },
-        "channel_stats": {
-            "id": "channel_1",
-            "avg_views_last_5": 2000,
-            "subscriber_count": 500,
-        },
-        "slope_views": 10.0,
-        "slope_engagement": 0.5,
+        "log_start_views": 6.9,
+        "log_duration": 5.7,
+        "initial_virality_slope": 1.2,
+        "interaction_density": 0.1,
+        "like_view_ratio": 0.05,
+        "comment_view_ratio": 0.01,
+        "video_age_hours": 2.0,
+        "hour_sin": 0.5,
+        "hour_cos": -0.8,
+        "publish_day": 1,
+        "is_weekend": 0,
+        "title_len": 50,
+        "caps_ratio": 0.1,
+        "exclamation_count": 1,
+        "question_count": 0,
+        "has_digits": 0,
+        "category_id": 10
     }
     response = client.post("/api/v1/predict/velocity", json=payload)
     assert response.status_code == 200
