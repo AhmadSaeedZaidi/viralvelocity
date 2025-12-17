@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 
 from app.core.config import settings
 from app.models import (
@@ -78,10 +79,9 @@ def viral_input():
 @pytest.fixture(autouse=True)
 def enable_mock_inference():
     """Force mock inference for all tests in this module."""
-    original_value = settings.ENABLE_MOCK_INFERENCE
-    settings.ENABLE_MOCK_INFERENCE = True
-    yield
-    settings.ENABLE_MOCK_INFERENCE = original_value
+    # Patch the settings object where it is used in base.py
+    with patch("app.models.base.settings.ENABLE_MOCK_INFERENCE", True):
+        yield
 
 
 # --- Tests ---

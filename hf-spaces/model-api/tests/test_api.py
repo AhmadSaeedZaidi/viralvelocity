@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
@@ -8,13 +9,9 @@ from app.main import app
 @pytest.fixture(scope="module")
 def client():
     # Enable mock inference for API tests so we don't need real models
-    original_value = settings.ENABLE_MOCK_INFERENCE
-    settings.ENABLE_MOCK_INFERENCE = True
-
-    with TestClient(app) as c:
-        yield c
-
-    settings.ENABLE_MOCK_INFERENCE = original_value
+    with patch("app.models.base.settings.ENABLE_MOCK_INFERENCE", True):
+        with TestClient(app) as c:
+            yield c
 
 
 def test_health_check(client):
