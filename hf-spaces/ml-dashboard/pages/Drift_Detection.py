@@ -21,7 +21,11 @@ def render():
         return
 
     if ref_df.empty or curr_df.empty:
-        st.warning("Not enough data in database to perform drift analysis.")
+        st.warning(
+            "Not enough data in database to perform drift analysis.\n\n"
+            f"- **Training Data (Older than 24h):** {len(ref_df)} records\n"
+            f"- **Live Data (Last 24h):** {len(curr_df)} records"
+        )
         return
 
     # Feature Selector

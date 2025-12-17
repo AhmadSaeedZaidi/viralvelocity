@@ -4,8 +4,8 @@ from typing import Any, Dict
 import requests
 import streamlit as st
 
-# Default to local if not set, or use the public HF Space URL
-DEFAULT_API_URL = "http://localhost:7860"
+# Default to local uvicorn port
+DEFAULT_API_URL = "http://localhost:8000"
 
 def get_api_url() -> str:
     """Retrieves the API URL from secrets or environment variables."""
@@ -20,9 +20,30 @@ def get_api_url() -> str:
 
     return os.getenv("API_URL", DEFAULT_API_URL)
 
+def _fix_hf_url(url: str) -> str:
+    """Converts HF Spaces web URL to direct API URL if needed."""
+    # Example: https://huggingface.co/spaces/Rolaficus/ViralVelocity-api 
+    # Becomes: https://rolaficus-viralvelocity-api.hf.space
+    if "huggingface.co/spaces/" in url:
+        try:
+            # Remove protocol and split
+            clean_url = url.replace("https://", "").replace("http://", "")
+            parts = clean_url.split("huggingface.co/spaces/")[-1].split("/")
+            if len(parts) >= 2:
+                user = parts[0]
+                space = parts[1]
+                # HF Spaces URLs are lowercase and use hyphens
+                return f"https://{user.lower()}-{space.lower()}.hf.space"
+        except Exception:
+            return url # Fallback to original if parsing fails
+    return url
+
 class YoutubeMLClient:
     def __init__(self):
-        self.base_url = get_api_url().rstrip("/")
+        raw_url = get_api_url()
+        self.base_url = _fix_hf_url(raw_url).rstrip("/")
+        # Optional: Display connected API in sidebar for debugging
+        # st.sidebar.caption(f"API: {self.base_url}")
     
     def _post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
         try:

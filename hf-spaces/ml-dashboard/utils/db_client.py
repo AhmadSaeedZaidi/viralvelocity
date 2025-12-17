@@ -39,7 +39,8 @@ class DatabaseClient:
         In a real scenario, this might come from a separate 'training_set' table
         or a specific time range in the past.
         """
-        # For now, we'll just take older data as "reference"
+        # Modified: Take data older than 24 hours as reference (instead of 7 days)
+        # to ensure we have data to show even in early stages of deployment.
         query = text("""
             SELECT 
                 vs.views,
@@ -48,7 +49,7 @@ class DatabaseClient:
                 v.duration_seconds
             FROM video_stats vs
             JOIN videos v ON vs.video_id = v.video_id
-            WHERE vs.time < NOW() - INTERVAL '7 days'
+            WHERE vs.time < NOW() - INTERVAL '24 hours'
             LIMIT 5000
         """)
         with _self.engine.connect() as conn:
