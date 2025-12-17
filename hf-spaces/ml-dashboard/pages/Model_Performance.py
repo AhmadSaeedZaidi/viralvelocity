@@ -67,6 +67,77 @@ def render():
     fig = px.line(df, x='time', y='views', title='Recent View Counts (Real Data)')
     st.plotly_chart(fig, use_container_width=True)
 
+    st.divider()
+
+    # --- Advanced Model Stats (Simulated based on Training Pipelines) ---
+    st.subheader("Training Pipeline Metrics (Simulated)")
+    
+    tab1, tab2, tab3 = st.tabs(["Velocity (Regression)", "Clickbait (Classification)", "Genre (Multi-class)"])
+    
+    with tab1:
+        st.markdown("### Velocity Predictor Performance")
+        # Scatter plot: Actual vs Predicted
+        fig_scatter = px.scatter(
+            x=y_true, y=y_pred, 
+            labels={'x': 'Actual Views', 'y': 'Predicted Views'},
+            title="Actual vs Predicted Views (Log Scale)",
+            log_x=True, log_y=True,
+            trendline="ols"
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+        
+        # Residual Plot
+        residuals = y_true - y_pred
+        fig_resid = px.histogram(
+            residuals, nbins=30, 
+            title="Residual Distribution (Errors)",
+            labels={'value': 'Residual (Actual - Predicted)'}
+        )
+        st.plotly_chart(fig_resid, use_container_width=True)
+
+    with tab2:
+        st.markdown("### Clickbait Detector Performance")
+        # Confusion Matrix (Simulated)
+        cm_data = [[85, 15], [10, 90]] # TP, FP, FN, TN
+        fig_cm = px.imshow(
+            cm_data,
+            labels=dict(x="Predicted", y="Actual", color="Count"),
+            x=['Solid', 'Clickbait'],
+            y=['Solid', 'Clickbait'],
+            text_auto=True,
+            title="Confusion Matrix"
+        )
+        st.plotly_chart(fig_cm, use_container_width=True)
+        
+        # ROC Curve (Simulated)
+        fpr = [0, 0.1, 0.2, 0.5, 0.8, 1]
+        tpr = [0, 0.8, 0.9, 0.95, 0.98, 1]
+        fig_roc = px.area(
+            x=fpr, y=tpr,
+            title=f"ROC Curve (AUC = 0.92)",
+            labels=dict(x='False Positive Rate', y='True Positive Rate'),
+        )
+        fig_roc.add_shape(
+            type='line', line=dict(dash='dash'),
+            x0=0, x1=1, y0=0, y1=1
+        )
+        st.plotly_chart(fig_roc, use_container_width=True)
+
+    with tab3:
+        st.markdown("### Genre Classifier Performance")
+        # Class-wise F1 Scores
+        genres = ['Gaming', 'Tech', 'Vlog', 'Education', 'Music']
+        f1_scores = [0.95, 0.88, 0.82, 0.91, 0.85]
+        
+        fig_bar = px.bar(
+            x=genres, y=f1_scores,
+            title="F1 Score by Genre",
+            labels={'x': 'Genre', 'y': 'F1 Score'},
+            color=f1_scores,
+            color_continuous_scale='Viridis'
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
     st.write(
         """
     **Note:** Currently, the database stores *actual* video statistics. 

@@ -9,6 +9,7 @@ class DatabaseClient:
         if not self.db_url:
             raise ValueError("DATABASE_URL environment variable is not set.")
         self.engine = create_engine(self.db_url)
+        print(f"✅ Connected to Database: {self.db_url.split('@')[-1]}") # Log connection (masking auth)
 
     @st.cache_data(ttl=300)  # Cache results for 5 minutes
     def get_video_stats(_self, limit=1000):

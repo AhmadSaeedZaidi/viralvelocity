@@ -119,15 +119,3 @@ def render():
 
 if __name__ == "__main__":
     render()
-
-fig_line = px.line(
-    df_timeline,
-    x="Date",
-    y="Drift Score",
-    title="KS Statistic Trend (30 Days)",
-)
-fig_line.add_hline(
-    y=0.10, line_dash="dash", line_color="red", annotation_text="Threshold"
-)
-
-st.plotly_chart(fig_line, use_container_width=True)
