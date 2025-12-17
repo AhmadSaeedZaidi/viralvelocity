@@ -1,5 +1,4 @@
 import streamlit as st
-from utils.api_client import get_model_metrics, get_model_list
 from pages import Drift_Detection, Feature_Analysis, Live_Predictions, Model_Configs, Model_Performance
 
 st.set_page_config(
