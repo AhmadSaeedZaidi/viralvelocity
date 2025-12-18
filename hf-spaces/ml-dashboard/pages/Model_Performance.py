@@ -365,6 +365,9 @@ def render():
         )
 
         if not eval_df.empty:
+            # Only add trendline if we have enough data points to avoid warnings
+            trendline_arg = "ols" if len(eval_df) > 2 else None
+            
             fig_scatter = px.scatter(
                 eval_df,
                 x="Actual",
@@ -372,7 +375,7 @@ def render():
                 title="Actual vs Predicted Views (Log Scale)",
                 log_x=True,
                 log_y=True,
-                trendline="ols",
+                trendline=trendline_arg,
                 labels={"Actual": "Actual Views", "Predicted": "Predicted Views"},
             )
             st.plotly_chart(fig_scatter, width="stretch")
