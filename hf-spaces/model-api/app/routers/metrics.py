@@ -47,7 +47,7 @@ async def evaluate_predictions(payload: EvaluationRequest):
 
     elif payload.task_type in ["classification", "binary"]:
         average = "binary" if payload.task_type == "binary" else "weighted"
-        
+
         try:
             y_pred_float = y_pred.astype(float)
             y_pred_class = np.round(y_pred_float)

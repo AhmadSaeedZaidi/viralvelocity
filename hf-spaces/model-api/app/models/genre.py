@@ -94,12 +94,13 @@ class GenreClassifier(BaseModelWrapper):
     def predict(self, input_data: GenreInput):
         # Match training/feature_engineering/text_features.py: prepare_text_features
         # It combines title and tags, then cleans them.
-        
+
         # 1. Combine
         raw_text = f"{input_data.title} {' '.join(input_data.tags)}"
-        
+
         # 2. Clean (Replicating clean_text from text_features.py)
         import re
+
         text = raw_text.lower()
         text = re.sub(r"http\S+|www\S+|https\S+", "", text, flags=re.MULTILINE)
         text = re.sub(r"[^\w\s]", " ", text)
@@ -109,7 +110,7 @@ class GenreClassifier(BaseModelWrapper):
             # Real Keras Model
             # 3. Vectorize
             vec = self.vectorizer.transform([text])
-            
+
             # 4. SVD Reduction
             reduced = self.pca.transform(vec)  # TruncatedSVD supports sparse input
 

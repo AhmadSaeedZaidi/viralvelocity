@@ -66,7 +66,7 @@ class ViralTrendPredictor(BaseModelWrapper):
     def get_feature_importance(self) -> dict:
         if not self.is_loaded or self.model is None:
             return {}
-        
+
         feature_names = [
             "like_velocity",
             "comment_velocity",
@@ -86,7 +86,7 @@ class ViralTrendPredictor(BaseModelWrapper):
             "caps_ratio",
             "has_digits",
         ]
-        
+
         try:
             # Logistic Regression uses coefficients
             if hasattr(self.model, "coef_"):

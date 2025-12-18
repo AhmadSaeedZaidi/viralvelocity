@@ -5,6 +5,7 @@ from pages import (
     Live_Predictions,
     Model_Configs,
     Model_Performance,
+    Predict_from_Video,
 )
 
 st.set_page_config(
@@ -15,6 +16,7 @@ st.sidebar.title("ML Dashboard Navigation")
 page = st.sidebar.radio(
     "Go to:",
     (
+        "Predict from Video",
         "Live Predictions",
         "Model Performance",
         "Feature Analysis",
@@ -23,7 +25,9 @@ page = st.sidebar.radio(
     ),
 )
 
-if page == "Live Predictions":
+if page == "Predict from Video":
+    Predict_from_Video.render()
+elif page == "Live Predictions":
     Live_Predictions.render()
 elif page == "Model Performance":
     Model_Performance.render()
