@@ -215,8 +215,8 @@ def render():
             }
             try:
                 pred = ml_client.predict("genre", payload)
-                genre = pred.get("predicted_genre", "Unknown")
-                conf = pred.get("confidence", 0.0)
+                genre = pred.get("prediction", "Unknown")
+                conf = pred.get("confidence_score", 0.0)
                 st.metric("Genre", genre, f"{conf:.1%}")
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -251,13 +251,15 @@ def render():
             payload = {"current_tags": current_tags}
             try:
                 pred = ml_client.predict("tags", payload)
-                # Response is a list of strings
-                if isinstance(pred, list) and pred:
-                    st.success(f"Recommended Tags: {', '.join(pred)}")
-                elif isinstance(pred, list):
+                # Response is a dict, tags are in 'prediction'
+                tags_list = pred.get("prediction", [])
+                
+                if isinstance(tags_list, list) and tags_list:
+                    st.success(f"Recommended Tags: {', '.join(tags_list)}")
+                elif isinstance(tags_list, list):
                     st.info("No specific recommendations found.")
                 else:
-                    st.warning("Unexpected response format.")
+                    st.warning(f"Unexpected response format: {type(tags_list)}")
             except Exception as e:
                 st.error(f"Error fetching tags: {e}")
         else:
