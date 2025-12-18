@@ -92,17 +92,28 @@ class GenreClassifier(BaseModelWrapper):
         self.model = None  # We use mock_mlp instead
 
     def predict(self, input_data: GenreInput):
-        text_data = f"{input_data.title} {' '.join(input_data.tags)}"
+        # Match training/feature_engineering/text_features.py: prepare_text_features
+        # It combines title and tags, then cleans them.
+        
+        # 1. Combine
+        raw_text = f"{input_data.title} {' '.join(input_data.tags)}"
+        
+        # 2. Clean (Replicating clean_text from text_features.py)
+        import re
+        text = raw_text.lower()
+        text = re.sub(r"http\S+|www\S+|https\S+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"[^\w\s]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
 
         if self.model:
             # Real Keras Model
-            vec = self.vectorizer.transform([text_data])
+            # 3. Vectorize
+            vec = self.vectorizer.transform([text])
+            
+            # 4. SVD Reduction
             reduced = self.pca.transform(vec)  # TruncatedSVD supports sparse input
 
-            # Keras model expects dense input usually, but let's check pipeline
-            # Pipeline: X_train_red = svd.fit_transform(X_train_tfidf)
-            # So input to model is output of SVD.
-
+            # 5. Predict
             probs = self.model.predict(reduced)[0]
             pred_idx = np.argmax(probs)
             confidence = float(probs[pred_idx])
@@ -112,7 +123,7 @@ class GenreClassifier(BaseModelWrapper):
 
         else:
             # Mock Model
-            vec = self.vectorizer.transform([text_data])
+            vec = self.vectorizer.transform([text])
             reduced = self.pca.transform(vec.toarray())
 
             pred = self.mock_mlp.predict(reduced)[0]
