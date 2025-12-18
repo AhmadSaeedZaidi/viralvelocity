@@ -1,7 +1,7 @@
-import pytest
 from unittest.mock import patch
 
-from app.core.config import settings
+import pytest
+
 from app.models import (
     AnomalyDetector,
     ClickbaitDetector,
