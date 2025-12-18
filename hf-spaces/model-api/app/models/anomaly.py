@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import IsolationForest
 
 from ..schemas import AnomalyInput
@@ -24,18 +25,19 @@ class AnomalyDetector(BaseModelWrapper):
         like_view_ratio = input_data.like_count / safe_views
         comment_view_ratio = input_data.comment_count / safe_views
 
-        features = np.array(
-            [
-                [
-                    log_views,
-                    like_view_ratio,
-                    comment_view_ratio,
-                ]
-            ]
-        )
+        features_dict = {
+            "log_views": log_views,
+            "like_view_ratio": like_view_ratio,
+            "comment_view_ratio": comment_view_ratio,
+        }
 
-        pred = self.model.predict(features)[0]
-        score = self.model.decision_function(features)[0]
+        features_df = pd.DataFrame([features_dict])
+        
+        # Ensure column order
+        features_df = features_df[["log_views", "like_view_ratio", "comment_view_ratio"]]
+
+        pred = self.model.predict(features_df)[0]
+        score = self.model.decision_function(features_df)[0]
 
         is_anomaly = True if pred == -1 else False
         return is_anomaly, float(score)
