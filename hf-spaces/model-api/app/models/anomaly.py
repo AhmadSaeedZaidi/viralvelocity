@@ -42,5 +42,9 @@ class AnomalyDetector(BaseModelWrapper):
 
     def get_feature_importance(self) -> dict:
         # Isolation Forest doesn't have standard feature importance
-        # But we can return empty or a message
-        return {}
+        # Return feature names with dummy importance for visualization
+        return {
+            "log_views": 1.0,
+            "like_view_ratio": 1.0,
+            "comment_view_ratio": 1.0,
+        }

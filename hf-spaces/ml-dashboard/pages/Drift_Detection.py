@@ -85,7 +85,7 @@ def render():
             xaxis_title=x_label,
             yaxis_title="Density",
         )
-        st.plotly_chart(fig_dist, use_container_width=True)
+        st.plotly_chart(fig_dist, width="stretch")
 
         # --- Statistical Test (KS Test Simulation) ---
         st.subheader("Statistical Drift Metrics")
