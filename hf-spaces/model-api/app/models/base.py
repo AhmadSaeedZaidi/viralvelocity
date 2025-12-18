@@ -72,6 +72,7 @@ class BaseModelWrapper:
         except Exception as e:
             # Catch ALL exceptions to ensure we log the full error details
             import traceback
+
             error_details = traceback.format_exc()
             logger.error(
                 f"CRITICAL ERROR loading {self.name} from Hub.\n"

@@ -71,7 +71,7 @@ class ClickbaitDetector(BaseModelWrapper):
     def get_feature_importance(self) -> dict:
         if not self.is_loaded or self.model is None:
             return {}
-        
+
         feature_names = [
             "title_len",
             "caps_ratio",
@@ -83,7 +83,7 @@ class ClickbaitDetector(BaseModelWrapper):
             "publish_day",
             "is_weekend",
         ]
-        
+
         try:
             if hasattr(self.model, "feature_importances_"):
                 importances = self.model.feature_importances_

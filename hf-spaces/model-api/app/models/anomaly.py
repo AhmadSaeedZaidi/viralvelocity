@@ -32,9 +32,11 @@ class AnomalyDetector(BaseModelWrapper):
         }
 
         features_df = pd.DataFrame([features_dict])
-        
+
         # Ensure column order
-        features_df = features_df[["log_views", "like_view_ratio", "comment_view_ratio"]]
+        features_df = features_df[
+            ["log_views", "like_view_ratio", "comment_view_ratio"]
+        ]
 
         pred = self.model.predict(features_df)[0]
         score = self.model.decision_function(features_df)[0]

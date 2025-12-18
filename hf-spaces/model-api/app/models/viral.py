@@ -38,7 +38,6 @@ class ViralTrendPredictor(BaseModelWrapper):
         # Create DataFrame to preserve feature names
         features_df = pd.DataFrame([features_dict])
 
-        # Ensure column order matches training (though sklearn is usually robust with DF if names match)
         feature_order = [
             "like_velocity",
             "comment_velocity",

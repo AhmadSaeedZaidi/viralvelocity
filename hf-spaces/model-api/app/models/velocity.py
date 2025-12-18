@@ -59,7 +59,7 @@ class VelocityPredictor(BaseModelWrapper):
             return 0
 
         try:
-            # Construct feature list (not numpy array) 
+            # Construct feature list (not numpy array)
             # to preserve types for CatBoost
             # Order from pipeline: hour_sin,
             # hour_cos, publish_day, is_weekend, log_start_views, log_duration,

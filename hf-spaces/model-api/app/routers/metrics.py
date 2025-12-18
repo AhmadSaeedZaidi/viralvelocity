@@ -48,12 +48,8 @@ async def evaluate_predictions(payload: EvaluationRequest):
     elif payload.task_type in ["classification", "binary"]:
         average = "binary" if payload.task_type == "binary" else "weighted"
         
-        # Check if predictions are numeric (probabilities) or labels (strings/ints)
         try:
-            # Try to convert to float to check if numeric
             y_pred_float = y_pred.astype(float)
-            # If successful, and it's classification, we might need to round probabilities
-            # But if they are already class labels (0, 1, 2), rounding is fine or no-op
             y_pred_class = np.round(y_pred_float)
         except (ValueError, TypeError):
             # If conversion fails, they are likely string labels

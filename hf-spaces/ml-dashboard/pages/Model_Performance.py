@@ -367,7 +367,7 @@ def render():
         if not eval_df.empty:
             # Only add trendline if we have enough data points to avoid warnings
             trendline_arg = "ols" if len(eval_df) > 2 else None
-            
+
             fig_scatter = px.scatter(
                 eval_df,
                 x="Actual",
