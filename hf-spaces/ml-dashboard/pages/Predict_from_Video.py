@@ -135,7 +135,7 @@ def render():
                 }
                 try:
                     pred = ml_client.predict("velocity", payload)
-                    st.metric("Predicted 24h Views", f"{pred:,}")
+                    st.metric("Predicted 24h Views", f"{pred['prediction']:,}")
                 except Exception as e:
                     st.error(f"Prediction failed: {e}")
 
@@ -201,9 +201,16 @@ def render():
 
         with col_c2:
             st.markdown("### 🏷️ Genre Classifier")
+            
+            current_tags = details.get("tags", [])
+            if current_tags:
+                st.caption(f"Tags found: {len(current_tags)}")
+            else:
+                st.caption("Tags: None")
+
             payload = {
                 "title": title,
-                "tags": details["tags"],
+                "tags": current_tags,
                 "description": details["description"],
             }
             try:
@@ -237,18 +244,24 @@ def render():
 
         # 3. Tag Recommendations
         st.subheader("🏷️ Tag Recommendations")
-        payload = {"current_tags": details["tags"]}
-        try:
-            pred = ml_client.predict("tags", payload)
-            # Response is a list of strings
-            if isinstance(pred, list) and pred:
-                st.success(f"Recommended Tags: {', '.join(pred)}")
-            elif isinstance(pred, list):
-                st.info("No specific recommendations found.")
-            else:
-                st.warning("Unexpected response format.")
-        except Exception as e:
-            st.error(f"Error fetching tags: {e}")
+        current_tags = details.get("tags", [])
+        
+        if current_tags:
+            st.markdown(f"**Current Tags:** {', '.join(current_tags)}")
+            payload = {"current_tags": current_tags}
+            try:
+                pred = ml_client.predict("tags", payload)
+                # Response is a list of strings
+                if isinstance(pred, list) and pred:
+                    st.success(f"Recommended Tags: {', '.join(pred)}")
+                elif isinstance(pred, list):
+                    st.info("No specific recommendations found.")
+                else:
+                    st.warning("Unexpected response format.")
+            except Exception as e:
+                st.error(f"Error fetching tags: {e}")
+        else:
+            st.info("No tags found on this video. Cannot generate recommendations.")
 
 
 if __name__ == "__main__":
