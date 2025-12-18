@@ -108,6 +108,10 @@ class YoutubeMLClient:
             st.error(f"Failed to fetch {endpoint}: {e}")
             return {}
 
+    def predict(self, model_name: str, data: Dict[str, Any]):
+        """Generic predict method to support dynamic model calls."""
+        return self._post(model_name, data)
+
     # --- Prediction Methods ---
 
     def predict_velocity(self, data: Dict[str, Any]):
