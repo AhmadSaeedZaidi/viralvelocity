@@ -1,9 +1,9 @@
 name: Collect YouTube Data
 
 on:
-  schedule:
-    # Run every 2 hours (00:00, 02:00 ... 22:00 UTC)
-    - cron: '0 */2 * * *'
+  # schedule:
+  #   # Run every 2 hours (00:00, 02:00 ... 22:00 UTC)
+  #   - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
