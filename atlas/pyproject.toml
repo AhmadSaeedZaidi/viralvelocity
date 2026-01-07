@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "pleiades-atlas"
+version = "0.2.0"
+description = "Core Infrastructure Library for Pleiades"
+authors = ["Pleiades Admin <admin@pleiades.system>"]
+readme = "README.md"
+packages = [{include = "atlas", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pydantic = "^2.6.0"
+pydantic-settings = "^2.2.0"
+psycopg = {extras = ["binary", "pool"], version = "^3.1.18"}
+
+# Storage Providers
+huggingface_hub = "^0.20.0"
+google-cloud-storage = "^2.14.0"
+
+# Data Serialization (For Visual Evidence)
+pandas = "^2.2.0"
+pyarrow = "^15.0.0"
+
+# Networking & JSON
+aiohttp = "^3.9.3"
+orjson = "^3.9.15"
+
+# Orchestration
+prefect = "^2.16.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
