@@ -1,5 +1,17 @@
 from atlas.config import settings
 from atlas.db import db
-from atlas.vault import vault
 from atlas.events import events
-from atlas.notifications import notifier, AlertChannel, AlertLevel
+from atlas.notifications import AlertChannel, AlertLevel, notifier
+from atlas.vault import vault
+
+__all__ = [
+    "settings",
+    "db",
+    "vault",
+    "events",
+    "notifier",
+    "AlertChannel",
+    "AlertLevel",
+]
+
+__version__ = "0.2.0"

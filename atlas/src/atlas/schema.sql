@@ -1,9 +1,7 @@
--- Enable pgvector for visual embeddings (The "Vectorize & Vanish" requirement)
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 1. CHANNELS (The Entities)
 CREATE TABLE IF NOT EXISTS channels (
-    id VARCHAR(50) PRIMARY KEY, -- YouTube Channel ID
+    id VARCHAR(50) PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     country VARCHAR(10),
     custom_url VARCHAR(100),
@@ -12,19 +10,17 @@ CREATE TABLE IF NOT EXISTS channels (
     last_scraped_at TIMESTAMP DEFAULT NOW()
 );
 
--- 2. CHANNEL HISTORY (The Audit Trail)
 CREATE TABLE IF NOT EXISTS channel_history (
-    id UUID PRIMARY KEY,
-    channel_id VARCHAR(50) REFERENCES channels(id),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    channel_id VARCHAR(50) REFERENCES channels(id) ON DELETE CASCADE,
     changed_at TIMESTAMP DEFAULT NOW(),
     old_title VARCHAR(255),
     new_title VARCHAR(255),
-    event_type VARCHAR(50) -- 'rebrand', 'handle_change'
+    event_type VARCHAR(50) NOT NULL
 );
 
--- 3. CHANNEL STATS LOG (Time-Series)
 CREATE TABLE IF NOT EXISTS channel_stats_log (
-    channel_id VARCHAR(50) REFERENCES channels(id),
+    channel_id VARCHAR(50) REFERENCES channels(id) ON DELETE CASCADE,
     timestamp TIMESTAMP DEFAULT NOW(),
     view_count BIGINT,
     subscriber_count BIGINT,
@@ -32,20 +28,18 @@ CREATE TABLE IF NOT EXISTS channel_stats_log (
     PRIMARY KEY (channel_id, timestamp)
 );
 
--- 4. VIDEOS (The Content)
 CREATE TABLE IF NOT EXISTS videos (
-    id VARCHAR(20) PRIMARY KEY, -- YouTube Video ID
-    channel_id VARCHAR(50) REFERENCES channels(id),
+    id VARCHAR(20) PRIMARY KEY,
+    channel_id VARCHAR(50) REFERENCES channels(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     published_at TIMESTAMP,
     duration INTEGER,
-    wiki_topics TEXT[], -- Knowledge Graph Anchors
+    wiki_topics TEXT[],
     discovered_at TIMESTAMP DEFAULT NOW()
 );
 
--- 5. VIDEO STATS LOG (Time-Series for Velocity Mismatch)
 CREATE TABLE IF NOT EXISTS video_stats_log (
-    video_id VARCHAR(20) REFERENCES videos(id),
+    video_id VARCHAR(20) REFERENCES videos(id) ON DELETE CASCADE,
     timestamp TIMESTAMP DEFAULT NOW(),
     views BIGINT,
     likes BIGINT,
@@ -53,26 +47,25 @@ CREATE TABLE IF NOT EXISTS video_stats_log (
     PRIMARY KEY (video_id, timestamp)
 );
 
--- 6. VIDEO VECTORS (The Visuals)
 CREATE TABLE IF NOT EXISTS video_vectors (
-    video_id VARCHAR(20) REFERENCES videos(id),
-    frame_index INTEGER,
-    vector vector(512), -- CLIP Embedding
-    source_type VARCHAR(50), -- 'heatmap', 'chapter'
+    video_id VARCHAR(20) REFERENCES videos(id) ON DELETE CASCADE,
+    frame_index INTEGER NOT NULL,
+    vector vector(512) NOT NULL,
+    source_type VARCHAR(50),
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (video_id, frame_index)
 );
 
--- 7. SYSTEM EVENTS (Event Sourcing Log)
 CREATE TABLE IF NOT EXISTS system_events (
-    id UUID PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type VARCHAR(50) NOT NULL,
     entity_id VARCHAR(50),
     payload JSONB,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Performance Indices
 CREATE INDEX IF NOT EXISTS idx_video_publish ON videos(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_channel_scrape ON channels(last_scraped_at ASC);
 CREATE INDEX IF NOT EXISTS idx_events_type ON system_events(event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_entity ON system_events(entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_history_channel ON channel_history(channel_id, changed_at DESC);
