@@ -5,7 +5,6 @@ import abc
 from typing import Optional, Any, List, Tuple
 from atlas.config import settings
 
-# Conditional imports to avoid hard dependencies if specific extras aren't installed
 try:
     from google.cloud import storage
 except ImportError:
@@ -13,7 +12,7 @@ except ImportError:
 
 try:
     from huggingface_hub import HfApi, hf_hub_download
-    import pandas as pd # Required for Parquet archiving
+    import pandas as pd
 except ImportError:
     HfApi = None
 
@@ -84,7 +83,6 @@ class HuggingFaceVault(VaultStrategy):
 
     def list_files(self, prefix: str) -> List[str]:
         try:
-            # Note: This can be slow on massive repos, filtering is key
             return self.api.list_repo_files(
                 repo_id=self.repo_id, 
                 repo_type="dataset",
