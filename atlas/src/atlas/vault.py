@@ -2,6 +2,7 @@ import abc
 import io
 import json
 import logging
+from datetime import datetime
 from typing import Any, List, Optional, Tuple
 
 from atlas.config import settings
@@ -38,6 +39,32 @@ class VaultStrategy(abc.ABC):
     @abc.abstractmethod
     def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
         pass
+    
+    @abc.abstractmethod
+    def store_binary(self, path: str, data: io.BytesIO) -> str:
+        pass
+    
+    @abc.abstractmethod
+    def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
+        pass
+    
+    def store_metadata(self, video_id: str, data: dict, date: Optional[str] = None) -> None:
+        if date is None:
+            date = datetime.utcnow().strftime("%Y-%m-%d")
+        path = f"metadata/{date}/{video_id}.json"
+        self.store_json(path, data)
+    
+    def fetch_metadata(self, video_id: str, date: str) -> Optional[dict]:
+        path = f"metadata/{date}/{video_id}.json"
+        return self.fetch_json(path)
+    
+    def store_transcript(self, video_id: str, transcript: dict) -> None:
+        path = f"transcripts/{video_id}.json"
+        self.store_json(path, transcript)
+    
+    def fetch_transcript(self, video_id: str) -> Optional[dict]:
+        path = f"transcripts/{video_id}.json"
+        return self.fetch_json(path)
 
 class HuggingFaceVault(VaultStrategy):
     def __init__(self) -> None:
@@ -117,6 +144,41 @@ class HuggingFaceVault(VaultStrategy):
         except Exception as e:
             logger.error(f"Failed to archive visuals for {video_id}: {e}")
             raise
+    
+    def store_binary(self, path: str, data: io.BytesIO) -> str:
+        try:
+            data.seek(0)
+            self.api.upload_file(
+                path_or_fileobj=data,
+                path_in_repo=path,
+                repo_id=self.repo_id,
+                repo_type="dataset",
+                commit_message=f"Vault: Binary {path}",
+            )
+            logger.info(f"Stored binary {path} to HF vault")
+            return f"hf://datasets/{self.repo_id}/{path}"
+        except Exception as e:
+            logger.error(f"HF binary upload failed for {path}: {e}")
+            raise
+    
+    def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
+        try:
+            if path.startswith("hf://"):
+                path = path.split(self.repo_id + "/")[-1]
+
+            local_path = hf_hub_download(
+                repo_id=self.repo_id,
+                filename=path,
+                repo_type="dataset",
+                token=self.token,
+            )
+            
+            with open(local_path, "rb") as f:
+                return io.BytesIO(f.read())
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch binary {path} from HF vault: {e}")
+            return None
 
 class GCSVault(VaultStrategy):
     def __init__(self) -> None:
@@ -172,6 +234,34 @@ class GCSVault(VaultStrategy):
         except Exception as e:
             logger.error(f"Failed to store visuals for {video_id}: {e}")
             raise
+    
+    def store_binary(self, path: str, data: io.BytesIO) -> str:
+        try:
+            data.seek(0)
+            blob = self.bucket.blob(path)
+            blob.upload_from_file(data)
+            logger.info(f"Stored binary {path} to GCS vault")
+            return f"gs://{self.bucket_name}/{path}"
+        except Exception as e:
+            logger.error(f"GCS binary upload failed for {path}: {e}")
+            raise
+    
+    def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
+        try:
+            if path.startswith("gs://"):
+                path = path.split(self.bucket_name + "/")[-1]
+
+            blob = self.bucket.blob(path)
+            if not blob.exists():
+                return None
+                
+            buffer = io.BytesIO()
+            blob.download_to_file(buffer)
+            buffer.seek(0)
+            return buffer
+        except Exception as e:
+            logger.warning(f"Failed to fetch binary {path} from GCS vault: {e}")
+            return None
 
 def get_vault() -> VaultStrategy:
     if settings.VAULT_PROVIDER == "gcs":

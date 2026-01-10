@@ -85,10 +85,14 @@ async def main():
         result = await conn.execute("SELECT COUNT(*) FROM channels")
         print(f"Channels: {result}")
     
-    # Storage operations
-    vault.store_json("test.json", {"hello": "atlas"})
-    data = vault.fetch_json("test.json")
-    print(f"Retrieved: {data}")
+    # Storage operations (structured layout)
+    vault.store_metadata("test_video", {"title": "Example", "tags": ["ai", "ml"]})
+    vault.store_transcript("test_video", {"text": "Hello Atlas"})
+    
+    # Fetch data
+    metadata = vault.fetch_metadata("test_video", "2026-01-09")
+    transcript = vault.fetch_transcript("test_video")
+    print(f"Retrieved: {metadata}, {transcript}")
     
     # Event emission
     await events.emit("test.event", "entity123", {"status": "ok"})

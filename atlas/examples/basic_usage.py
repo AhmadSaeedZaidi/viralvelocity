@@ -27,18 +27,32 @@ async def storage_example() -> None:
     print("\nStorage Example:")
     print(f"  Active vault: {settings.VAULT_PROVIDER}")
     
-    test_data = {
+    # Store metadata (date-partitioned)
+    metadata = {
         "video_id": "test123",
         "title": "Example Video",
+        "tags": ["demo", "atlas"],
+        "category_id": "28",
         "views": 1000
     }
+    vault.store_metadata("test123", metadata)
+    print("  Stored metadata")
     
-    vault.store_json("test/example.json", test_data)
-    print("  Stored test data")
+    # Store transcript
+    transcript = {
+        "text": "This is an example transcript",
+        "language": "en"
+    }
+    vault.store_transcript("test123", transcript)
+    print("  Stored transcript")
     
-    retrieved = vault.fetch_json("test/example.json")
-    if retrieved:
-        print(f"  Retrieved: {retrieved['title']}")
+    # Fetch data
+    retrieved_meta = vault.fetch_metadata("test123", "2026-01-09")
+    retrieved_trans = vault.fetch_transcript("test123")
+    if retrieved_meta:
+        print(f"  Retrieved metadata: {retrieved_meta['title']}")
+    if retrieved_trans:
+        print(f"  Retrieved transcript: {len(retrieved_trans['text'])} chars")
 
 
 async def events_example() -> None:

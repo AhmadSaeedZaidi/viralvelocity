@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 CREATE TABLE IF NOT EXISTS channels (
     id VARCHAR(50) PRIMARY KEY,
@@ -34,8 +35,12 @@ CREATE TABLE IF NOT EXISTS videos (
     title TEXT NOT NULL,
     published_at TIMESTAMP,
     duration INTEGER,
+    tags TEXT[],
+    category_id VARCHAR(10),
+    default_language VARCHAR(10),
     wiki_topics TEXT[],
-    discovered_at TIMESTAMP DEFAULT NOW()
+    discovered_at TIMESTAMP DEFAULT NOW(),
+    last_updated_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS video_stats_log (
@@ -57,15 +62,46 @@ CREATE TABLE IF NOT EXISTS video_vectors (
 );
 
 CREATE TABLE IF NOT EXISTS system_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid(),
     event_type VARCHAR(50) NOT NULL,
     entity_id VARCHAR(50),
     payload JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (id, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS search_queue (
+    id SERIAL PRIMARY KEY,
+    query_term TEXT UNIQUE NOT NULL,
+    priority INTEGER DEFAULT 0,
+    mention_count INTEGER DEFAULT 0,
+    next_page_token TEXT,
+    last_searched_at TIMESTAMP,
+    result_count_total INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS transcripts (
+    video_id VARCHAR(20) PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
+    language VARCHAR(10) DEFAULT 'en',
+    vault_uri TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_video_publish ON videos(published_at DESC);
+SELECT create_hypertable('channel_stats_log', 'timestamp', 
+    if_not_exists => TRUE, migrate_data => TRUE);
+SELECT create_hypertable('video_stats_log', 'timestamp', 
+    if_not_exists => TRUE, migrate_data => TRUE);
+SELECT create_hypertable('system_events', 'created_at', 
+    if_not_exists => TRUE, migrate_data => TRUE);
+
 CREATE INDEX IF NOT EXISTS idx_channel_scrape ON channels(last_scraped_at ASC);
+CREATE INDEX IF NOT EXISTS idx_channel_history_channel ON channel_history(channel_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_video_publish ON videos(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_video_tags ON videos USING GIN(tags);
+CREATE INDEX IF NOT EXISTS idx_video_category ON videos(category_id);
+CREATE INDEX IF NOT EXISTS idx_video_tracker_staleness ON videos(last_updated_at ASC NULLS FIRST);
+CREATE INDEX IF NOT EXISTS idx_search_queue_fetch ON search_queue(priority DESC, mention_count DESC);
+CREATE INDEX IF NOT EXISTS idx_video_vectors_embedding ON video_vectors USING ivfflat (vector vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX IF NOT EXISTS idx_events_type ON system_events(event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_entity ON system_events(entity_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_channel_history_channel ON channel_history(channel_id, changed_at DESC);

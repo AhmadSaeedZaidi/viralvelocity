@@ -1,6 +1,7 @@
 """Utility functions for Atlas infrastructure."""
 import asyncio
 import functools
+import itertools
 import logging
 from typing import Any, Callable, Optional, TypeVar, cast
 
@@ -114,5 +115,27 @@ def validate_channel_id(channel_id: str) -> bool:
     
     allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
     return all(c in allowed_chars for c in channel_id)
+
+
+class KeyRing:
+    def __init__(self, pool_name: str):
+        from atlas.config import settings
+        
+        self.pool_name = pool_name.lower()
+        self.keys = settings.key_rings.get(self.pool_name, [])
+        
+        if not self.keys:
+            logger.error(f"KeyRing: No keys initialized for pool '{pool_name}'!")
+            raise ValueError(f"Empty KeyRing for {pool_name}")
+            
+        self._iterator = itertools.cycle(self.keys)
+        logger.info(f"KeyRing: Initialized '{pool_name}' with {len(self.keys)} keys.")
+    
+    def next_key(self) -> str:
+        return next(self._iterator)
+
+    @property
+    def size(self) -> int:
+        return len(self.keys)
 
 

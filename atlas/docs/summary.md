@@ -1,10 +1,10 @@
-# Atlas v0.2.0 - Production Release Summary
+# Atlas v0.2.1 - Production Release Summary
 
 ## Overview
 
 Atlas is the core infrastructure library for the Pleiades Surveillance Platform, providing unified interfaces for database management, object storage, event sourcing, and system notifications.
 
-**Version**: 0.2.0  
+**Version**: 0.2.1  
 **Status**: Production Ready  
 **Type Coverage**: 100%  
 **License**: MIT  
@@ -14,16 +14,18 @@ Atlas is the core infrastructure library for the Pleiades Surveillance Platform,
 
 ## Core Components
 
-### 1. Database Layer (`atlas.db`)
+### 1. Database Layer (`atlas.db`) - The Hot Index
 - **Technology**: Async PostgreSQL with psycopg3
 - **Pattern**: Singleton connection pool
 - **Features**: Health checks, lazy initialization, graceful shutdown
 - **Configuration**: 0-20 connections (serverless-friendly)
+- **Indices**: GIN for tags, B-tree for categories, temporal for published_at
 
 ### 2. Storage Layer (`atlas.vault`)
 - **Pattern**: Strategy pattern with factory
 - **Providers**: HuggingFace (Git LFS + Parquet) | GCS (Cloud Storage)
-- **Operations**: JSON storage, file listing, visual evidence archival
+- **Operations**: Metadata, transcripts, visual evidence
+- **Layout**: Date-partitioned metadata, structured transcripts, Parquet visuals
 - **Switchable**: Via `VAULT_PROVIDER` environment variable
 
 ### 3. Event Bus (`atlas.events`)
@@ -332,5 +334,5 @@ SOFTWARE.
 
 ---
 
-**Atlas v0.2.0** - Production-ready infrastructure for Pleiades 🚀
+**Atlas v0.2.0** - Production-ready infrastructure for Pleiades 
 

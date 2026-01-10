@@ -37,12 +37,6 @@ Complete documentation for the Pleiades infrastructure kernel.
   - PR process
   - Architecture patterns
 
-- **[Migration Guide](migration.md)** - Upgrading to v0.2.0
-  - Breaking changes (none)
-  - New features
-  - Recommended updates
-  - Configuration changes
-
 ## Additional Resources
 
 - **[Summary](summary.md)** - Complete v0.2.0 release overview
@@ -98,7 +92,7 @@ docs/
 
 ## Version
 
-Current version: **0.2.0**
+Current version: **0.2.1**
 
 See [Changelog](../CHANGELOG.md) for release history.
 

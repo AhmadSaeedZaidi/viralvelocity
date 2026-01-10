@@ -1,3 +1,4 @@
+from atlas.adapter import DatabaseAdapter
 from atlas.config import settings
 from atlas.db import db
 from atlas.events import events
@@ -12,6 +13,7 @@ __all__ = [
     "notifier",
     "AlertChannel",
     "AlertLevel",
+    "DatabaseAdapter",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

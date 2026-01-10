@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pleiades-atlas"
-version = "0.2.0"
+version = "0.2.1"
 description = "Core Infrastructure Library for Pleiades Surveillance Platform"
 authors = ["Ahmad Saeed Zaidi"]
 readme = "README.md"

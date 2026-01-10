@@ -1,7 +1,10 @@
 import json
-from typing import List, Optional, Literal
+import logging
+from typing import Dict, List, Optional, Literal
 from pydantic_settings import BaseSettings
 from pydantic import PostgresDsn, Field, SecretStr, field_validator, model_validator
+
+logger = logging.getLogger("atlas.config")
 
 
 class Settings(BaseSettings):
@@ -20,6 +23,9 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY_POOL_JSON: SecretStr = Field(
         ..., description="JSON List of YouTube API Keys"
     )
+    
+    KEY_POOL_ARCHEOLOGY_SIZE: int = Field(1, description="Keys reserved for archeology")
+    KEY_POOL_TRACKING_SIZE: int = Field(1, description="Keys reserved for tracking")
     
     DISCORD_WEBHOOK_ALERTS: Optional[SecretStr] = None
     DISCORD_WEBHOOK_HUNT: Optional[SecretStr] = None
@@ -54,6 +60,37 @@ class Settings(BaseSettings):
             return keys
         except json.JSONDecodeError:
             return [self.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()]
+    
+    @property
+    def key_rings(self) -> Dict[str, List[str]]:
+        raw_keys = self.api_keys
+        total_keys = len(raw_keys)
+        reserved_count = self.KEY_POOL_ARCHEOLOGY_SIZE + self.KEY_POOL_TRACKING_SIZE
+        
+        if total_keys <= reserved_count:
+            logger.warning(
+                f"Config: Insufficient keys for strict pooling! "
+                f"Need > {reserved_count}, got {total_keys}. "
+                "Enabling CHAOS MODE (Shared Pools)."
+            )
+            return {
+                "hunting": raw_keys,
+                "tracking": raw_keys,
+                "archeology": raw_keys
+            }
+            
+        archeology_keys = raw_keys[-self.KEY_POOL_ARCHEOLOGY_SIZE:]
+        remaining = raw_keys[:-self.KEY_POOL_ARCHEOLOGY_SIZE]
+        
+        tracking_keys = remaining[-self.KEY_POOL_TRACKING_SIZE:]
+        
+        hunting_keys = remaining[:-self.KEY_POOL_TRACKING_SIZE]
+        
+        return {
+            "hunting": hunting_keys,
+            "tracking": tracking_keys,
+            "archeology": archeology_keys
+        }
 
     model_config = {
         "env_file": ".env",

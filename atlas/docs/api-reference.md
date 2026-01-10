@@ -53,22 +53,50 @@ class VaultStrategy(ABC):
 - `HuggingFaceVault` - Git LFS + Parquet storage
 - `GCSVault` - Google Cloud Storage
 
+**Storage Layout:**
+```
+vault/
+├── metadata/{date}/{video_id}.json     # Raw API responses (date-partitioned)
+├── transcripts/{video_id}.json         # Full text content
+└── visuals/{video_id}.parquet          # Compressed visual evidence
+```
+
 **Usage:**
 ```python
 from atlas import vault
 
-# Store JSON
-vault.store_json("metadata/video.json", {"id": "abc", "title": "Example"})
+# Store metadata (automatically date-partitioned)
+vault.store_metadata("dQw4w9WgXcQ", api_response_data)
 
-# Fetch JSON
-data = vault.fetch_json("metadata/video.json")
+# Fetch metadata by date
+data = vault.fetch_metadata("dQw4w9WgXcQ", "2026-01-09")
 
-# List files
-files = vault.list_files("metadata/")
+# Store transcript
+vault.store_transcript("dQw4w9WgXcQ", {"text": "...", "segments": []})
 
-# Store visual evidence
+# Fetch transcript
+transcript = vault.fetch_transcript("dQw4w9WgXcQ")
+
+# Store visual evidence (Parquet format)
 frames = [(0, b"..."), (1, b"...")]
-vault.store_visual_evidence("video123", frames)
+vault.store_visual_evidence("dQw4w9WgXcQ", frames)
+
+# Store binary data (cold storage)
+import io
+binary_data = io.BytesIO(b"raw binary content")
+uri = vault.store_binary("raw/data.bin", binary_data)
+# Returns: "gs://bucket/raw/data.bin" or "hf://datasets/repo/raw/data.bin"
+
+# Fetch binary data (supports URIs)
+buffer = vault.fetch_binary("gs://bucket/raw/data.bin")
+# or: buffer = vault.fetch_binary("raw/data.bin")
+if buffer:
+    content = buffer.read()
+
+# Low-level operations
+vault.store_json("custom/path.json", {"key": "value"})
+data = vault.fetch_json("custom/path.json")
+files = vault.list_files("metadata/")
 ```
 
 ---
@@ -157,6 +185,43 @@ await notifier.send(
 
 ---
 
+### `atlas.adapter`
+
+Database adapter base class for clean data access patterns.
+
+#### `DatabaseAdapter`
+
+```python
+class DatabaseAdapter:
+    async def _execute(query: str, params: Optional[Tuple] = None) -> None
+    async def _fetch_one(query: str, params: Optional[Tuple] = None) -> Optional[Dict[str, Any]]
+    async def _fetch_all(query: str, params: Optional[Tuple] = None) -> List[Dict[str, Any]]
+    async def _fetch_scalar(query: str, params: Optional[Tuple] = None) -> Any
+    async def _execute_many(query: str, params_list: List[Tuple]) -> None
+```
+
+**Usage:**
+```python
+from atlas import DatabaseAdapter
+
+class MyServiceDB(DatabaseAdapter):
+    async def get_user(self, user_id: str):
+        query = "SELECT * FROM users WHERE id = %s"
+        return await self._fetch_one(query, (user_id,))
+    
+    async def list_users(self):
+        query = "SELECT * FROM users ORDER BY created_at DESC"
+        return await self._fetch_all(query)
+    
+    async def count_users(self):
+        query = "SELECT COUNT(*) FROM users"
+        return await self._fetch_scalar(query)
+
+service_db = MyServiceDB()
+```
+
+---
+
 ### `atlas.config`
 
 Configuration management.
@@ -180,6 +245,8 @@ class Settings(BaseSettings):
     
     # API Keys
     YOUTUBE_API_KEY_POOL_JSON: SecretStr
+    KEY_POOL_ARCHEOLOGY_SIZE: int
+    KEY_POOL_TRACKING_SIZE: int
     
     # Webhooks
     DISCORD_WEBHOOK_ALERTS: Optional[SecretStr]
@@ -206,6 +273,12 @@ provider = settings.VAULT_PROVIDER
 # API keys (respects compliance mode)
 keys = settings.api_keys
 
+# Key rings (functional pools)
+rings = settings.key_rings
+print(f"Hunting pool: {len(rings['hunting'])} keys")
+print(f"Tracking pool: {len(rings['tracking'])} keys")
+print(f"Archeology pool: {len(rings['archeology'])} keys")
+
 # Check compliance
 if settings.COMPLIANCE_MODE:
     print("Running in compliance mode")
@@ -215,7 +288,7 @@ if settings.COMPLIANCE_MODE:
 
 ### `atlas.utils`
 
-Utility functions.
+Utility functions and classes.
 
 #### Functions
 
@@ -231,13 +304,24 @@ def retry_async(
 ) -> Callable
 ```
 
+#### Classes
+
+```python
+class KeyRing:
+    def __init__(self, pool_name: str)
+    def next_key(self) -> str
+    @property
+    def size(self) -> int
+```
+
 **Usage:**
 ```python
 from atlas.utils import (
     validate_youtube_id,
     validate_channel_id,
     retry_async,
-    health_check_all
+    health_check_all,
+    KeyRing
 )
 
 # Validate IDs
@@ -254,8 +338,12 @@ print(health)  # {"database": True}
 # Retry decorator
 @retry_async(max_attempts=5, delay=2.0, backoff=2.0)
 async def fetch_data():
-    # Will retry up to 5 times with exponential backoff
     return await api_call()
+
+# Key Ring (infinite key rotation)
+hunting_keys = KeyRing("hunting")
+current_key = hunting_keys.next_key()
+print(f"Pool size: {hunting_keys.size}")
 ```
 
 ---
@@ -285,9 +373,18 @@ CREATE TABLE videos (
     title TEXT NOT NULL,
     published_at TIMESTAMP,
     duration INTEGER,
+    tags TEXT[],                    -- Indexed via GIN
+    category_id VARCHAR(10),        -- e.g., "25" (News)
+    default_language VARCHAR(10),   -- e.g., "en"
     wiki_topics TEXT[],
-    discovered_at TIMESTAMP DEFAULT NOW()
+    discovered_at TIMESTAMP DEFAULT NOW(),
+    last_updated_at TIMESTAMP       -- Tracker staleness detection
 );
+
+-- Indices
+CREATE INDEX idx_video_tags ON videos USING GIN(tags);
+CREATE INDEX idx_video_category ON videos(category_id);
+CREATE INDEX idx_video_tracker_staleness ON videos(last_updated_at ASC NULLS FIRST);
 ```
 
 #### `video_vectors`
@@ -313,7 +410,31 @@ CREATE TABLE system_events (
 );
 ```
 
-### Time-Series Tables
+#### `search_queue`
+```sql
+CREATE TABLE search_queue (
+    id SERIAL PRIMARY KEY,
+    query_term TEXT UNIQUE NOT NULL,
+    priority INTEGER DEFAULT 0,
+    mention_count INTEGER DEFAULT 0,
+    next_page_token TEXT,
+    last_searched_at TIMESTAMP,
+    result_count_total INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'active'
+);
+```
+
+#### `transcripts`
+```sql
+CREATE TABLE transcripts (
+    video_id VARCHAR(20) PRIMARY KEY REFERENCES videos(id),
+    language VARCHAR(10) DEFAULT 'en',
+    vault_uri TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+### Time-Series Tables (TimescaleDB Hypertables)
 
 #### `channel_stats_log`
 ```sql
@@ -325,6 +446,7 @@ CREATE TABLE channel_stats_log (
     video_count INTEGER,
     PRIMARY KEY (channel_id, timestamp)
 );
+SELECT create_hypertable('channel_stats_log', 'timestamp');
 ```
 
 #### `video_stats_log`
@@ -337,7 +459,14 @@ CREATE TABLE video_stats_log (
     comment_count BIGINT,
     PRIMARY KEY (video_id, timestamp)
 );
+SELECT create_hypertable('video_stats_log', 'timestamp');
 ```
+
+**TimescaleDB Benefits:**
+- Automatic time-based chunking
+- Optimized aggregations (avg, sum, count)
+- Fast time-range queries
+- Compression for historical data
 
 ### Audit Tables
 

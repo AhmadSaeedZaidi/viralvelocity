@@ -8,18 +8,22 @@ Atlas is the infrastructure kernel for the Pleiades platform, providing stateles
 
 ### 1. Stateless Library Pattern
 Atlas maintains no internal state beyond configuration. All state is externalized to:
-- PostgreSQL (structured data + events)
-- Object storage (unstructured data)
+- PostgreSQL (Hot Index: structured data + events)
+- Object storage (Cold Archive: unstructured data)
 - Environment variables (configuration)
 
-### 2. Singleton Services
+### 2. Hot/Cold Data Tiering
+- **Hot Index (PostgreSQL)**: Queryable metadata with indices for fast filtering
+- **Cold Archive (Vault)**: Complete raw data for reprocessing and audit trails
+
+### 3. Singleton Services
 Core services use the singleton pattern for resource pooling:
 - `db`: Single connection pool instance
 - `vault`: Single storage provider instance
 - `events`: Single event bus instance
 - `notifier`: Single notification dispatcher
 
-### 3. Strategy Pattern for Storage
+### 4. Strategy Pattern for Storage
 The vault system uses the Strategy pattern to enable swappable storage backends:
 
 ```
@@ -30,16 +34,30 @@ VaultStrategy (ABC)
 
 Selection via `VAULT_PROVIDER` environment variable.
 
+### 5. Data Layout Convention
+Vault storage follows a structured layout:
+```
+metadata/{date}/{video_id}.json     # Daily-partitioned API responses
+transcripts/{video_id}.json         # Full text content from Scribe
+visuals/{video_id}.parquet          # Compressed visual evidence (binary)
+```
+
+Benefits:
+- **Date partitioning**: Efficient time-range queries
+- **Parquet format**: Columnar compression for visual data
+- **Flat structure**: Simple discovery and reprocessing
+
 ## Component Architecture
 
 ### Database Layer (`atlas.db`)
 
 **Pattern**: Singleton + Connection Pool  
-**Technology**: psycopg3 with AsyncConnectionPool  
+**Technology**: PostgreSQL with TimescaleDB + psycopg3 AsyncConnectionPool  
 **Configuration**:
 - `min_size=0` for serverless autoscaling
 - `max_size=20` for connection limiting
 - Async-only interface
+- TimescaleDB hypertables for time-series optimization
 
 **Lifecycle**:
 ```python
