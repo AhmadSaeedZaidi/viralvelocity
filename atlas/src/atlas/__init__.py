@@ -1,4 +1,4 @@
-from atlas.adapter import DatabaseAdapter
+from atlas.adapters import DatabaseAdapter
 from atlas.config import settings
 from atlas.db import db
 from atlas.events import events

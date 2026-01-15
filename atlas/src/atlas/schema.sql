@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS videos (
     default_language VARCHAR(10),
     wiki_topics TEXT[],
     discovered_at TIMESTAMP DEFAULT NOW(),
-    last_updated_at TIMESTAMP
+    last_updated_at TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'PENDING',
+    has_transcript BOOLEAN DEFAULT FALSE,
+    has_visuals BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS video_stats_log (
@@ -50,15 +53,6 @@ CREATE TABLE IF NOT EXISTS video_stats_log (
     likes BIGINT,
     comment_count BIGINT,
     PRIMARY KEY (video_id, timestamp)
-);
-
-CREATE TABLE IF NOT EXISTS video_vectors (
-    video_id VARCHAR(20) REFERENCES videos(id) ON DELETE CASCADE,
-    frame_index INTEGER NOT NULL,
-    vector vector(512) NOT NULL,
-    source_type VARCHAR(50),
-    created_at TIMESTAMP DEFAULT NOW(),
-    PRIMARY KEY (video_id, frame_index)
 );
 
 CREATE TABLE IF NOT EXISTS system_events (
@@ -88,6 +82,18 @@ CREATE TABLE IF NOT EXISTS transcripts (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS watchlist (
+    video_id VARCHAR(20) PRIMARY KEY,
+    tracking_tier VARCHAR(20) DEFAULT 'HOURLY' CHECK (tracking_tier IN ('HOURLY', 'DAILY', 'WEEKLY')),
+    last_tracked_at TIMESTAMP,
+    next_track_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+COMMENT ON TABLE watchlist IS 
+'Ghost Tracking: Persistent tracking schedule independent of video retention. 
+EXCLUDED from Janitor cleanup to enable long-term metrics collection.';
+
 SELECT create_hypertable('channel_stats_log', 'timestamp', 
     if_not_exists => TRUE, migrate_data => TRUE);
 SELECT create_hypertable('video_stats_log', 'timestamp', 
@@ -101,7 +107,9 @@ CREATE INDEX IF NOT EXISTS idx_video_publish ON videos(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_video_tags ON videos USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_video_category ON videos(category_id);
 CREATE INDEX IF NOT EXISTS idx_video_tracker_staleness ON videos(last_updated_at ASC NULLS FIRST);
+CREATE INDEX IF NOT EXISTS idx_video_status ON videos(status, discovered_at);
 CREATE INDEX IF NOT EXISTS idx_search_queue_fetch ON search_queue(priority DESC, mention_count DESC);
-CREATE INDEX IF NOT EXISTS idx_video_vectors_embedding ON video_vectors USING ivfflat (vector vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_watchlist_next_track ON watchlist(next_track_at ASC);
+CREATE INDEX IF NOT EXISTS idx_watchlist_tier ON watchlist(tracking_tier, next_track_at ASC);
 CREATE INDEX IF NOT EXISTS idx_events_type ON system_events(event_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_entity ON system_events(entity_id, created_at DESC);

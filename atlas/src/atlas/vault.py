@@ -65,6 +65,10 @@ class VaultStrategy(abc.ABC):
     def fetch_transcript(self, video_id: str) -> Optional[dict]:
         path = f"transcripts/{video_id}.json"
         return self.fetch_json(path)
+    
+    @abc.abstractmethod
+    def append_metrics(self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None) -> None:
+        pass
 
 class HuggingFaceVault(VaultStrategy):
     def __init__(self) -> None:
@@ -179,6 +183,67 @@ class HuggingFaceVault(VaultStrategy):
         except Exception as e:
             logger.warning(f"Failed to fetch binary {path} from HF vault: {e}")
             return None
+    
+    def append_metrics(self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None) -> None:
+        """
+        Append time-series metrics to partitioned Parquet files.
+        
+        Uses Hive-style partitioning: metrics/date=YYYY-MM-DD/hour=HH/stats.parquet
+        """
+        if not data:
+            logger.warning("No metrics data to append")
+            return
+        
+        if date is None:
+            date = datetime.utcnow().strftime("%Y-%m-%d")
+        if hour is None:
+            hour = datetime.utcnow().strftime("%H")
+        
+        path = f"metrics/date={date}/hour={hour}/stats.parquet"
+        
+        try:
+            # Try to fetch existing file
+            existing_df = None
+            try:
+                local_path = hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=path,
+                    repo_type="dataset",
+                    token=self.token,
+                )
+                existing_df = pd.read_parquet(local_path)
+                logger.info(f"Found existing metrics file with {len(existing_df)} rows")
+            except Exception:
+                logger.info(f"No existing metrics file at {path}, creating new")
+            
+            # Create DataFrame from new data
+            new_df = pd.DataFrame(data)
+            
+            # Concat if existing data found
+            if existing_df is not None:
+                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+            else:
+                combined_df = new_df
+            
+            # Write to buffer
+            buffer = io.BytesIO()
+            combined_df.to_parquet(buffer, engine="pyarrow", index=False)
+            buffer.seek(0)
+            
+            # Upload
+            self.api.upload_file(
+                path_or_fileobj=buffer,
+                path_in_repo=path,
+                repo_id=self.repo_id,
+                repo_type="dataset",
+                commit_message=f"Append metrics: {len(data)} rows to {path}",
+            )
+            
+            logger.info(f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})")
+            
+        except Exception as e:
+            logger.error(f"Failed to append metrics to {path}: {e}")
+            raise
 
 class GCSVault(VaultStrategy):
     def __init__(self) -> None:
@@ -262,6 +327,62 @@ class GCSVault(VaultStrategy):
         except Exception as e:
             logger.warning(f"Failed to fetch binary {path} from GCS vault: {e}")
             return None
+    
+    def append_metrics(self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None) -> None:
+        """
+        Append time-series metrics to partitioned Parquet files in GCS.
+        
+        Uses Hive-style partitioning: metrics/date=YYYY-MM-DD/hour=HH/stats.parquet
+        """
+        if not data:
+            logger.warning("No metrics data to append")
+            return
+        
+        if not pd:
+            raise ImportError("pandas required for metrics append. Install: pip install pandas pyarrow")
+        
+        if date is None:
+            date = datetime.utcnow().strftime("%Y-%m-%d")
+        if hour is None:
+            hour = datetime.utcnow().strftime("%H")
+        
+        path = f"metrics/date={date}/hour={hour}/stats.parquet"
+        
+        try:
+            # Try to fetch existing file
+            existing_df = None
+            blob = self.bucket.blob(path)
+            if blob.exists():
+                buffer = io.BytesIO()
+                blob.download_to_file(buffer)
+                buffer.seek(0)
+                existing_df = pd.read_parquet(buffer)
+                logger.info(f"Found existing metrics file with {len(existing_df)} rows")
+            else:
+                logger.info(f"No existing metrics file at {path}, creating new")
+            
+            # Create DataFrame from new data
+            new_df = pd.DataFrame(data)
+            
+            # Concat if existing data found
+            if existing_df is not None:
+                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+            else:
+                combined_df = new_df
+            
+            # Write to buffer
+            buffer = io.BytesIO()
+            combined_df.to_parquet(buffer, engine="pyarrow", index=False)
+            buffer.seek(0)
+            
+            # Upload
+            blob.upload_from_file(buffer, content_type="application/octet-stream")
+            
+            logger.info(f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})")
+            
+        except Exception as e:
+            logger.error(f"Failed to append metrics to {path}: {e}")
+            raise
 
 def get_vault() -> VaultStrategy:
     if settings.VAULT_PROVIDER == "gcs":

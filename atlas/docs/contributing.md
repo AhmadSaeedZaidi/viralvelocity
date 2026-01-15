@@ -133,7 +133,11 @@ atlas/
 ├── notifications.py   # Alert system
 ├── utils.py           # Helper functions
 ├── setup.py           # Schema provisioning
-└── schema.sql         # Database schema
+├── schema.sql         # Database schema
+└── adapters/          # Database adapters
+    ├── __init__.py    # Base DatabaseAdapter
+    ├── adapter.py     # Base class implementation
+    └── maia.py        # Maia-specific DAO
 ```
 
 ### Adding a New Module
@@ -144,6 +148,190 @@ atlas/
 4. Export public APIs in `__init__.py`
 5. Update `__all__` list
 6. Document in README.md
+
+### Creating a Custom Database Adapter
+
+Atlas provides a `DatabaseAdapter` base class that abstracts common database operations. This reduces boilerplate and standardizes database interactions across services.
+
+#### When to Create a Custom Adapter
+
+Create a specialized adapter when:
+- Your service has complex, domain-specific queries
+- You need to encapsulate business logic at the data access layer
+- You want to decouple SQL from application logic
+- You're building a distinct agent/service (e.g., Maia, Scribe, Sentinel)
+
+#### Step-by-Step Guide
+
+**1. Inherit from DatabaseAdapter**
+
+```python
+from atlas.adapters.adapter import DatabaseAdapter
+
+class MyServiceDAO(DatabaseAdapter):
+    """
+    Data Access Object for MyService.
+    Encapsulates all SQL logic for service-specific workflows.
+    """
+    pass
+```
+
+**2. Use the Base Methods**
+
+The `DatabaseAdapter` provides these core methods:
+
+- `_execute(query, params)` - Execute a write query (INSERT, UPDATE, DELETE)
+- `_fetch_one(query, params)` - Fetch a single row as dict
+- `_fetch_all(query, params)` - Fetch multiple rows as list of dicts
+- `_fetch_scalar(query, params)` - Fetch a single value
+- `_execute_many(query, params_list)` - Batch execute with multiple param sets
+- `_cursor()` - Context manager for raw cursor access
+
+**3. Implement Domain Methods**
+
+```python
+async def fetch_pending_jobs(self, limit: int = 10) -> List[Dict[str, Any]]:
+    """Fetch jobs ready for processing."""
+    query = """
+        SELECT id, task_type, payload, priority
+        FROM job_queue
+        WHERE status = 'pending'
+        ORDER BY priority DESC, created_at ASC
+        LIMIT %s
+        FOR UPDATE SKIP LOCKED
+    """
+    return await self._fetch_all(query, (limit,))
+
+async def mark_job_complete(self, job_id: int) -> None:
+    """Mark a job as completed."""
+    query = """
+        UPDATE job_queue 
+        SET status = 'completed', completed_at = %s 
+        WHERE id = %s
+    """
+    now = datetime.now(timezone.utc)
+    await self._execute(query, (now, job_id))
+```
+
+**4. Handle Complex Transactions**
+
+For multi-step operations, use the `_cursor()` context manager:
+
+```python
+async def transfer_credits(self, from_user: str, to_user: str, amount: int) -> None:
+    """Transfer credits between users atomically."""
+    async with self._cursor() as cur:
+        await cur.execute(
+            "UPDATE users SET credits = credits - %s WHERE id = %s",
+            (amount, from_user)
+        )
+        await cur.execute(
+            "UPDATE users SET credits = credits + %s WHERE id = %s",
+            (amount, to_user)
+        )
+        await cur.execute(
+            "INSERT INTO transactions (from_user, to_user, amount) VALUES (%s, %s, %s)",
+            (from_user, to_user, amount)
+        )
+```
+
+**5. Best Practices**
+
+- **Use parameterized queries**: Always use `%s` placeholders, never f-strings
+- **Return typed data**: Return `List[Dict[str, Any]]` for consistency
+- **Handle edge cases**: Check for empty results, null values
+- **Log strategically**: Log failures, not routine operations
+- **Keep SQL readable**: Use multi-line strings with proper indentation
+- **Use database features**: Leverage `FOR UPDATE SKIP LOCKED`, `RETURNING`, CTEs
+
+**6. Testing Your Adapter**
+
+```python
+import pytest
+from atlas.adapters.myservice import MyServiceDAO
+
+@pytest.mark.asyncio
+async def test_fetch_pending_jobs():
+    dao = MyServiceDAO()
+    
+    # Insert test data
+    # ... setup code ...
+    
+    # Fetch jobs
+    jobs = await dao.fetch_pending_jobs(limit=5)
+    
+    assert len(jobs) <= 5
+    assert all(job["status"] == "pending" for job in jobs)
+```
+
+**7. Export and Document**
+
+Add your adapter to `atlas/__init__.py`:
+
+```python
+from atlas.adapters.myservice import MyServiceDAO
+
+__all__ = [
+    # ... existing exports ...
+    "MyServiceDAO",
+]
+```
+
+Update `docs/api-reference.md` with your new adapter's methods.
+
+#### Real-World Example: MaiaDAO
+
+See `atlas/adapters/maia.py` for a production example. Key features:
+
+- **Hunter workflow**: Priority queue with `SKIP LOCKED`
+- **Tracker workflow**: 3-zone staleness detection with CTEs
+- **Snowball logic**: Upsert with conflict handling
+- **Batch operations**: Efficient bulk updates
+
+Study this adapter as a template for your own implementations.
+
+#### Common Patterns
+
+**Priority Queue Processing**:
+```python
+query = """
+    SELECT * FROM queue
+    WHERE status = 'pending'
+    ORDER BY priority DESC
+    LIMIT %s
+    FOR UPDATE SKIP LOCKED
+"""
+```
+
+**Upsert with Conflict Resolution**:
+```python
+query = """
+    INSERT INTO table (key, value) VALUES (%s, %s)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+"""
+```
+
+**Temporal Queries (TimescaleDB)**:
+```python
+query = """
+    SELECT time_bucket('1 hour', timestamp) AS hour,
+           AVG(value) as avg_value
+    FROM metrics
+    WHERE timestamp > NOW() - INTERVAL '24 hours'
+    GROUP BY hour
+    ORDER BY hour DESC
+"""
+```
+
+**Pagination with Cursor**:
+```python
+query = """
+    SELECT * FROM items
+    WHERE id > %s
+    ORDER BY id ASC
+    LIMIT %s
+"""
+```
 
 ## Pull Request Process
 

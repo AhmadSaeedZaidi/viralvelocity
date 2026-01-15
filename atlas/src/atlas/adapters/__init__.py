@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from atlas.db import db
 
-logger = logging.getLogger("atlas.adapter")
+logger = logging.getLogger("atlas.adapters")
 
 
 class DatabaseAdapter:
@@ -55,7 +55,7 @@ class DatabaseAdapter:
         async with self._cursor() as cur:
             await cur.executemany(query, params_list)
     
-    async def _fetch_scalar(self, query: str, params: Optional[Tuple] = None) -> Any:
+    async def _fetch_scalar(self, query: str, params: Optional[Tuple] = None) -> Optional[Any]:
         async with self._cursor() as cur:
             await cur.execute(query, params or ())
             row = await cur.fetchone()

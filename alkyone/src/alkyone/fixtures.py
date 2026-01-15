@@ -57,3 +57,65 @@ async def fresh_db(system_init) -> AsyncGenerator:
             
     yield
     # No teardown needed; the next test will nuke it anyway.
+
+
+# --- TEST DATA FIXTURES ---
+
+@pytest.fixture
+def mock_search_queue_item():
+    """Mock search queue item for Hunter tests."""
+    return {
+        "id": 1,
+        "query_term": "test query",
+        "next_page_token": None,
+        "last_searched_at": None,
+        "priority": 5
+    }
+
+
+@pytest.fixture
+def mock_youtube_search_response():
+    """Mock YouTube search API response."""
+    return {
+        "items": [{
+            "id": {"videoId": "TEST123"},
+            "snippet": {
+                "title": "Test Video",
+                "channelId": "CHANNEL123",
+                "channelTitle": "Test Channel",
+                "publishedAt": "2026-01-15T10:00:00Z",
+                "description": "Test description",
+                "tags": ["test", "video"]
+            }
+        }],
+        "nextPageToken": "NEXT_TOKEN"
+    }
+
+
+@pytest.fixture
+def mock_tracker_target():
+    """Mock tracker target video."""
+    return {
+        "id": "TEST123",
+        "title": "Test Video",
+        "published_at": "2026-01-15T10:00:00Z",
+        "last_updated_at": None
+    }
+
+
+@pytest.fixture
+def mock_youtube_stats_response():
+    """Mock YouTube statistics API response."""
+    return {
+        "items": [{
+            "id": "TEST123",
+            "snippet": {
+                "publishedAt": "2026-01-15T10:00:00Z"
+            },
+            "statistics": {
+                "viewCount": "1000",
+                "likeCount": "100",
+                "commentCount": "10"
+            }
+        }]
+    }

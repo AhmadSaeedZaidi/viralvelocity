@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     PREFECT_API_URL: Optional[str] = None
     PREFECT_API_KEY: Optional[SecretStr] = None
     
+    JANITOR_ENABLED: bool = Field(True, description="Enable automatic cleanup of old processed data")
+    JANITOR_RETENTION_DAYS: int = Field(7, description="Days to retain processed data in hot queue")
+    JANITOR_SAFETY_CHECK: bool = Field(True, description="Verify data exists in Vault before deletion")
+    
     @model_validator(mode="after")
     def validate_vault_config(self) -> "Settings":
         if self.VAULT_PROVIDER == "huggingface":

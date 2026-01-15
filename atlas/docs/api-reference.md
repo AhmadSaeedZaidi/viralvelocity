@@ -185,11 +185,11 @@ await notifier.send(
 
 ---
 
-### `atlas.adapter`
+### `atlas.adapters`
 
-Database adapter base class for clean data access patterns.
+Database adapter base class and service-specific implementations.
 
-#### `DatabaseAdapter`
+#### `DatabaseAdapter` (Base Class)
 
 ```python
 class DatabaseAdapter:
@@ -200,11 +200,38 @@ class DatabaseAdapter:
     async def _execute_many(query: str, params_list: List[Tuple]) -> None
 ```
 
+#### `MaiaDAO` (Maia Service Adapter)
+
+```python
+from atlas.adapters.maia import MaiaDAO
+
+class MaiaDAO(DatabaseAdapter):
+    # Hunter Queries
+    async def fetch_hunter_batch(batch_size: int = 10) -> List[Dict[str, Any]]
+    async def update_search_state(topic_id: int, next_token: Optional[str], 
+                                   result_count: int, status: str = 'active') -> None
+    async def add_to_search_queue(terms: List[str]) -> int
+    
+    # Ingestion
+    async def ingest_video_metadata(video_data: Dict[str, Any]) -> None
+    
+    # Tracker Queries
+    async def fetch_tracker_targets(batch_size: int = 50) -> List[Dict[str, Any]]
+    async def update_video_stats_batch(updates: List[Dict[str, Any]]) -> None
+```
+
 **Usage:**
 ```python
-from atlas import DatabaseAdapter
+from atlas.adapters import DatabaseAdapter
+from atlas.adapters.maia import MaiaDAO
 
-class MyServiceDB(DatabaseAdapter):
+# Use Maia adapter directly
+maia = MaiaDAO()
+batch = await maia.fetch_hunter_batch(batch_size=10)
+await maia.add_to_search_queue(["AI", "ML"])
+
+# Create custom adapter
+class MyServiceDAO(DatabaseAdapter):
     async def get_user(self, user_id: str):
         query = "SELECT * FROM users WHERE id = %s"
         return await self._fetch_one(query, (user_id,))
@@ -212,12 +239,8 @@ class MyServiceDB(DatabaseAdapter):
     async def list_users(self):
         query = "SELECT * FROM users ORDER BY created_at DESC"
         return await self._fetch_all(query)
-    
-    async def count_users(self):
-        query = "SELECT COUNT(*) FROM users"
-        return await self._fetch_scalar(query)
 
-service_db = MyServiceDB()
+service_dao = MyServiceDAO()
 ```
 
 ---

@@ -144,7 +144,10 @@ Check your `.env` file has all required variables and that services are accessib
 
 - **Detailed Usage**: See [Architecture Guide](architecture.md) for component details
 - **Development**: Read [Contributing Guide](contributing.md) for development workflow
-- **Examples**: Check `examples/basic_usage.py` for more patterns
+- **Examples**: 
+  - `examples/basic_usage.py` - Core functionality patterns
+  - `examples/database_adapter.py` - MaiaDAO adapter usage
+- **Custom Adapters**: See [Contributing Guide](contributing.md#creating-a-custom-database-adapter) for building your own DAO
 - **Integration**: Import Atlas in downstream services (Maia, etc.)
 
 ## Development Workflow
