@@ -24,7 +24,6 @@ classifiers = [
 dependencies = [
     "prefect>=2.16.0",
     "aiohttp>=3.9.0",
-    "pleiades-atlas>=0.2.1",  # Atlas (The Brain)
     "tenacity>=8.2.0",  # Retry logic for resilient network operations
     "opencv-python>=4.9.0",  # Painter: Frame extraction
     "yt-dlp>=2024.1.0",  # Video streaming and metadata
