@@ -1,73 +1,175 @@
 # Maia Documentation
 
-Welcome to the Maia documentation! This directory contains comprehensive guides for understanding, using, and contributing to Maia.
+**Collection service agents for the Pleiades platform**
 
-## Documentation Index
-
-### Getting Started
-- **[Main README](../README.md)** - Quick overview and installation guide
-- **[quickstart.md](quickstart.md)** - Step-by-step guide to get started
-
-### Architecture & Design
-- **[architecture.md](ARCHITECTURE.md)** - Complete architectural documentation
-  - Core principles (Statelessness, DAO Pattern, Hydra Protocol)
-  - Component breakdown (Hunter, Tracker)
-  - Data flow and error handling
-  - Interface with Atlas
-
-### Development
-- **[contributing.md](CONTRIBUTING.md)** - Contribution guidelines
-  - Development setup
-  - Code standards
-  - Testing requirements
-  - Pull request process
-
-### Reference
-- **[improvements.md](IMPROVEMENTS.md)** - Recent improvements and enhancements
-- **[ENV.example](../ENV.example)** - Configuration reference
-
-## Quick Links
-
-### For Users
-1. Start with the [Main README](../README.md)
-2. Follow the installation instructions
-3. Configure using [ENV.example](../ENV.example)
-
-### For Developers
-1. Read [ARCHITECTURE.md](ARCHITECTURE.md) to understand the system
-2. Follow [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines
-3. Run tests before submitting PRs
-
-### For Operators
-1. Review [ARCHITECTURE.md](ARCHITECTURE.md) for deployment patterns
-2. Configure environment variables per [ENV.example](../ENV.example)
-3. Monitor using the Hydra Protocol guidelines
-
-## Documentation Structure
-
-```
-docs/
-├── README.md           # This file - documentation index
-├── ARCHITECTURE.md     # Complete architectural guide
-├── CONTRIBUTING.md     # Developer contribution guidelines
-└── IMPROVEMENTS.md     # Recent improvements summary
-```
-
-## Additional Resources
-
-- **Atlas Documentation**: `../atlas/docs/` - Infrastructure layer documentation
-- **Tests**: `../tests/` - Unit tests (integration tests in alkyone/)
-- **Examples**: See README.md for usage examples
-
-## Getting Help
-
-- Check the documentation first
-- Review [ARCHITECTURE.md](ARCHITECTURE.md) for design questions
-- See [CONTRIBUTING.md](CONTRIBUTING.md) for development questions
-- Open an issue on GitHub for bugs or feature requests
+> For complete platform documentation, see **[`../../docs/`](../../docs/README.md)**
 
 ---
 
-**Version**: 0.1.0  
-**Last Updated**: 2026-01-10  
-**Maintainer**: Ahmad Saeed Zaidi
+## Quick Links
+
+- **[Main Documentation](../../docs/README.md)** - Platform overview and architecture
+- **[Quick Start Guide](../../docs/quickstart.md)** - Get up and running
+- **[Ghost Tracking](../../docs/ghost-tracking.md)** - Persistent video tracking
+- **[Hydra Protocol](../../docs/hydra-protocol.md)** - API key management
+- **[Hot Queue Architecture](../../docs/hot-queue.md)** - Ephemeral data pattern
+- **[Testing Guide](../../docs/testing.md)** - Test suite and coverage
+- **[Contributing](../../docs/contributing.md)** - Development workflow
+
+---
+
+## Maia Agents Overview
+
+Maia is a multi-agent system for YouTube video collection. Each agent has a focused responsibility:
+
+### Hunter (`hunter/`)
+**Purpose**: Discover new viral videos
+
+**Responsibilities**:
+- Search YouTube with multiple queries
+- Filter videos published in last 24 hours
+- Add videos to Ghost Tracking watchlist
+- Extract tags for snowball effect
+
+**CLI**:
+```bash
+maia-hunter
+```
+
+---
+
+### Tracker (`tracker/`)
+**Purpose**: Monitor viral velocity and metrics
+
+**Responsibilities**:
+- Fetch from persistent watchlist (Ghost Tracking)
+- Query YouTube Statistics API
+- Log metrics to hot tier (SQL)
+- Update adaptive tracking schedule
+
+**CLI**:
+```bash
+maia-tracker
+```
+
+---
+
+### Scribe (`scribe/`)
+**Purpose**: Extract video transcripts
+
+**Responsibilities**:
+- Download transcripts via YouTube API
+- Store to Vault (cold tier)
+- Mark videos as transcript-safe
+- Retry with exponential backoff
+
+**CLI**:
+```bash
+maia-scribe
+```
+
+---
+
+### Painter (`painter/`)
+**Purpose**: Collect visual evidence (keyframes)
+
+**Responsibilities**:
+- Download videos via yt-dlp
+- Extract keyframes using OpenCV
+- Store frames to Vault (Parquet)
+- Mark videos as visuals-safe
+
+**CLI**:
+```bash
+maia-painter
+```
+
+---
+
+### Janitor (`janitor/`)
+**Purpose**: Hot queue cleanup and stats archival
+
+**Responsibilities**:
+- Archive stats from SQL to Vault (7-day retention)
+- Delete old processed videos
+- Preserve Ghost Tracking watchlist
+- Dry-run mode for safety
+
+**CLI**:
+```bash
+maia-janitor
+```
+
+---
+
+## Agent Details
+
+For detailed agent information, see **[agents.md](agents.md)**
+
+---
+
+## Development
+
+### Installation
+
+```bash
+cd maia
+pip install -e ".[dev]"
+```
+
+### Testing
+
+```bash
+# Unit tests
+pytest tests/
+
+# Integration tests (requires Atlas)
+cd ../alkyone && pytest tests/components/maia/
+
+# With coverage
+pytest --cov=maia --cov-report=html
+```
+
+### Configuration
+
+All agents share Atlas configuration. See **[../atlas/ENV.example](../atlas/ENV.example)** for required environment variables.
+
+**Key settings**:
+```bash
+DATABASE_URL=postgresql://user:pass@host:5432/db
+VAULT_PROVIDER=huggingface  # or 'gcs'
+YOUTUBE_API_KEY_POOL_JSON='["key1","key2"]'
+JANITOR_ENABLED=true
+JANITOR_RETENTION_DAYS=7
+```
+
+---
+
+## Architecture Patterns
+
+### Ghost Tracking
+Videos tracked forever via `watchlist` table, even after Janitor cleanup.
+
+**See**: [docs/ghost-tracking.md](../../docs/ghost-tracking.md)
+
+### Hydra Protocol
+Multi-key rotation with clean termination (exit 0) on quota exhaustion.
+
+**See**: [docs/hydra-protocol.md](../../docs/hydra-protocol.md)
+
+### Hot/Cold Storage
+7-day SQL retention, unlimited Vault storage via Parquet.
+
+**See**: [docs/hot-queue.md](../../docs/hot-queue.md)
+
+---
+
+## Related Documentation
+
+- **[Atlas](../atlas/docs/README.md)** - Infrastructure layer
+- **[Alkyone](../alkyone/README.md)** - Integration testing
+
+---
+
+**Maintainer**: Ahmad Saeed Zaidi  
+**Last Updated**: 2026-01-15

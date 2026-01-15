@@ -16,8 +16,9 @@ def retry_async(
     delay: float = 1.0,
     backoff: float = 2.0,
     exceptions: tuple = (Exception,),
+    max_delay: float = 60.0,
 ) -> Callable:
-    """Async retry decorator with exponential backoff."""
+    """Async retry decorator with exponential backoff and capped delay."""
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -33,7 +34,9 @@ def retry_async(
                         logger.warning(
                             f"{func.__name__} failed (attempt {attempt + 1}/{max_attempts}): {e}"
                         )
-                        await asyncio.sleep(current_delay)
+                        # Sleep with capped delay for safety
+                        sleep_time = min(current_delay, max_delay)
+                        await asyncio.sleep(sleep_time)
                         current_delay *= backoff
                     else:
                         logger.error(

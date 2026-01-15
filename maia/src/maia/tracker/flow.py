@@ -94,8 +94,27 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         return 0
 
     try:
+        # Write to hot tier (video_stats_log table)
+        from datetime import datetime, timezone
+        
+        stats_list = []
+        for item in items:
+            stats = item.get("statistics", {})
+            stats_list.append({
+                'video_id': item['id'],
+                'views': int(stats.get('viewCount', 0)) if stats.get('viewCount') else None,
+                'likes': int(stats.get('likeCount', 0)) if stats.get('likeCount') else None,
+                'comment_count': int(stats.get('commentCount', 0)) if stats.get('commentCount') else None,
+                'timestamp': datetime.now(timezone.utc)
+            })
+        
+        # Log to hot tier
+        await dao.log_video_stats_batch(stats_list)
+        
+        # Also update last_updated_at on videos table (legacy behavior)
         await dao.update_video_stats_batch(items)
-        run_logger.info(f"✓ Updated stats for {len(items)} videos.")
+        
+        run_logger.info(f"✓ Logged {len(stats_list)} stats to hot tier")
         return len(items)
     except Exception as e:
         run_logger.error(f"Failed to update stats in database: {e}")

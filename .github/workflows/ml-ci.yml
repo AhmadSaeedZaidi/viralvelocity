@@ -1,0 +1,138 @@
+name: CI - Lint & Test
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'hf-spaces/model-api/**'
+      - 'hf-spaces/ml-dashboard/**'
+      - 'training/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'hf-spaces/model-api/**'
+      - 'hf-spaces/ml-dashboard/**'
+      - 'training/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # ======================================================
+  # GROUP 1: MODEL API (FastAPI)
+  # ======================================================
+  
+  lint-api:
+    name: 🧹 Lint API
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/hf-spaces/model-api
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Lint Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+
+      - name: Run Linter (Ruff)
+        run: ruff check .
+
+  test-api:
+    name: 🧪 Test API
+    needs: lint-api
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/hf-spaces/model-api
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Test Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx pytest-mock
+
+      - name: Run Tests (Pytest)
+        env:
+          ENABLE_MOCK_INFERENCE: "True"
+        run: pytest -v
+
+  # ======================================================
+  # GROUP 2: TRAINING PIPELINE (Dockerized)
+  # ======================================================
+
+  lint-training:
+    name: 🧹 Lint Training
+    needs: test-api
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Lint Tools
+        run: pip install flake8
+
+      - name: Lint Training Code
+        run: flake8 training/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  test-training:
+    name: 🧪 Test ${{ matrix.test_file }}
+    needs: lint-training
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ahmadsaeedzaidi/viralvelocity/training:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        test_file:
+          - test_feature_engineering.py
+          - test_anomaly_pipeline.py
+          - test_clickbait_pipeline.py
+          - test_genre_pipeline.py
+          - test_tags_pipeline.py
+          - test_velocity_pipeline.py
+          - test_viral_pipeline.py
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Test Tools
+        run: pip install pytest
+
+      - name: Run Unit Test
+        env:
+          PYTHONPATH: .
+        run: python -m unittest training/tests/${{ matrix.test_file }}

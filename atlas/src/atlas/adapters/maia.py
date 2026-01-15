@@ -145,7 +145,37 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
             batch_size
         ))
 
+    async def log_video_stats_batch(self, stats_list: List[Dict[str, Any]]) -> None:
+        """
+        Log video statistics to the hot tier (video_stats_log table).
+        
+        Args:
+            stats_list: List of dicts with keys: video_id, views, likes, comment_count, timestamp
+        """
+        if not stats_list:
+            return
+        
+        log_query = """
+            INSERT INTO video_stats_log (video_id, views, likes, comment_count, timestamp)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        
+        params_list = [
+            (
+                stat['video_id'],
+                stat.get('views'),
+                stat.get('likes'),
+                stat.get('comment_count'),
+                stat.get('timestamp', datetime.now(timezone.utc))
+            )
+            for stat in stats_list
+        ]
+        
+        await self._execute_many(log_query, params_list)
+        logger.info(f"Logged {len(stats_list)} stats to hot tier")
+
     async def update_video_stats_batch(self, updates: List[Dict[str, Any]]) -> None:
+        """Legacy method for updating video stats. Prefer log_video_stats_batch for new code."""
         timestamp_query = "UPDATE videos SET last_updated_at = %s WHERE id = %s"
         
         log_query = """
@@ -262,6 +292,67 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
         """
         now = datetime.now(timezone.utc)
         await self._execute(query, (now, video_id))
+
+    async def archive_cold_stats(self, retention_days: int = 7, batch_size: int = 5000) -> int:
+        """
+        Archive stats older than retention_days from hot tier (SQL) to cold tier (Vault).
+        Returns the number of rows archived.
+        """
+        from atlas.vault import vault
+        
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        
+        # Step 1: Select old stats
+        select_query = """
+            SELECT id, video_id, views, likes, comment_count, timestamp
+            FROM video_stats_log
+            WHERE timestamp < %s
+            ORDER BY timestamp ASC
+            LIMIT %s
+        """
+        
+        stats = await self._fetch_all(select_query, (cutoff_date, batch_size))
+        
+        if not stats:
+            logger.info("No stats to archive")
+            return 0
+        
+        # Step 2: Prepare for Vault (group by date)
+        try:
+            # Group stats by date for efficient Parquet storage
+            from collections import defaultdict
+            stats_by_date = defaultdict(list)
+            
+            for stat in stats:
+                date_str = stat['timestamp'].strftime("%Y-%m-%d") if isinstance(stat['timestamp'], datetime) else stat['timestamp'][:10]
+                stats_by_date[date_str].append({
+                    'video_id': stat['video_id'],
+                    'views': stat['views'],
+                    'likes': stat['likes'],
+                    'comment_count': stat['comment_count'],
+                    'timestamp': stat['timestamp'].isoformat() if isinstance(stat['timestamp'], datetime) else stat['timestamp']
+                })
+            
+            # Step 3: Upload to Vault (one file per date)
+            for date_str, day_stats in stats_by_date.items():
+                vault.append_metrics(day_stats, date=date_str)
+                logger.info(f"Archived {len(day_stats)} stats for date {date_str}")
+            
+            # Step 4: Purge from hot tier (only after successful Vault upload)
+            stat_ids = [stat['id'] for stat in stats]
+            delete_query = """
+                DELETE FROM video_stats_log
+                WHERE id = ANY(%s)
+            """
+            await self._execute(delete_query, (stat_ids,))
+            
+            logger.info(f"Archived and purged {len(stats)} stats from hot tier")
+            return len(stats)
+            
+        except Exception as e:
+            logger.error(f"Failed to archive stats: {e}")
+            # Don't delete if Vault upload failed
+            raise
 
     async def run_janitor(self, dry_run: bool = False) -> Dict[str, Any]:
         """

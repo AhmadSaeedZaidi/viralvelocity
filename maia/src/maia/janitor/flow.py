@@ -10,6 +10,39 @@ from prefect import flow, get_run_logger, task
 logger = logging.getLogger(__name__)
 
 
+@task(name="archive_cold_stats")
+async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, Any]:
+    """Archive stats older than retention_days from hot tier to cold tier (Vault)."""
+    dao = MaiaDAO()
+    run_logger = get_run_logger()
+    
+    run_logger.info(f"Starting stats archival (retention: {retention_days} days)...")
+    
+    total_archived = 0
+    batch_count = 0
+    
+    # Loop until backlog is drained
+    while True:
+        try:
+            archived = await dao.archive_cold_stats(retention_days=retention_days, batch_size=5000)
+            if archived == 0:
+                break
+            
+            total_archived += archived
+            batch_count += 1
+            run_logger.info(f"Batch {batch_count}: Archived {archived} stats (total: {total_archived})")
+            
+            # Prevent tight loop
+            await asyncio.sleep(1)
+            
+        except Exception as e:
+            run_logger.error(f"Stats archival failed: {e}")
+            raise
+    
+    run_logger.info(f"Stats archival complete: {total_archived} total rows archived in {batch_count} batches")
+    return {"archived": total_archived, "batches": batch_count}
+
+
 @task(name="run_janitor_cleanup")
 async def run_janitor_cleanup(dry_run: bool = False) -> Dict[str, Any]:
     dao = MaiaDAO()
@@ -33,9 +66,13 @@ async def run_janitor_cleanup(dry_run: bool = False) -> Dict[str, Any]:
 
 
 @flow(name="janitor_cycle")
-async def janitor_cycle(dry_run: bool = False) -> None:
+async def janitor_cycle(dry_run: bool = False, archive_stats: bool = True) -> None:
     """
     Prefect flow for running the Janitor cleanup cycle.
+    
+    This flow:
+    1. Archives old stats from hot tier (SQL) to cold tier (Vault) 
+    2. Cleans up old processed videos from hot queue
     
     This flow should be scheduled to run periodically (e.g., daily)
     to keep the hot queue size under control.
@@ -50,14 +87,35 @@ async def janitor_cycle(dry_run: bool = False) -> None:
     run_logger.info("JANITOR CYCLE STARTING")
     run_logger.info("=" * 60)
     
-    result = await run_janitor_cleanup(dry_run=dry_run)
+    results = {}
+    
+    # Step 1: Archive stats to cold tier
+    if archive_stats and not dry_run:
+        run_logger.info("Phase 1: Archiving stats to cold tier...")
+        try:
+            stats_result = await archive_cold_stats_task(retention_days=7)
+            results['stats_archived'] = stats_result['archived']
+            results['archive_batches'] = stats_result['batches']
+        except Exception as e:
+            run_logger.error(f"Stats archival failed: {e}")
+            results['stats_archived'] = 0
+            results['archive_error'] = str(e)
+    else:
+        run_logger.info("Phase 1: Stats archival skipped (dry_run or disabled)")
+        results['stats_archived'] = 0
+    
+    # Step 2: Clean up old videos
+    run_logger.info("Phase 2: Cleaning up old videos...")
+    video_result = await run_janitor_cleanup(dry_run=dry_run)
+    results['videos_deleted'] = video_result.get('deleted', 0)
     
     run_logger.info("=" * 60)
     run_logger.info("JANITOR CYCLE COMPLETE")
-    run_logger.info(f"Result: {result}")
+    run_logger.info(f"Stats archived: {results.get('stats_archived', 0)}")
+    run_logger.info(f"Videos deleted: {results.get('videos_deleted', 0)}")
     run_logger.info("=" * 60)
     
-    return result
+    return results
 
 
 def main() -> None:
