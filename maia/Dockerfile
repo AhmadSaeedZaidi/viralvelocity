@@ -23,12 +23,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Atlas (The Brain)
+# Upgrade pip and install build tools
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel poetry-core
+
+# Copy and install Atlas (The Brain) - Uses Poetry build backend
 # Atlas must be installed first as Maia depends on it
 COPY atlas /app/atlas
-RUN pip install --no-cache-dir -e /app/atlas
+RUN pip install --no-cache-dir -e '/app/atlas[all]'
 
-# Copy and install Maia (The Agent)
+# Copy and install Maia (The Agent) - Uses setuptools
 COPY maia /app/maia
 RUN pip install --no-cache-dir -e /app/maia
 
