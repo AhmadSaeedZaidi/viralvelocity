@@ -40,6 +40,31 @@ pleiades/
 
 ---
 
+## CI/CD Testing
+
+### Ephemeral Database Environments
+
+CI integration tests use **Neon Postgres ephemeral branches**:
+- Each PR gets an isolated temporary database
+- Cloned from production (`main` branch)
+- Automatically cleaned up after tests
+
+**Required Configuration**:
+```bash
+gh variable set NEON_PROJECT_ID --body "your-project-id"
+gh secret set NEON_API_KEY
+```
+
+**Local Testing with Neon**:
+```bash
+neonctl branches create --name test-branch --parent main
+export DATABASE_URL=$(neonctl connection-string --branch test-branch)
+pytest -m integration
+neonctl branches delete test-branch
+```
+
+---
+
 ## Running Tests
 
 ### All Tests

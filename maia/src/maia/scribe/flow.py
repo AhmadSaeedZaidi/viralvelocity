@@ -3,16 +3,17 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from atlas.vault import vault
-from atlas.adapters.maia import MaiaDAO
 from prefect import flow, get_run_logger, task
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log
 )
+
+from atlas.adapters.maia import MaiaDAO
+from atlas.vault import vault
 
 from .loader import TranscriptLoader
 
@@ -32,7 +33,7 @@ async def fetch_scribe_targets(batch_size: int = 10) -> List[Dict[str, Any]]:
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-    before_sleep=before_sleep_log(logger, logging.WARNING)
+    before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) -> Any:
     loop = asyncio.get_event_loop()
@@ -42,14 +43,13 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    before_sleep=before_sleep_log(logger, logging.WARNING)
+    before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 async def _store_to_vault_with_retry(vid_id: str, transcript_data: Any) -> str:
     """Store transcript to vault with retry logic for network failures."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        None,
-        lambda: vault.store_transcript(vid_id, transcript_data)
+        None, lambda: vault.store_transcript(vid_id, transcript_data)
     )
 
 
@@ -128,6 +128,7 @@ def main() -> None:
 if __name__ == "__main__":
     # Configure logging for standalone execution
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     main()

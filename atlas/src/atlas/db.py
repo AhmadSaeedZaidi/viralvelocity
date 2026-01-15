@@ -1,8 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
+
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
+
 from atlas.config import settings
 
 logger = logging.getLogger("atlas.db")
@@ -20,7 +22,7 @@ class DatabaseManager:
     def __init__(self) -> None:
         if not hasattr(self, "dsn"):
             self.dsn = str(settings.DATABASE_URL)
-        
+
     async def initialize(self) -> None:
         if self._pool is None:
             logger.info("Atlas: Connecting to Database...")

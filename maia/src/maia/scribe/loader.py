@@ -2,7 +2,11 @@ import logging
 from typing import Dict, List, Optional
 
 from prefect import get_run_logger
-from youtube_transcript_api import TooManyRequests, TranscriptsDisabled, YouTubeTranscriptApi
+from youtube_transcript_api import (
+    TooManyRequests,
+    TranscriptsDisabled,
+    YouTubeTranscriptApi,
+)
 
 
 class TranscriptLoader:

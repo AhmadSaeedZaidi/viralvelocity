@@ -58,7 +58,8 @@
 
 ### Platform Secrets
 ```bash
-DATABASE_URL              # PostgreSQL connection string
+DATABASE_URL              # PostgreSQL connection string (production)
+NEON_API_KEY             # For ephemeral CI test databases
 VAULT_PROVIDER            # "huggingface" or "gcs"
 HF_TOKEN                  # HuggingFace API token
 HF_DATASET_ID            # username/dataset-name
@@ -73,25 +74,37 @@ PREFECT_API_URL          # If using Prefect Cloud
 PREFECT_API_KEY          # Prefect authentication
 ```
 
+## Required GitHub Variables
+
+```bash
+NEON_PROJECT_ID          # For ephemeral CI test databases
+```
+
 ---
 
 ## Deployment Steps
 
-### 1. Configure Secrets
+### 1. Configure Secrets & Variables
 
 Go to GitHub Settings → Secrets and variables → Actions:
 
 ```bash
-# Required
+# Required Secrets
 gh secret set DATABASE_URL --body "postgresql://user:pass@host:5432/db"
+gh secret set NEON_API_KEY  # Get from console.neon.tech → Account → API Keys
 gh secret set VAULT_PROVIDER --body "huggingface"
 gh secret set HF_TOKEN --body "hf_xxxxxxxxxxxxx"
 gh secret set HF_DATASET_ID --body "username/pleiades-vault"
 gh secret set YOUTUBE_API_KEY_POOL_JSON --body '["key1","key2","key3"]'
 
+# Required Variables
+gh variable set NEON_PROJECT_ID --body "your-neon-project-id"
+
 # Optional
 gh secret set DISCORD_WEBHOOK_ALERTS --body "https://discord.com/api/webhooks/..."
 ```
+
+**Note**: CI uses Neon ephemeral databases for integration tests (requires `NEON_API_KEY` and `NEON_PROJECT_ID`).
 
 ### 2. Push to GitHub
 
@@ -230,6 +243,16 @@ data = vault.fetch_json("test.json")
 ---
 
 ## Troubleshooting
+
+### CI Fails: "poetry section not found" or "pleiades-atlas not found"
+
+**Cause**: Atlas uses Poetry, Maia uses setuptools. CI handles this automatically.
+
+**Fix**: Ensure local installation order:
+```bash
+pip install -e atlas[all]  # Poetry-based (requires poetry-core)
+pip install -e maia[dev]    # setuptools-based
+```
 
 ### CI Fails: "mypy errors"
 

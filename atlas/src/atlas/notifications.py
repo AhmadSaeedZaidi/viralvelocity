@@ -43,7 +43,7 @@ class DiscordNotifier:
         fields: Optional[Dict[str, str]] = None,
     ) -> None:
         secret = self.hooks.get(channel)
-        
+
         if not secret:
             if channel != AlertChannel.ALERTS and self.hooks.get(AlertChannel.ALERTS):
                 secret = self.hooks[AlertChannel.ALERTS]
@@ -52,7 +52,7 @@ class DiscordNotifier:
                 return
 
         webhook_url = secret.get_secret_value()
-        
+
         embed = {
             "title": f"[{self.env_tag}] {title}",
             "description": description,
@@ -60,7 +60,10 @@ class DiscordNotifier:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "footer": {"text": "Pleiades Atlas"},
             "fields": (
-                [{"name": k, "value": str(v), "inline": True} for k, v in fields.items()]
+                [
+                    {"name": k, "value": str(v), "inline": True}
+                    for k, v in fields.items()
+                ]
                 if fields
                 else []
             ),
@@ -68,7 +71,9 @@ class DiscordNotifier:
 
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.post(webhook_url, json={"embeds": [embed]}) as response:
+                async with session.post(
+                    webhook_url, json={"embeds": [embed]}
+                ) as response:
                     if response.status not in [200, 204]:
                         logger.error(f"Discord alert failed: HTTP {response.status}")
                     else:

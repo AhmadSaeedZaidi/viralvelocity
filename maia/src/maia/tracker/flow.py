@@ -5,9 +5,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from atlas.adapters.maia import MaiaDAO
-from atlas.utils import KeyRing, HydraExecutor
 from prefect import flow, get_run_logger, task
+
+from atlas.adapters.maia import MaiaDAO
+from atlas.utils import HydraExecutor, KeyRing
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,9 @@ async def fetch_targets(batch_size: int = 50) -> List[Dict[str, Any]]:
 
     try:
         targets = await dao.fetch_tracker_targets(batch_size)
-        logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
+        logger.info(
+            f"Fetched {len(targets)} videos for tracking (batch_size={batch_size})."
+        )
         return targets
     except Exception as e:
         logger.error(f"Failed to fetch tracker targets: {e}")
@@ -60,7 +63,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     # Define the request function for HydraExecutor
     async def make_request(api_key: str) -> Dict[str, Any]:
         params["key"] = api_key
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(base_url, params=params) as resp:
                 if resp.status == 200:
@@ -96,24 +99,38 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     try:
         # Write to hot tier (video_stats_log table)
         from datetime import datetime, timezone
-        
+
         stats_list = []
         for item in items:
             stats = item.get("statistics", {})
-            stats_list.append({
-                'video_id': item['id'],
-                'views': int(stats.get('viewCount', 0)) if stats.get('viewCount') else None,
-                'likes': int(stats.get('likeCount', 0)) if stats.get('likeCount') else None,
-                'comment_count': int(stats.get('commentCount', 0)) if stats.get('commentCount') else None,
-                'timestamp': datetime.now(timezone.utc)
-            })
-        
+            stats_list.append(
+                {
+                    "video_id": item["id"],
+                    "views": (
+                        int(stats.get("viewCount", 0))
+                        if stats.get("viewCount")
+                        else None
+                    ),
+                    "likes": (
+                        int(stats.get("likeCount", 0))
+                        if stats.get("likeCount")
+                        else None
+                    ),
+                    "comment_count": (
+                        int(stats.get("commentCount", 0))
+                        if stats.get("commentCount")
+                        else None
+                    ),
+                    "timestamp": datetime.now(timezone.utc),
+                }
+            )
+
         # Log to hot tier
         await dao.log_video_stats_batch(stats_list)
-        
+
         # Also update last_updated_at on videos table (legacy behavior)
         await dao.update_video_stats_batch(items)
-        
+
         run_logger.info(f"✓ Logged {len(stats_list)} stats to hot tier")
         return len(items)
     except Exception as e:
@@ -144,14 +161,18 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     try:
         # Enforce YouTube API batch limit
         if batch_size > 50:
-            logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
+            logger.warning(
+                f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50."
+            )
             batch_size = 50
 
         targets = await fetch_targets(batch_size=batch_size)
         stats["videos_fetched"] = len(targets)
 
         if not targets:
-            logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
+            logger.info(
+                "No videos need tracking updates. Tracker cycle complete (idle)."
+            )
             return stats
 
         updated_count = await update_stats(targets)
@@ -194,6 +215,7 @@ def main() -> None:
 if __name__ == "__main__":
     # Configure logging for standalone execution
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     main()

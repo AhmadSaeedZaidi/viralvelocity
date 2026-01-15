@@ -6,10 +6,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from atlas.vault import vault
-from atlas.adapters.maia import MaiaDAO
-from atlas.utils import KeyRing, HydraExecutor
 from prefect import flow, get_run_logger, task
+
+from atlas.adapters.maia import MaiaDAO
+from atlas.utils import HydraExecutor, KeyRing
+from atlas.vault import vault
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ async def search_youtube(topic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     async def make_request(api_key: str) -> Dict[str, Any]:
         params["key"] = api_key
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(base_url, params=params) as resp:
                 if resp.status == 200:
@@ -128,7 +129,9 @@ async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> Non
         tags = snippet.get("tags", [])
         if tags and isinstance(tags, list):
             # Filter out empty tags and normalize
-            valid_tags = [str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0]
+            valid_tags = [
+                str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0
+            ]
             snowball_tags.extend(valid_tags)
 
     # 3. Feed tags back into search queue (Snowball)
@@ -145,7 +148,10 @@ async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> Non
     # 4. Update Topic State
     try:
         await dao.update_search_state(
-            topic["id"], next_token, len(items), status="active" if next_token else "exhausted"
+            topic["id"],
+            next_token,
+            len(items),
+            status="active" if next_token else "exhausted",
         )
     except Exception as e:
         logger.error(f"Failed to update search state for topic {topic['id']}: {e}")
@@ -240,6 +246,7 @@ def main() -> None:
 if __name__ == "__main__":
     # Configure logging for standalone execution
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     main()

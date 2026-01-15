@@ -23,6 +23,7 @@ except ImportError:
 
 logger = logging.getLogger("atlas.vault")
 
+
 class VaultStrategy(abc.ABC):
     @abc.abstractmethod
     def store_json(self, path: str, data: Any) -> None:
@@ -31,44 +32,51 @@ class VaultStrategy(abc.ABC):
     @abc.abstractmethod
     def fetch_json(self, path: str) -> Optional[dict]:
         pass
-    
+
     @abc.abstractmethod
     def list_files(self, prefix: str) -> List[str]:
         pass
 
     @abc.abstractmethod
-    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+    def store_visual_evidence(
+        self, video_id: str, frames: List[Tuple[int, bytes]]
+    ) -> None:
         pass
-    
+
     @abc.abstractmethod
     def store_binary(self, path: str, data: io.BytesIO) -> str:
         pass
-    
+
     @abc.abstractmethod
     def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
         pass
-    
-    def store_metadata(self, video_id: str, data: dict, date: Optional[str] = None) -> None:
+
+    def store_metadata(
+        self, video_id: str, data: dict, date: Optional[str] = None
+    ) -> None:
         if date is None:
             date = datetime.utcnow().strftime("%Y-%m-%d")
         path = f"metadata/{date}/{video_id}.json"
         self.store_json(path, data)
-    
+
     def fetch_metadata(self, video_id: str, date: str) -> Optional[dict]:
         path = f"metadata/{date}/{video_id}.json"
         return self.fetch_json(path)
-    
+
     def store_transcript(self, video_id: str, transcript: dict) -> None:
         path = f"transcripts/{video_id}.json"
         self.store_json(path, transcript)
-    
+
     def fetch_transcript(self, video_id: str) -> Optional[dict]:
         path = f"transcripts/{video_id}.json"
         return self.fetch_json(path)
-    
+
     @abc.abstractmethod
-    def append_metrics(self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None) -> None:
+    def append_metrics(
+        self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None
+    ) -> None:
         pass
+
 
 class HuggingFaceVault(VaultStrategy):
     def __init__(self) -> None:
@@ -79,7 +87,7 @@ class HuggingFaceVault(VaultStrategy):
             )
         if not settings.HF_DATASET_ID:
             raise ValueError("HF_DATASET_ID required for HuggingFace vault")
-        
+
         self.repo_id = settings.HF_DATASET_ID
         self.token = settings.HF_TOKEN.get_secret_value() if settings.HF_TOKEN else None
         self.api = HfApi(token=self.token)
@@ -116,7 +124,7 @@ class HuggingFaceVault(VaultStrategy):
     def list_files(self, prefix: str) -> List[str]:
         try:
             files = self.api.list_repo_files(
-                repo_id=self.repo_id, 
+                repo_id=self.repo_id,
                 repo_type="dataset",
             )
             return [f for f in files if f.startswith(prefix)]
@@ -124,18 +132,20 @@ class HuggingFaceVault(VaultStrategy):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+    def store_visual_evidence(
+        self, video_id: str, frames: List[Tuple[int, bytes]]
+    ) -> None:
         try:
             data = [
                 {"video_id": video_id, "frame_index": idx, "image": img_bytes}
                 for idx, img_bytes in frames
             ]
             df = pd.DataFrame(data)
-            
+
             buffer = io.BytesIO()
             df.to_parquet(buffer, engine="pyarrow")
             buffer.seek(0)
-            
+
             path = f"visuals/{video_id}.parquet"
             self.api.upload_file(
                 path_or_fileobj=buffer,
@@ -148,7 +158,7 @@ class HuggingFaceVault(VaultStrategy):
         except Exception as e:
             logger.error(f"Failed to archive visuals for {video_id}: {e}")
             raise
-    
+
     def store_binary(self, path: str, data: io.BytesIO) -> str:
         try:
             data.seek(0)
@@ -164,7 +174,7 @@ class HuggingFaceVault(VaultStrategy):
         except Exception as e:
             logger.error(f"HF binary upload failed for {path}: {e}")
             raise
-    
+
     def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
         try:
             if path.startswith("hf://"):
@@ -176,31 +186,33 @@ class HuggingFaceVault(VaultStrategy):
                 repo_type="dataset",
                 token=self.token,
             )
-            
+
             with open(local_path, "rb") as f:
                 return io.BytesIO(f.read())
-                
+
         except Exception as e:
             logger.warning(f"Failed to fetch binary {path} from HF vault: {e}")
             return None
-    
-    def append_metrics(self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None) -> None:
+
+    def append_metrics(
+        self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None
+    ) -> None:
         """
         Append time-series metrics to partitioned Parquet files.
-        
+
         Uses Hive-style partitioning: metrics/date=YYYY-MM-DD/hour=HH/stats.parquet
         """
         if not data:
             logger.warning("No metrics data to append")
             return
-        
+
         if date is None:
             date = datetime.utcnow().strftime("%Y-%m-%d")
         if hour is None:
             hour = datetime.utcnow().strftime("%H")
-        
+
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
-        
+
         try:
             # Try to fetch existing file
             existing_df = None
@@ -215,21 +227,21 @@ class HuggingFaceVault(VaultStrategy):
                 logger.info(f"Found existing metrics file with {len(existing_df)} rows")
             except Exception:
                 logger.info(f"No existing metrics file at {path}, creating new")
-            
+
             # Create DataFrame from new data
             new_df = pd.DataFrame(data)
-            
+
             # Concat if existing data found
             if existing_df is not None:
                 combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             else:
                 combined_df = new_df
-            
+
             # Write to buffer
             buffer = io.BytesIO()
             combined_df.to_parquet(buffer, engine="pyarrow", index=False)
             buffer.seek(0)
-            
+
             # Upload
             self.api.upload_file(
                 path_or_fileobj=buffer,
@@ -238,12 +250,15 @@ class HuggingFaceVault(VaultStrategy):
                 repo_type="dataset",
                 commit_message=f"Append metrics: {len(data)} rows to {path}",
             )
-            
-            logger.info(f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})")
-            
+
+            logger.info(
+                f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})"
+            )
+
         except Exception as e:
             logger.error(f"Failed to append metrics to {path}: {e}")
             raise
+
 
 class GCSVault(VaultStrategy):
     def __init__(self) -> None:
@@ -254,7 +269,7 @@ class GCSVault(VaultStrategy):
             )
         if not settings.GCS_BUCKET_NAME:
             raise ValueError("GCS_BUCKET_NAME required for GCS vault")
-        
+
         self.bucket_name = settings.GCS_BUCKET_NAME
         self.client = storage.Client()
         self.bucket = self.client.bucket(self.bucket_name)
@@ -262,10 +277,7 @@ class GCSVault(VaultStrategy):
     def store_json(self, path: str, data: Any) -> None:
         try:
             blob = self.bucket.blob(path)
-            blob.upload_from_string(
-                json.dumps(data), 
-                content_type="application/json"
-            )
+            blob.upload_from_string(json.dumps(data), content_type="application/json")
             logger.info(f"Stored {path} to GCS vault")
         except Exception as e:
             logger.error(f"GCS upload failed for {path}: {e}")
@@ -289,7 +301,9 @@ class GCSVault(VaultStrategy):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+    def store_visual_evidence(
+        self, video_id: str, frames: List[Tuple[int, bytes]]
+    ) -> None:
         try:
             for idx, img_bytes in frames:
                 path = f"visuals/{video_id}/{idx}.jpg"
@@ -299,7 +313,7 @@ class GCSVault(VaultStrategy):
         except Exception as e:
             logger.error(f"Failed to store visuals for {video_id}: {e}")
             raise
-    
+
     def store_binary(self, path: str, data: io.BytesIO) -> str:
         try:
             data.seek(0)
@@ -310,7 +324,7 @@ class GCSVault(VaultStrategy):
         except Exception as e:
             logger.error(f"GCS binary upload failed for {path}: {e}")
             raise
-    
+
     def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
         try:
             if path.startswith("gs://"):
@@ -319,7 +333,7 @@ class GCSVault(VaultStrategy):
             blob = self.bucket.blob(path)
             if not blob.exists():
                 return None
-                
+
             buffer = io.BytesIO()
             blob.download_to_file(buffer)
             buffer.seek(0)
@@ -327,27 +341,31 @@ class GCSVault(VaultStrategy):
         except Exception as e:
             logger.warning(f"Failed to fetch binary {path} from GCS vault: {e}")
             return None
-    
-    def append_metrics(self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None) -> None:
+
+    def append_metrics(
+        self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None
+    ) -> None:
         """
         Append time-series metrics to partitioned Parquet files in GCS.
-        
+
         Uses Hive-style partitioning: metrics/date=YYYY-MM-DD/hour=HH/stats.parquet
         """
         if not data:
             logger.warning("No metrics data to append")
             return
-        
+
         if not pd:
-            raise ImportError("pandas required for metrics append. Install: pip install pandas pyarrow")
-        
+            raise ImportError(
+                "pandas required for metrics append. Install: pip install pandas pyarrow"
+            )
+
         if date is None:
             date = datetime.utcnow().strftime("%Y-%m-%d")
         if hour is None:
             hour = datetime.utcnow().strftime("%H")
-        
+
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
-        
+
         try:
             # Try to fetch existing file
             existing_df = None
@@ -360,29 +378,32 @@ class GCSVault(VaultStrategy):
                 logger.info(f"Found existing metrics file with {len(existing_df)} rows")
             else:
                 logger.info(f"No existing metrics file at {path}, creating new")
-            
+
             # Create DataFrame from new data
             new_df = pd.DataFrame(data)
-            
+
             # Concat if existing data found
             if existing_df is not None:
                 combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             else:
                 combined_df = new_df
-            
+
             # Write to buffer
             buffer = io.BytesIO()
             combined_df.to_parquet(buffer, engine="pyarrow", index=False)
             buffer.seek(0)
-            
+
             # Upload
             blob.upload_from_file(buffer, content_type="application/octet-stream")
-            
-            logger.info(f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})")
-            
+
+            logger.info(
+                f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})"
+            )
+
         except Exception as e:
             logger.error(f"Failed to append metrics to {path}: {e}")
             raise
+
 
 def get_vault() -> VaultStrategy:
     if settings.VAULT_PROVIDER == "gcs":

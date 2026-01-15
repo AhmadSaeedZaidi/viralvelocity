@@ -1,5 +1,5 @@
 """Maia Tracker - Velocity Monitoring Agent"""
 
-from .flow import run_tracker_cycle, main
+from .flow import main, run_tracker_cycle
 
 __all__ = ["run_tracker_cycle", "main"]
