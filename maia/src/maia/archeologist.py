@@ -65,7 +65,9 @@ async def hunt_history(year: int, month: int) -> None:
 
                             # Ingest with High Priority (100)
                             for item in items:
-                                await dao.ingest_video_metadata(item, priority_override=100)
+                                await dao.ingest_video_metadata(
+                                    item, priority_override=100
+                                )
 
                             logger.info(
                                 f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
@@ -73,7 +75,9 @@ async def hunt_history(year: int, month: int) -> None:
                             break  # Success, move to next category
 
                         elif resp.status == 403:
-                            logger.warning(f"Archeologist Key {key[-6:]} burned. Rotating.")
+                            logger.warning(
+                                f"Archeologist Key {key[-6:]} burned. Rotating."
+                            )
                             continue
                         elif resp.status == 429:
                             logger.critical("Archeologist hit 429. Aborting to Hydra.")

@@ -308,7 +308,9 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
         now = datetime.now(timezone.utc)
         await self._execute(query, (now, video_id))
 
-    async def archive_cold_stats(self, retention_days: int = 7, batch_size: int = 5000) -> int:
+    async def archive_cold_stats(
+        self, retention_days: int = 7, batch_size: int = 5000
+    ) -> int:
         """
         Archive stats older than retention_days from hot tier (SQL) to cold tier (Vault).
         Returns the number of rows archived.
@@ -394,7 +396,9 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
             logger.info("Janitor is disabled in settings")
             return {"deleted": 0, "reason": "disabled"}
 
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(
+            days=settings.JANITOR_RETENTION_DAYS
+        )
 
         # Build the WHERE clause based on safety settings
         safety_clause = ""

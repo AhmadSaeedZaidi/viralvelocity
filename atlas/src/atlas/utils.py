@@ -41,7 +41,9 @@ def retry_async(
                         await asyncio.sleep(sleep_time)
                         current_delay *= backoff
                     else:
-                        logger.error(f"{func.__name__} failed after {max_attempts} attempts")
+                        logger.error(
+                            f"{func.__name__} failed after {max_attempts} attempts"
+                        )
 
             if last_exception:
                 raise last_exception
@@ -87,7 +89,9 @@ def validate_youtube_id(video_id: str) -> bool:
     if len(video_id) != 11:
         return False
 
-    allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    allowed_chars = set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    )
     return all(c in allowed_chars for c in video_id)
 
 
@@ -110,7 +114,9 @@ def validate_channel_id(channel_id: str) -> bool:
     if len(channel_id) != 24:
         return False
 
-    allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    allowed_chars = set(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    )
     return all(c in allowed_chars for c in channel_id)
 
 

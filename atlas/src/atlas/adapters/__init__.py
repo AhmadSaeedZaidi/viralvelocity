@@ -24,7 +24,9 @@ class DatabaseAdapter:
             async with conn.cursor() as cur:
                 yield cur
 
-    async def _execute(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> None:
+    async def _execute(
+        self, query: str, params: Optional[Tuple[Any, ...]] = None
+    ) -> None:
         async with self._connection() as conn:
             await conn.execute(query, params or ())
 
@@ -57,7 +59,9 @@ class DatabaseAdapter:
             rows = await cur.fetchmany(limit)
             return [dict(zip(columns, row)) for row in rows]
 
-    async def _execute_many(self, query: str, params_list: List[Tuple[Any, ...]]) -> None:
+    async def _execute_many(
+        self, query: str, params_list: List[Tuple[Any, ...]]
+    ) -> None:
         async with self._cursor() as cur:
             await cur.executemany(query, params_list)
 

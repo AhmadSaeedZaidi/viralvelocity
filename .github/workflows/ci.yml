@@ -57,9 +57,20 @@ jobs:
         run: |
           isort --check-only --diff atlas/src maia/src alkyone/src
 
-      - name: Static type analysis (mypy)
+      - name: Static type analysis (mypy) - Atlas
+        working-directory: ./atlas
         run: |
-          mypy atlas/src maia/src alkyone/src --strict --no-error-summary
+          mypy src --strict --no-error-summary
+
+      - name: Static type analysis (mypy) - Maia
+        working-directory: ./maia
+        run: |
+          mypy src --strict --no-error-summary
+
+      - name: Static type analysis (mypy) - Alkyone
+        working-directory: ./alkyone
+        run: |
+          mypy src --strict --no-error-summary
 
   unit-tests:
     name: Unit Tests (Fast, Mocked)

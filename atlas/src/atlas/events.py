@@ -11,7 +11,9 @@ logger = logging.getLogger("atlas.events")
 
 
 class EventBus:
-    async def emit(self, event_type: str, entity_id: str, payload: Dict[str, Any]) -> None:
+    async def emit(
+        self, event_type: str, entity_id: str, payload: Dict[str, Any]
+    ) -> None:
         event_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc)
 
