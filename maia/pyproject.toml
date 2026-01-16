@@ -1,17 +1,11 @@
-[build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "maia"
+[tool.poetry]
+name = "pleiades-maia"
 version = "0.1.0"
 description = "The Stateless Agent Layer for Project Pleiades - High-velocity video discovery and viral velocity monitoring"
-requires-python = ">=3.11"
-authors = [
-    {name = "Ahmad Saeed Zaidi"}
-]
+authors = ["Ahmad Saeed Zaidi"]
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+packages = [{include = "maia", from = "src"}]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -21,37 +15,33 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-dependencies = [
-    "prefect>=2.16.0",
-    "aiohttp>=3.9.0",
-    "tenacity>=8.2.0",  # Retry logic for resilient network operations
-    "opencv-python>=4.9.0",  # Painter: Frame extraction
-    "yt-dlp>=2024.1.0",  # Video streaming and metadata
-    "numpy>=1.26.0",  # Array processing for frames
-    "youtube-transcript-api>=0.6.1",  # Scribe: Transcript fetching
-]
+[tool.poetry.dependencies]
+python = "^3.11"
+prefect = "^2.16.0"
+aiohttp = "^3.9.0"
+tenacity = "^8.2.0"
+opencv-python = "^4.9.0"
+yt-dlp = "^2024.1.0"
+numpy = "^1.26.0"
+youtube-transcript-api = "^0.6.1"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "black>=24.0.0",
-    "isort>=5.13.0",
-    "mypy>=1.8.0",
-]
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+black = "^24.0.0"
+isort = "^5.13.0"
+mypy = "^1.8.0"
 
-[project.scripts]
+[tool.poetry.scripts]
 maia-hunter = "maia.hunter:main"
 maia-tracker = "maia.tracker:main"
 maia-scribe = "maia.scribe:main"
 maia-painter = "maia.painter:main"
 maia-janitor = "maia.janitor:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-maia = ["py.typed"]
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 100
@@ -67,6 +57,19 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "google.cloud.*",
+    "pandas.*",
+    "huggingface_hub.*",
+    "yt_dlp.*",
+    "cv2.*",
+    "youtube_transcript_api.*",
+    "prefect.*",
+    "tenacity.*"
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -8,17 +8,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from atlas.config import settings
 
 try:
-    from google.cloud import storage  # type: ignore[import-not-found,import-untyped]
+    from google.cloud import storage
     from google.cloud.storage import (
-        Client as GCSClient,  # type: ignore[import-not-found,import-untyped]
+        Client as GCSClient,
     )
 except ImportError:
     storage = None
     GCSClient = None
 
 try:
-    import pandas as pd  # type: ignore[import-untyped]
-    from huggingface_hub import (  # type: ignore[import-not-found,import-untyped]
+    import pandas as pd
+    from huggingface_hub import (
         HfApi,
         hf_hub_download,
     )
@@ -43,9 +43,7 @@ class VaultStrategy(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def store_visual_evidence(
-        self, video_id: str, frames: List[Tuple[int, bytes]]
-    ) -> None:
+    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
         pass
 
     @abc.abstractmethod
@@ -141,9 +139,7 @@ class HuggingFaceVault(VaultStrategy):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def store_visual_evidence(
-        self, video_id: str, frames: List[Tuple[int, bytes]]
-    ) -> None:
+    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
         try:
             data = [
                 {"video_id": video_id, "frame_index": idx, "image": img_bytes}
@@ -263,9 +259,7 @@ class HuggingFaceVault(VaultStrategy):
                 commit_message=f"Append metrics: {len(data)} rows to {path}",
             )
 
-            logger.info(
-                f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})"
-            )
+            logger.info(f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})")
 
         except Exception as e:
             logger.error(f"Failed to append metrics to {path}: {e}")
@@ -314,9 +308,7 @@ class GCSVault(VaultStrategy):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def store_visual_evidence(
-        self, video_id: str, frames: List[Tuple[int, bytes]]
-    ) -> None:
+    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
         try:
             for idx, img_bytes in frames:
                 path = f"visuals/{video_id}/{idx}.jpg"
@@ -412,9 +404,7 @@ class GCSVault(VaultStrategy):
             # Upload
             blob.upload_from_file(buffer, content_type="application/octet-stream")
 
-            logger.info(
-                f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})"
-            )
+            logger.info(f"Appended {len(data)} metrics to {path} (total: {len(combined_df)})")
 
         except Exception as e:
             logger.error(f"Failed to append metrics to {path}: {e}")

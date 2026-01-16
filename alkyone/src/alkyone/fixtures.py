@@ -4,7 +4,7 @@ import os
 from typing import Any, AsyncGenerator, Dict
 
 import pytest
-import pytest_asyncio  # type: ignore[import-not-found]
+import pytest_asyncio
 
 from atlas.config import settings
 

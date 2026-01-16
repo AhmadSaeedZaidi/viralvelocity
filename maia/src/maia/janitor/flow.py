@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any, Dict
 
-from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
+from prefect import flow, get_run_logger, task
 
 from atlas.adapters.maia import MaiaDAO
 
@@ -25,9 +25,7 @@ async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, Any]:
     # Loop until backlog is drained
     while True:
         try:
-            archived = await dao.archive_cold_stats(
-                retention_days=retention_days, batch_size=5000
-            )
+            archived = await dao.archive_cold_stats(retention_days=retention_days, batch_size=5000)
             if archived == 0:
                 break
 
@@ -60,9 +58,7 @@ async def run_janitor_cleanup(dry_run: bool = False) -> Dict[str, Any]:
     result = await dao.run_janitor(dry_run=dry_run)
 
     if dry_run:
-        run_logger.info(
-            f"Janitor [DRY RUN]: Would delete {result.get('would_delete', 0)} videos"
-        )
+        run_logger.info(f"Janitor [DRY RUN]: Would delete {result.get('would_delete', 0)} videos")
     else:
         run_logger.info(
             f"Janitor: Cleaned up {result.get('deleted', 0)} videos "

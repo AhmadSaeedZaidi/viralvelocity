@@ -5,8 +5,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import aiohttp  # type: ignore[import-not-found]
-from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
+import aiohttp
+from prefect import flow, get_run_logger, task
 
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
@@ -18,7 +18,7 @@ hunter_keys = KeyRing("hunting")
 hunter_executor = HydraExecutor(hunter_keys, agent_name="hunter")
 
 
-@task(name="fetch_batch")  # type: ignore[misc]
+@task(name="fetch_batch")
 async def fetch_batch(batch_size: int = 10) -> List[Dict[str, Any]]:
     dao = MaiaDAO()
     logger = get_run_logger()
@@ -32,7 +32,7 @@ async def fetch_batch(batch_size: int = 10) -> List[Dict[str, Any]]:
     return batch
 
 
-@task(name="search_youtube")  # type: ignore[misc]
+@task(name="search_youtube")
 async def search_youtube(topic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     run_logger = get_run_logger()
     query = topic["query_term"]
@@ -85,7 +85,7 @@ async def search_youtube(topic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
 
-@task(name="ingest_results")  # type: ignore[misc]
+@task(name="ingest_results")
 async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> None:
     """
     Ingest video metadata and implement the Snowball Effect.
@@ -130,9 +130,7 @@ async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> Non
         tags = snippet.get("tags", [])
         if tags and isinstance(tags, list):
             # Filter out empty tags and normalize
-            valid_tags = [
-                str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0
-            ]
+            valid_tags = [str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0]
             snowball_tags.extend(valid_tags)
 
     # 3. Feed tags back into search queue (Snowball)
@@ -163,7 +161,7 @@ async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> Non
     )
 
 
-@flow(name="run_hunter_cycle")  # type: ignore[misc]
+@flow(name="run_hunter_cycle")
 async def run_hunter_cycle(batch_size: int = 10) -> Dict[str, Any]:
     """
     Execute a complete Hunter cycle: fetch queries, search YouTube, ingest results.

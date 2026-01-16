@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "pleiades-atlas"
-version = "0.2.1"
-description = "Core Infrastructure Library for Pleiades Surveillance Platform"
+name = "pleiades-alkyone"
+version = "0.1.0"
+description = "Integration Test Suite for Project Pleiades"
 authors = ["Ahmad Saeed Zaidi"]
 readme = "README.md"
 license = "MIT"
-packages = [{include = "atlas", from = "src"}]
+packages = [{include = "alkyone", from = "src"}]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -17,30 +17,13 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-pydantic = "^2.6.0"
-pydantic-settings = "^2.2.0"
-psycopg = {extras = ["binary", "pool"], version = "^3.1.18"}
-aiohttp = "^3.9.3"
-orjson = "^3.9.15"
-
-huggingface-hub = {version = "^0.20.0", optional = true}
-google-cloud-storage = {version = "^2.14.0", optional = true}
-pandas = {version = "^2.2.0", optional = true}
-pyarrow = {version = "^15.0.0", optional = true}
-prefect = {version = "^2.16.0", optional = true}
-
-[tool.poetry.extras]
-hf = ["huggingface-hub", "pandas", "pyarrow"]
-gcs = ["google-cloud-storage"]
-orchestration = ["prefect"]
-all = ["huggingface-hub", "google-cloud-storage", "pandas", "pyarrow", "prefect"]
 
 [tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
 black = "^24.0.0"
 isort = "^5.13.0"
 mypy = "^1.8.0"
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -66,10 +49,7 @@ disallow_untyped_defs = true
 module = [
     "google.cloud.*",
     "pandas.*",
-    "huggingface_hub.*",
-    "yt_dlp.*",
-    "cv2.*",
-    "youtube_transcript_api.*"
+    "huggingface_hub.*"
 ]
 ignore_missing_imports = true
 

@@ -35,14 +35,15 @@ jobs:
         run: |
           poetry install --no-interaction
 
-      - name: Install Maia dependencies (pip)
+      - name: Install Maia dependencies (Poetry)
         working-directory: ./maia
         run: |
-          pip install -e .[dev]
+          poetry install --no-interaction
 
-      - name: Install pytest for Alkyone
+      - name: Install Alkyone dependencies (Poetry)
+        working-directory: ./alkyone
         run: |
-          pip install pytest pytest-asyncio
+          poetry install --no-interaction
 
       - name: Install linting tools globally
         run: |
@@ -84,14 +85,15 @@ jobs:
         run: |
           poetry install --no-interaction --only main
 
-      - name: Install Maia dependencies (pip)
+      - name: Install Maia dependencies (Poetry)
         working-directory: ./maia
         run: |
-          pip install -e .
+          poetry install --no-interaction --only main
 
-      - name: Install pytest
+      - name: Install Alkyone dependencies (Poetry)
+        working-directory: ./alkyone
         run: |
-          pip install pytest pytest-asyncio
+          poetry install --no-interaction
 
       - name: Run Atlas unit tests
         run: |
@@ -145,14 +147,15 @@ jobs:
         run: |
           poetry install --no-interaction
 
-      - name: Install Maia dependencies (pip)
+      - name: Install Maia dependencies (Poetry)
         working-directory: ./maia
         run: |
-          pip install -e .[dev]
+          poetry install --no-interaction
 
-      - name: Install pytest for Alkyone
+      - name: Install Alkyone dependencies (Poetry)
+        working-directory: ./alkyone
         run: |
-          pip install pytest pytest-asyncio
+          poetry install --no-interaction
 
       - name: Install PostgreSQL client
         run: |

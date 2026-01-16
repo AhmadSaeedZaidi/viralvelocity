@@ -3,8 +3,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import aiohttp  # type: ignore[import-not-found]
-from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
+import aiohttp
+from prefect import flow, get_run_logger, task
 
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing
@@ -17,7 +17,7 @@ archeo_keys = KeyRing("archeology")
 TARGET_CATEGORIES = ["10", "20", "24", "28", "27"]
 
 
-@task(name="hunt_history")  # type: ignore[misc]
+@task(name="hunt_history")
 async def hunt_history(year: int, month: int) -> None:
     """
     Searches for top videos in target categories for a specific month in history.
@@ -65,9 +65,7 @@ async def hunt_history(year: int, month: int) -> None:
 
                             # Ingest with High Priority (100)
                             for item in items:
-                                await dao.ingest_video_metadata(
-                                    item, priority_override=100
-                                )
+                                await dao.ingest_video_metadata(item, priority_override=100)
 
                             logger.info(
                                 f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
@@ -75,9 +73,7 @@ async def hunt_history(year: int, month: int) -> None:
                             break  # Success, move to next category
 
                         elif resp.status == 403:
-                            logger.warning(
-                                f"Archeologist Key {key[-6:]} burned. Rotating."
-                            )
+                            logger.warning(f"Archeologist Key {key[-6:]} burned. Rotating.")
                             continue
                         elif resp.status == 429:
                             logger.critical("Archeologist hit 429. Aborting to Hydra.")
@@ -91,7 +87,7 @@ async def hunt_history(year: int, month: int) -> None:
                 logger.error(f"Network error in Archeologist: {e}")
 
 
-@flow(name="run_archeology_campaign")  # type: ignore[misc]
+@flow(name="run_archeology_campaign")
 async def run_archeology_campaign(start_year: int = 2005, end_year: int = 2024) -> None:
     """
     The Campaign. Iterates through history.
