@@ -130,7 +130,9 @@ async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> Non
         tags = snippet.get("tags", [])
         if tags and isinstance(tags, list):
             # Filter out empty tags and normalize
-            valid_tags = [str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0]
+            valid_tags = [
+                str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0
+            ]
             snowball_tags.extend(valid_tags)
 
     # 3. Feed tags back into search queue (Snowball)
