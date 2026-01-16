@@ -9,9 +9,7 @@ from atlas.config import settings
 
 try:
     from google.cloud import storage
-    from google.cloud.storage import (
-        Client as GCSClient,
-    )
+    from google.cloud.storage import Client as GCSClient
 except ImportError:
     storage = None
     GCSClient = None
