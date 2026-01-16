@@ -51,7 +51,7 @@ jobs:
 
       - name: Check code formatting (Black)
         run: |
-          black --check atlas/src maia/src alkyone/src --diff
+          black --check atlas maia alkyone --diff
 
       - name: Check import order (isort)
         run: |
