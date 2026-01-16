@@ -9,8 +9,8 @@ from atlas.config import settings
 
 try:
     from google.cloud import storage  # type: ignore[import-not-found,import-untyped]
-    from google.cloud.storage import (  # type: ignore[import-not-found,import-untyped]
-        Client as GCSClient,
+    from google.cloud.storage import (
+        Client as GCSClient,  # type: ignore[import-not-found,import-untyped]
     )
 except ImportError:
     storage = None
