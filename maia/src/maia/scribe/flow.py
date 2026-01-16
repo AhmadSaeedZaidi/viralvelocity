@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Any, Dict, List
 
+from atlas.adapters.maia import MaiaDAO
+from atlas.vault import vault
 from prefect import flow, get_run_logger, task
 from tenacity import (
     before_sleep_log,
@@ -11,9 +13,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
-
-from atlas.adapters.maia import MaiaDAO
-from atlas.vault import vault
 
 from .loader import TranscriptLoader
 
@@ -48,9 +47,7 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
 async def _store_to_vault_with_retry(vid_id: str, transcript_data: Any) -> None:
     """Store transcript to vault with retry logic for network failures."""
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None, lambda: vault.store_transcript(vid_id, transcript_data)
-    )
+    await loop.run_in_executor(None, lambda: vault.store_transcript(vid_id, transcript_data))
 
 
 @task(name="process_transcript")

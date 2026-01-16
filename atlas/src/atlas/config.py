@@ -9,25 +9,19 @@ logger = logging.getLogger("atlas.config")
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: PostgresDsn = Field(
-        ..., description="Neon/Postgres Connection String"
-    )
+    DATABASE_URL: PostgresDsn = Field(..., description="Neon/Postgres Connection String")
     VAULT_PROVIDER: Literal["huggingface", "gcs"] = Field(
         "huggingface", description="Storage Backend Provider"
     )
 
-    HF_DATASET_ID: Optional[str] = Field(
-        None, description="HF Dataset ID (username/dataset)"
-    )
+    HF_DATASET_ID: Optional[str] = Field(None, description="HF Dataset ID (username/dataset)")
     HF_TOKEN: Optional[SecretStr] = Field(None, description="HF Write Token")
     GCS_BUCKET_NAME: Optional[str] = Field(None, description="GCS Bucket Name")
 
     COMPLIANCE_MODE: bool = Field(True, description="Enforce API Policy limits")
     ENV: str = Field("dev", description="Deployment environment (dev/prod)")
 
-    YOUTUBE_API_KEY_POOL_JSON: SecretStr = Field(
-        ..., description="JSON List of YouTube API Keys"
-    )
+    YOUTUBE_API_KEY_POOL_JSON: SecretStr = Field(..., description="JSON List of YouTube API Keys")
 
     KEY_POOL_ARCHEOLOGY_SIZE: int = Field(1, description="Keys reserved for archeology")
     KEY_POOL_TRACKING_SIZE: int = Field(1, description="Keys reserved for tracking")
@@ -43,9 +37,7 @@ class Settings(BaseSettings):
     JANITOR_ENABLED: bool = Field(
         True, description="Enable automatic cleanup of old processed data"
     )
-    JANITOR_RETENTION_DAYS: int = Field(
-        7, description="Days to retain processed data in hot queue"
-    )
+    JANITOR_RETENTION_DAYS: int = Field(7, description="Days to retain processed data in hot queue")
     JANITOR_SAFETY_CHECK: bool = Field(
         True, description="Verify data exists in Vault before deletion"
     )
@@ -54,9 +46,7 @@ class Settings(BaseSettings):
     def validate_vault_config(self) -> "Settings":
         if self.VAULT_PROVIDER == "huggingface":
             if not self.HF_DATASET_ID or not self.HF_TOKEN:
-                raise ValueError(
-                    "HF_DATASET_ID and HF_TOKEN required for HuggingFace vault"
-                )
+                raise ValueError("HF_DATASET_ID and HF_TOKEN required for HuggingFace vault")
         elif self.VAULT_PROVIDER == "gcs":
             if not self.GCS_BUCKET_NAME:
                 raise ValueError("GCS_BUCKET_NAME required for GCS vault")

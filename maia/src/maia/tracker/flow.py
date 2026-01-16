@@ -5,10 +5,9 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from prefect import flow, get_run_logger, task
-
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
+from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +22,7 @@ async def fetch_targets(batch_size: int = 50) -> List[Dict[str, Any]]:
 
     try:
         targets = await dao.fetch_tracker_targets(batch_size)
-        logger.info(
-            f"Fetched {len(targets)} videos for tracking (batch_size={batch_size})."
-        )
+        logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
         return targets
     except Exception as e:
         logger.error(f"Failed to fetch tracker targets: {e}")
@@ -107,20 +104,10 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
             stats_list.append(
                 {
                     "video_id": item["id"],
-                    "views": (
-                        int(stats.get("viewCount", 0))
-                        if stats.get("viewCount")
-                        else None
-                    ),
-                    "likes": (
-                        int(stats.get("likeCount", 0))
-                        if stats.get("likeCount")
-                        else None
-                    ),
+                    "views": (int(stats.get("viewCount", 0)) if stats.get("viewCount") else None),
+                    "likes": (int(stats.get("likeCount", 0)) if stats.get("likeCount") else None),
                     "comment_count": (
-                        int(stats.get("commentCount", 0))
-                        if stats.get("commentCount")
-                        else None
+                        int(stats.get("commentCount", 0)) if stats.get("commentCount") else None
                     ),
                     "timestamp": datetime.now(timezone.utc),
                 }
@@ -162,18 +149,14 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     try:
         # Enforce YouTube API batch limit
         if batch_size > 50:
-            logger.warning(
-                f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50."
-            )
+            logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
             batch_size = 50
 
         targets = await fetch_targets(batch_size=batch_size)
         stats["videos_fetched"] = len(targets)
 
         if not targets:
-            logger.info(
-                "No videos need tracking updates. Tracker cycle complete (idle)."
-            )
+            logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
             return stats
 
         updated_count = await update_stats(targets)

@@ -6,11 +6,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from prefect import flow, get_run_logger, task
-
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
 from atlas.vault import vault
+from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +129,7 @@ async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> Non
         tags = snippet.get("tags", [])
         if tags and isinstance(tags, list):
             # Filter out empty tags and normalize
-            valid_tags = [
-                str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0
-            ]
+            valid_tags = [str(tag).strip() for tag in tags if tag and len(str(tag).strip()) > 0]
             snowball_tags.extend(valid_tags)
 
     # 3. Feed tags back into search queue (Snowball)
