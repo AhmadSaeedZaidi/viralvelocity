@@ -8,15 +8,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from atlas.config import settings
 
 try:
-    from google.cloud import storage  # type: ignore[import-untyped]
-    from google.cloud.storage import Client as GCSClient  # type: ignore[import-untyped]
+    from google.cloud import storage  # type: ignore[import-not-found,import-untyped]
+    from google.cloud.storage import Client as GCSClient  # type: ignore[import-not-found,import-untyped]
 except ImportError:
     storage = None
     GCSClient = None
 
 try:
     import pandas as pd  # type: ignore[import-untyped]
-    from huggingface_hub import HfApi, hf_hub_download  # type: ignore[import-untyped]
+    from huggingface_hub import HfApi, hf_hub_download  # type: ignore[import-not-found,import-untyped]
 except ImportError:
     HfApi = None
     pd = None
