@@ -49,13 +49,36 @@ jobs:
         run: |
           pip install black isort mypy
 
-      - name: Check code formatting (Black)
-        run: |
-          black --check atlas maia alkyone --diff
 
-      - name: Check import order (isort)
+      - name: Check code formatting (Black) - Atlas
+        working-directory: ./atlas
         run: |
-          isort --check-only --diff atlas/src maia/src alkyone/src
+          black . --check --diff
+
+      - name: Check import order (isort) - Atlas
+        working-directory: ./atlas
+        run: |
+          isort src --check-only --diff
+
+      - name: Check code formatting (Black) - Maia
+        working-directory: ./maia
+        run: |
+          black . --check --diff
+
+      - name: Check import order (isort) - Maia
+        working-directory: ./maia
+        run: |
+          isort src --check-only --diff
+
+      - name: Check code formatting (Black) - Alkyone
+        working-directory: ./alkyone
+        run: |
+          black . --check --diff
+
+      - name: Check import order (isort) - Alkyone
+        working-directory: ./alkyone
+        run: |
+          isort src --check-only --diff
 
       - name: Static type analysis (mypy) - Atlas
         working-directory: ./atlas

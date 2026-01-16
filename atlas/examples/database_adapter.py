@@ -51,7 +51,11 @@ async def tracker_workflow_example():
         updates = [
             {
                 "id": targets[0]["id"],
-                "statistics": {"viewCount": 12345, "likeCount": 567, "commentCount": 89},
+                "statistics": {
+                    "viewCount": 12345,
+                    "likeCount": 567,
+                    "commentCount": 89,
+                },
             }
         ]
 

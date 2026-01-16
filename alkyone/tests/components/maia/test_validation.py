@@ -20,12 +20,19 @@ async def test_ingest_results_handles_missing_video_id():
         "items": [
             {
                 "id": {},  # Missing videoId
-                "snippet": {"channelId": "UC123", "channelTitle": "Test", "tags": ["test"]},
+                "snippet": {
+                    "channelId": "UC123",
+                    "channelTitle": "Test",
+                    "tags": ["test"],
+                },
             }
         ]
     }
 
-    with patch("maia.hunter.MaiaDAO") as MockDAO, patch("maia.hunter.vault") as mock_vault:
+    with (
+        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.vault") as mock_vault,
+    ):
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
@@ -57,7 +64,10 @@ async def test_ingest_results_handles_empty_tags():
         ]
     }
 
-    with patch("maia.hunter.MaiaDAO") as MockDAO, patch("maia.hunter.vault") as mock_vault:
+    with (
+        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.vault") as mock_vault,
+    ):
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
@@ -90,7 +100,10 @@ async def test_ingest_results_handles_missing_tags():
         ]
     }
 
-    with patch("maia.hunter.MaiaDAO") as MockDAO, patch("maia.hunter.vault") as mock_vault:
+    with (
+        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.vault") as mock_vault,
+    ):
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
@@ -173,7 +186,10 @@ async def test_update_stats_handles_network_errors():
 @pytest.mark.asyncio
 async def test_update_stats_partial_success():
     """Test update_stats handles partial failures in batch."""
-    videos = [{"id": "valid1", "title": "Video 1"}, {"id": "valid2", "title": "Video 2"}]
+    videos = [
+        {"id": "valid1", "title": "Video 1"},
+        {"id": "valid2", "title": "Video 2"},
+    ]
 
     with (
         patch("maia.tracker.MaiaDAO") as MockDAO,
@@ -188,7 +204,12 @@ async def test_update_stats_partial_success():
         mock_response.status = 200
         mock_response.json = AsyncMock(
             return_value={
-                "items": [{"id": "valid1", "statistics": {"viewCount": "1000", "likeCount": "50"}}]
+                "items": [
+                    {
+                        "id": "valid1",
+                        "statistics": {"viewCount": "1000", "likeCount": "50"},
+                    }
+                ]
             }
         )
 

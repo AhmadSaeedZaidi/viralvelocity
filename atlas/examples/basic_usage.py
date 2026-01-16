@@ -72,7 +72,10 @@ async def notification_example() -> None:
         description="This is a test notification from Atlas",
         channel=AlertChannel.OPS,
         level=AlertLevel.INFO,
-        fields={"Environment": settings.ENV, "Compliance": str(settings.COMPLIANCE_MODE)},
+        fields={
+            "Environment": settings.ENV,
+            "Compliance": str(settings.COMPLIANCE_MODE),
+        },
     )
     print("  Notification sent")
 

@@ -40,7 +40,10 @@ async def test_ingest_results_with_snowball(
     mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
 ):
     """Test ingest_results implements Snowball effect."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO, patch("maia.hunter.vault") as mock_vault:
+    with (
+        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.vault") as mock_vault,
+    ):
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
@@ -69,7 +72,10 @@ async def test_ingest_results_handles_vault_failure(
     mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
 ):
     """Test ingest_results continues even if vault storage fails."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO, patch("maia.hunter.vault") as mock_vault:
+    with (
+        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.vault") as mock_vault,
+    ):
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
