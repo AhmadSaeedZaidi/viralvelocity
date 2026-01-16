@@ -8,6 +8,3 @@ Structure:
 - components/atlas/ - Atlas integration and smoke tests
 - components/maia/ - Maia integration and validation tests
 """
-
-
-

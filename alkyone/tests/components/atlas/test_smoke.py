@@ -2,6 +2,7 @@
 Smoke tests for verifying live service connectivity.
 Run with: pytest tests/test_smoke.py or make smoke-test
 """
+
 import pytest
 
 from atlas import db, settings, vault
@@ -20,13 +21,13 @@ async def test_database_connectivity():
 def test_vault_configuration():
     """Verify vault provider is properly configured."""
     provider = settings.VAULT_PROVIDER
-    
+
     if provider == "huggingface":
         assert settings.HF_DATASET_ID is not None, "HF_DATASET_ID not configured"
         assert settings.HF_TOKEN is not None, "HF_TOKEN not configured"
     elif provider == "gcs":
         assert settings.GCS_BUCKET_NAME is not None, "GCS_BUCKET_NAME not configured"
-    
+
     assert vault is not None, "Vault instance not initialized"
 
 
@@ -44,4 +45,3 @@ def test_configuration_complete():
     assert settings.DATABASE_URL is not None, "DATABASE_URL not set"
     assert settings.ENV in ["dev", "prod", "test"], "ENV not properly configured"
     assert isinstance(settings.COMPLIANCE_MODE, bool), "COMPLIANCE_MODE must be boolean"
-

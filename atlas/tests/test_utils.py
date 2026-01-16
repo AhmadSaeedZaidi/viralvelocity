@@ -1,4 +1,5 @@
 """Tests for utility functions."""
+
 import pytest
 
 from atlas.utils import validate_channel_id, validate_youtube_id
@@ -31,5 +32,3 @@ def test_validate_channel_id_invalid():
     assert validate_channel_id("notstartwithuc_butcorrectlen") is False
     assert validate_channel_id("UC!@#$%^&*()_invalid!!") is False
     assert validate_channel_id(None) is False
-
-

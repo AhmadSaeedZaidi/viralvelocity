@@ -1,6 +1,7 @@
 """
 Pytest configuration and fixtures for Maia tests.
 """
+
 import pytest
 from typing import Dict, Any
 
@@ -16,10 +17,7 @@ def mock_youtube_search_response() -> Dict[str, Any]:
             {
                 "kind": "youtube#searchResult",
                 "etag": "test-video-etag",
-                "id": {
-                    "kind": "youtube#video",
-                    "videoId": "dQw4w9WgXcQ"
-                },
+                "id": {"kind": "youtube#video", "videoId": "dQw4w9WgXcQ"},
                 "snippet": {
                     "publishedAt": "2023-01-01T00:00:00Z",
                     "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
@@ -27,10 +25,10 @@ def mock_youtube_search_response() -> Dict[str, Any]:
                     "channelTitle": "Test Channel",
                     "tags": ["test", "example", "ai"],
                     "categoryId": "28",
-                    "defaultLanguage": "en"
-                }
+                    "defaultLanguage": "en",
+                },
             }
-        ]
+        ],
     }
 
 
@@ -48,10 +46,10 @@ def mock_youtube_stats_response() -> Dict[str, Any]:
                 "statistics": {
                     "viewCount": "1000000",
                     "likeCount": "50000",
-                    "commentCount": "1000"
-                }
+                    "commentCount": "1000",
+                },
             }
-        ]
+        ],
     }
 
 
@@ -63,7 +61,7 @@ def mock_search_queue_item() -> Dict[str, Any]:
         "query_term": "artificial intelligence",
         "next_page_token": None,
         "last_searched_at": None,
-        "priority": 5
+        "priority": 5,
     }
 
 
@@ -74,6 +72,5 @@ def mock_tracker_target() -> Dict[str, Any]:
         "id": "dQw4w9WgXcQ",
         "title": "Test Video",
         "published_at": "2023-01-01T00:00:00Z",
-        "last_updated_at": None
+        "last_updated_at": None,
     }
-

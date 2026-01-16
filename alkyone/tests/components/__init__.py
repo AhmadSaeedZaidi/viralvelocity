@@ -1,4 +1,1 @@
 """Component-level integration tests."""
-
-
-
