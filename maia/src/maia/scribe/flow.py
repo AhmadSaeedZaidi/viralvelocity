@@ -3,8 +3,8 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from prefect import flow, get_run_logger, task
-from tenacity import (
+from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
+from tenacity import (  # type: ignore[import-not-found]
     before_sleep_log,
     retry,
     retry_if_exception_type,
@@ -45,12 +45,10 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
     wait=wait_exponential(multiplier=1, min=2, max=10),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
-async def _store_to_vault_with_retry(vid_id: str, transcript_data: Any) -> str:
+async def _store_to_vault_with_retry(vid_id: str, transcript_data: Any) -> None:
     """Store transcript to vault with retry logic for network failures."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None, lambda: vault.store_transcript(vid_id, transcript_data)
-    )
+    await loop.run_in_executor(None, lambda: vault.store_transcript(vid_id, transcript_data))
 
 
 @task(name="process_transcript")
@@ -117,7 +115,7 @@ async def run_scribe_cycle(batch_size: int = 10) -> None:
 def main() -> None:
     """Entry point for running the Scribe as a standalone service."""
     try:
-        asyncio.run(run_scribe_cycle())
+        asyncio.run(run_scribe_cycle())  # type: ignore[arg-type]
     except KeyboardInterrupt:
         logger.info("Scribe stopped by user (SIGINT)")
     except Exception as e:

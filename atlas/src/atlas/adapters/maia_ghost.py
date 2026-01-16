@@ -2,13 +2,25 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from atlas.adapters import DatabaseAdapter
 
 logger = logging.getLogger("atlas.adapters.maia.ghost")
 
 
 class GhostTrackingMixin:
-    """Persistent video tracking beyond Janitor cleanup."""
+    """Persistent video tracking beyond Janitor cleanup.
+
+    This mixin requires the class to have _execute, _fetch_all, and _execute_many methods
+    (typically provided by DatabaseAdapter).
+    """
+
+    if TYPE_CHECKING:
+        _execute: Any
+        _fetch_all: Any
+        _execute_many: Any
 
     async def add_to_watchlist(self, video_id: str, tier: str = "HOURLY") -> None:
         query = """
@@ -28,7 +40,8 @@ class GhostTrackingMixin:
             LIMIT %s
             FOR UPDATE SKIP LOCKED
         """
-        return await self._fetch_all(query, (batch_size,))
+        result: List[Dict[str, Any]] = await self._fetch_all(query, (batch_size,))
+        return result
 
     async def update_watchlist_schedule(self, updates: List[Dict[str, Any]]) -> None:
         """
@@ -66,7 +79,7 @@ class GhostTrackingMixin:
         logger.info(f"Updated {len(updates)} watchlist schedules")
 
     def calculate_next_track_time(
-        self, published_at: datetime, tier: str = None
+        self, published_at: datetime, tier: Optional[str] = None
     ) -> tuple[str, datetime]:
         now = datetime.now(timezone.utc)
 

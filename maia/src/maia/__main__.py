@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 from maia import __version__
 from maia.hunter import run_hunter_cycle
@@ -89,13 +89,13 @@ def main(args: Optional[list[str]] = None) -> int:
     try:
         if parsed_args.command == "hunter":
             logger.info(f"Starting Maia Hunter (batch_size={parsed_args.batch_size})")
-            stats = asyncio.run(run_hunter_cycle(batch_size=parsed_args.batch_size))
+            stats: Any = asyncio.run(run_hunter_cycle(batch_size=parsed_args.batch_size))  # type: ignore[arg-type]
             logger.info(f"Hunter completed: {stats}")
             return 0
 
         elif parsed_args.command == "tracker":
             logger.info(f"Starting Maia Tracker (batch_size={parsed_args.batch_size})")
-            stats = asyncio.run(run_tracker_cycle(batch_size=parsed_args.batch_size))
+            stats = asyncio.run(run_tracker_cycle(batch_size=parsed_args.batch_size))  # type: ignore[arg-type]
             logger.info(f"Tracker completed: {stats}")
             return 0
 

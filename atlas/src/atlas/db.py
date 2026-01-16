@@ -53,6 +53,7 @@ class DatabaseManager:
     async def get_connection(self) -> AsyncGenerator[AsyncConnection, None]:
         if self._pool is None:
             await self.initialize()
+        assert self._pool is not None, "Pool initialization failed"
         async with self._pool.connection() as conn:
             yield conn
 

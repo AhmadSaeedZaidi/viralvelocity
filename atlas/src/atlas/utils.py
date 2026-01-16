@@ -16,16 +16,16 @@ def retry_async(
     max_attempts: int = 3,
     delay: float = 1.0,
     backoff: float = 2.0,
-    exceptions: tuple = (Exception,),
+    exceptions: tuple[type[BaseException], ...] = (Exception,),
     max_delay: float = 60.0,
-) -> Callable:
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Async retry decorator with exponential backoff and capped delay."""
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             current_delay = delay
-            last_exception: Optional[Exception] = None
+            last_exception: Optional[BaseException] = None
 
             for attempt in range(max_attempts):
                 try:

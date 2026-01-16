@@ -16,8 +16,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import aiohttp
-from prefect import flow, get_run_logger, task
+import aiohttp  # type: ignore[import-not-found]
+from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
 
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
@@ -29,7 +29,7 @@ tracker_keys = KeyRing("tracking")
 tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")
 
 
-@task(name="fetch_targets")
+@task(name="fetch_targets")  # type: ignore[misc]
 async def fetch_targets(batch_size: int = 50) -> List[Dict[str, Any]]:
     """
     Fetch videos from watchlist needing updates.
@@ -48,16 +48,14 @@ async def fetch_targets(batch_size: int = 50) -> List[Dict[str, Any]]:
 
     try:
         targets = await dao.fetch_tracking_batch(batch_size)
-        run_logger.info(
-            f"Fetched {len(targets)} videos from watchlist (batch_size={batch_size})."
-        )
+        run_logger.info(f"Fetched {len(targets)} videos from watchlist (batch_size={batch_size}).")
         return targets
     except Exception as e:
         run_logger.error(f"Failed to fetch tracking targets: {e}")
         return []
 
 
-@task(name="update_stats")
+@task(name="update_stats")  # type: ignore[misc]
 async def update_stats(videos: List[Dict[str, Any]]) -> int:
     """
     Fetch statistics from YouTube API and store to Vault.
@@ -97,7 +95,8 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         async with aiohttp.ClientSession() as session:
             async with session.get(base_url, params=params) as resp:
                 if resp.status == 200:
-                    return await resp.json()
+                    result: Dict[str, Any] = await resp.json()
+                    return result
                 elif resp.status in (403, 429):
                     error_text = await resp.text()
                     raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
@@ -200,7 +199,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     return len(items)
 
 
-@flow(name="run_tracker_cycle")
+@flow(name="run_tracker_cycle")  # type: ignore[misc]
 async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     """
     Execute a complete Tracker cycle using Ghost Tracking.
@@ -225,18 +224,14 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     try:
         # Enforce YouTube API batch limit
         if batch_size > 50:
-            run_logger.warning(
-                f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50."
-            )
+            run_logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
             batch_size = 50
 
         targets = await fetch_targets(batch_size=batch_size)
         stats["videos_fetched"] = len(targets)
 
         if not targets:
-            run_logger.info(
-                "No videos need tracking updates. Tracker cycle complete (idle)."
-            )
+            run_logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
             return stats
 
         updated_count = await update_stats(targets)
@@ -252,9 +247,7 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
 
     except SystemExit:
         # Hydra Protocol: Rate limit detected - propagate immediately
-        run_logger.critical(
-            "Tracker Cycle terminated by Hydra Protocol (429 Rate Limit)"
-        )
+        run_logger.critical("Tracker Cycle terminated by Hydra Protocol (429 Rate Limit)")
         raise
     except Exception as e:
         run_logger.exception(f"Tracker cycle failed with unexpected error: {e}")
@@ -266,7 +259,7 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
 def main() -> None:
     """Entry point for running the Ghost Tracker as a standalone service."""
     try:
-        asyncio.run(run_tracker_cycle())
+        asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
     except SystemExit as e:
         # Hydra Protocol: Exit with specific code for rate limit
         logger.critical(f"Ghost Tracker terminated: {e}")

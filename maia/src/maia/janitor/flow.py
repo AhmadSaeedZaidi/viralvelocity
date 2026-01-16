@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any, Dict
 
-from prefect import flow, get_run_logger, task
+from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
 
 from atlas.adapters.maia import MaiaDAO
 
@@ -25,9 +25,7 @@ async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, Any]:
     # Loop until backlog is drained
     while True:
         try:
-            archived = await dao.archive_cold_stats(
-                retention_days=retention_days, batch_size=5000
-            )
+            archived = await dao.archive_cold_stats(retention_days=retention_days, batch_size=5000)
             if archived == 0:
                 break
 
@@ -60,9 +58,7 @@ async def run_janitor_cleanup(dry_run: bool = False) -> Dict[str, Any]:
     result = await dao.run_janitor(dry_run=dry_run)
 
     if dry_run:
-        run_logger.info(
-            f"Janitor [DRY RUN]: Would delete {result.get('would_delete', 0)} videos"
-        )
+        run_logger.info(f"Janitor [DRY RUN]: Would delete {result.get('would_delete', 0)} videos")
     else:
         run_logger.info(
             f"Janitor: Cleaned up {result.get('deleted', 0)} videos "
@@ -122,14 +118,12 @@ async def janitor_cycle(dry_run: bool = False, archive_stats: bool = True) -> No
     run_logger.info(f"Videos deleted: {results.get('videos_deleted', 0)}")
     run_logger.info("=" * 60)
 
-    return results
-
 
 def main() -> None:
     """Entry point for running the Janitor as a standalone service."""
     try:
         # Run with dry_run=True by default for safety
-        asyncio.run(janitor_cycle(dry_run=True))
+        asyncio.run(janitor_cycle(dry_run=True))  # type: ignore[arg-type]
     except KeyboardInterrupt:
         logger.info("Janitor stopped by user (SIGINT)")
     except Exception as e:

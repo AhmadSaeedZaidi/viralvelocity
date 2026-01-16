@@ -5,11 +5,11 @@ import io
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-import cv2
+import cv2  # type: ignore[import-not-found]
 import numpy as np
-import yt_dlp
-from prefect import flow, get_run_logger, task
-from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
+import yt_dlp  # type: ignore[import-untyped]
+from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
+from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential  # type: ignore[import-not-found]
 
 from atlas.adapters.maia import MaiaDAO
 from atlas.vault import vault
@@ -30,7 +30,8 @@ class VideoStreamer:
             "no_warnings": True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(self.url, download=False)
+            result: Dict[str, Any] = ydl.extract_info(self.url, download=False)
+            return result
 
     def extract_heatmap_peaks(
         self, heatmap_data: List[Dict[str, Any]], top_n: int = 5
@@ -40,9 +41,7 @@ class VideoStreamer:
 
         # heatmap_data is typically [{'start_time': 0.0, 'end_time': 1.0, 'value': 0.1}, ...]
         # We sort by 'value' descending and take top N
-        sorted_points = sorted(
-            heatmap_data, key=lambda x: x.get("value", 0), reverse=True
-        )
+        sorted_points = sorted(heatmap_data, key=lambda x: x.get("value", 0), reverse=True)
         top_points = sorted_points[:top_n]
 
         return [p.get("start_time", 0.0) for p in top_points]
@@ -60,14 +59,10 @@ async def fetch_painter_targets(batch_size: int = 5) -> List[Dict[str, Any]]:
     wait=wait_exponential(multiplier=1, min=2, max=10),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
-async def _store_visuals_to_vault_with_retry(
-    vid_id: str, frames: List[Tuple[int, bytes]]
-) -> None:
+async def _store_visuals_to_vault_with_retry(vid_id: str, frames: List[Tuple[int, bytes]]) -> None:
     """Store visual evidence to vault with retry logic for network failures."""
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None, lambda: vault.store_visual_evidence(vid_id, frames)
-    )
+    await loop.run_in_executor(None, lambda: vault.store_visual_evidence(vid_id, frames))
 
 
 @task(name="process_frames")
@@ -119,9 +114,7 @@ async def process_frames(video: Dict[str, Any]) -> None:
 
         # Strategy C: Fallback (Scale with Length)
         if not target_timestamps:
-            run_logger.info(
-                f"No chapters/heatmap for {vid_id}. Using fallback scaling."
-            )
+            run_logger.info(f"No chapters/heatmap for {vid_id}. Using fallback scaling.")
             num_frames = 5
             if duration > 600:
                 num_frames = 10  # > 10 mins
@@ -161,9 +154,7 @@ async def process_frames(video: Dict[str, Any]) -> None:
             return
 
         # 4. Store ALL frames as a SINGLE Parquet file in the Vault
-        run_logger.info(
-            f"Uploading {len(frames_to_vault)} frames to Vault for {vid_id}"
-        )
+        run_logger.info(f"Uploading {len(frames_to_vault)} frames to Vault for {vid_id}")
         await _store_visuals_to_vault_with_retry(vid_id, frames_to_vault)
 
         # 5. Mark as safe in DB (data is in vault)
@@ -208,7 +199,7 @@ async def run_painter_cycle(batch_size: int = 5) -> None:
 def main() -> None:
     """Entry point for running the Painter as a standalone service."""
     try:
-        asyncio.run(run_painter_cycle())
+        asyncio.run(run_painter_cycle())  # type: ignore[arg-type]
     except KeyboardInterrupt:
         logger.info("Painter stopped by user (SIGINT)")
     except Exception as e:

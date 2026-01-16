@@ -66,13 +66,15 @@ class Settings(BaseSettings):
     def api_keys(self) -> List[str]:
         try:
             payload = self.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()
-            keys = json.loads(payload)
-            if isinstance(keys, str):
-                keys = [keys]
+            keys_parsed = json.loads(payload)
+            if isinstance(keys_parsed, str):
+                keys_list: List[str] = [keys_parsed]
+            else:
+                keys_list = keys_parsed
 
             if self.COMPLIANCE_MODE:
-                return keys[:1]
-            return keys
+                return keys_list[:1]
+            return keys_list
         except json.JSONDecodeError:
             return [self.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()]
 
@@ -111,4 +113,6 @@ class Settings(BaseSettings):
     }
 
 
-settings = Settings()
+# Initialize settings - will load from environment variables and .env file
+# Pydantic will validate all required fields are present at runtime
+settings = Settings()  # type: ignore[call-arg]

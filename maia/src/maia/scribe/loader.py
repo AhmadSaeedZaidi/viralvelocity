@@ -1,8 +1,8 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from prefect import get_run_logger
-from youtube_transcript_api import (
+from prefect import get_run_logger  # type: ignore[import-not-found]
+from youtube_transcript_api import (  # type: ignore[import-not-found,attr-defined]
     TooManyRequests,
     TranscriptsDisabled,
     YouTubeTranscriptApi,
@@ -14,21 +14,21 @@ class TranscriptLoader:
     Wrapper for youtube-transcript-api to handle proxy rotation logic.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # We try to get the prefect logger, fallback to standard if running outside flow context
         try:
             self.logger = get_run_logger()
         except Exception:
             self.logger = logging.getLogger("maia.scribe.loader")
 
-    def fetch(self, video_id: str) -> Optional[List[Dict]]:
+    def fetch(self, video_id: str) -> Optional[List[Dict[Any, Any]]]:
         """
         Fetches transcript.
         Implements Hydra Protocol: If blocked (TooManyRequests), raises SystemExit.
         """
         try:
             # We fetch the list object to inspect available transcripts
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)  # type: ignore[attr-defined]
 
             # Priority 1: Manual English
             try:
@@ -45,7 +45,8 @@ class TranscriptLoader:
                     )
 
             # Fetch the actual data
-            return transcript.fetch()
+            result: List[Dict[Any, Any]] = transcript.fetch()
+            return result
 
         except TooManyRequests:
             self.logger.critical(

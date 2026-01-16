@@ -3,20 +3,20 @@ import io
 import json
 import logging
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from atlas.config import settings
 
 try:
-    from google.cloud import storage
-    from google.cloud.storage import Client as GCSClient
+    from google.cloud import storage  # type: ignore[import-untyped]
+    from google.cloud.storage import Client as GCSClient  # type: ignore[import-untyped]
 except ImportError:
     storage = None
     GCSClient = None
 
 try:
-    import pandas as pd
-    from huggingface_hub import HfApi, hf_hub_download
+    import pandas as pd  # type: ignore[import-untyped]
+    from huggingface_hub import HfApi, hf_hub_download  # type: ignore[import-untyped]
 except ImportError:
     HfApi = None
     pd = None
@@ -30,7 +30,7 @@ class VaultStrategy(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def fetch_json(self, path: str) -> Optional[dict]:
+    def fetch_json(self, path: str) -> Optional[Dict[Any, Any]]:
         pass
 
     @abc.abstractmethod
@@ -52,28 +52,31 @@ class VaultStrategy(abc.ABC):
         pass
 
     def store_metadata(
-        self, video_id: str, data: dict, date: Optional[str] = None
+        self, video_id: str, data: Dict[Any, Any], date: Optional[str] = None
     ) -> None:
         if date is None:
             date = datetime.utcnow().strftime("%Y-%m-%d")
         path = f"metadata/{date}/{video_id}.json"
         self.store_json(path, data)
 
-    def fetch_metadata(self, video_id: str, date: str) -> Optional[dict]:
+    def fetch_metadata(self, video_id: str, date: str) -> Optional[Dict[Any, Any]]:
         path = f"metadata/{date}/{video_id}.json"
         return self.fetch_json(path)
 
-    def store_transcript(self, video_id: str, transcript: dict) -> None:
+    def store_transcript(self, video_id: str, transcript: Dict[Any, Any]) -> None:
         path = f"transcripts/{video_id}.json"
         self.store_json(path, transcript)
 
-    def fetch_transcript(self, video_id: str) -> Optional[dict]:
+    def fetch_transcript(self, video_id: str) -> Optional[Dict[Any, Any]]:
         path = f"transcripts/{video_id}.json"
         return self.fetch_json(path)
 
     @abc.abstractmethod
     def append_metrics(
-        self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None
+        self,
+        data: List[Dict[Any, Any]],
+        date: Optional[str] = None,
+        hour: Optional[str] = None,
     ) -> None:
         pass
 
@@ -107,7 +110,7 @@ class HuggingFaceVault(VaultStrategy):
             logger.error(f"HF upload failed for {path}: {e}")
             raise
 
-    def fetch_json(self, path: str) -> Optional[dict]:
+    def fetch_json(self, path: str) -> Optional[Dict[Any, Any]]:
         try:
             local_path = hf_hub_download(
                 repo_id=self.repo_id,
@@ -116,7 +119,8 @@ class HuggingFaceVault(VaultStrategy):
                 token=self.token,
             )
             with open(local_path, "r") as f:
-                return json.load(f)
+                result: Dict[Any, Any] = json.load(f)
+                return result
         except Exception as e:
             logger.warning(f"Failed to fetch {path} from HF vault: {e}")
             return None
@@ -195,7 +199,10 @@ class HuggingFaceVault(VaultStrategy):
             return None
 
     def append_metrics(
-        self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None
+        self,
+        data: List[Dict[Any, Any]],
+        date: Optional[str] = None,
+        hour: Optional[str] = None,
     ) -> None:
         """
         Append time-series metrics to partitioned Parquet files.
@@ -283,12 +290,13 @@ class GCSVault(VaultStrategy):
             logger.error(f"GCS upload failed for {path}: {e}")
             raise
 
-    def fetch_json(self, path: str) -> Optional[dict]:
+    def fetch_json(self, path: str) -> Optional[Dict[Any, Any]]:
         try:
             blob = self.bucket.blob(path)
             if not blob.exists():
                 return None
-            return json.loads(blob.download_as_text())
+            result: Dict[Any, Any] = json.loads(blob.download_as_text())
+            return result
         except Exception as e:
             logger.warning(f"Failed to fetch {path} from GCS vault: {e}")
             return None
@@ -343,7 +351,10 @@ class GCSVault(VaultStrategy):
             return None
 
     def append_metrics(
-        self, data: List[dict], date: Optional[str] = None, hour: Optional[str] = None
+        self,
+        data: List[Dict[Any, Any]],
+        date: Optional[str] = None,
+        hour: Optional[str] = None,
     ) -> None:
         """
         Append time-series metrics to partitioned Parquet files in GCS.

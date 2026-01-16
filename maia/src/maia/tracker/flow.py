@@ -4,8 +4,8 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-import aiohttp
-from prefect import flow, get_run_logger, task
+import aiohttp  # type: ignore[import-not-found]
+from prefect import flow, get_run_logger, task  # type: ignore[import-not-found]
 
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
@@ -16,23 +16,21 @@ tracker_keys = KeyRing("tracking")
 tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")
 
 
-@task(name="fetch_targets")
+@task(name="fetch_targets")  # type: ignore[misc]
 async def fetch_targets(batch_size: int = 50) -> List[Dict[str, Any]]:
     dao = MaiaDAO()
     logger = get_run_logger()
 
     try:
         targets = await dao.fetch_tracker_targets(batch_size)
-        logger.info(
-            f"Fetched {len(targets)} videos for tracking (batch_size={batch_size})."
-        )
+        logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
         return targets
     except Exception as e:
         logger.error(f"Failed to fetch tracker targets: {e}")
         return []
 
 
-@task(name="update_stats")
+@task(name="update_stats")  # type: ignore[misc]
 async def update_stats(videos: List[Dict[str, Any]]) -> int:
     """
     Fetch and update statistics for a batch of videos.
@@ -67,7 +65,8 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         async with aiohttp.ClientSession() as session:
             async with session.get(base_url, params=params) as resp:
                 if resp.status == 200:
-                    return await resp.json()
+                    result: Dict[str, Any] = await resp.json()
+                    return result
                 elif resp.status in (403, 429):
                     # Raise exception for Hydra Protocol handling
                     error_text = await resp.text()
@@ -106,20 +105,10 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
             stats_list.append(
                 {
                     "video_id": item["id"],
-                    "views": (
-                        int(stats.get("viewCount", 0))
-                        if stats.get("viewCount")
-                        else None
-                    ),
-                    "likes": (
-                        int(stats.get("likeCount", 0))
-                        if stats.get("likeCount")
-                        else None
-                    ),
+                    "views": (int(stats.get("viewCount", 0)) if stats.get("viewCount") else None),
+                    "likes": (int(stats.get("likeCount", 0)) if stats.get("likeCount") else None),
                     "comment_count": (
-                        int(stats.get("commentCount", 0))
-                        if stats.get("commentCount")
-                        else None
+                        int(stats.get("commentCount", 0)) if stats.get("commentCount") else None
                     ),
                     "timestamp": datetime.now(timezone.utc),
                 }
@@ -138,7 +127,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         return 0
 
 
-@flow(name="run_tracker_cycle")
+@flow(name="run_tracker_cycle")  # type: ignore[misc]
 async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     """
     Execute a complete Tracker cycle: fetch stale videos, update stats.
@@ -161,18 +150,14 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     try:
         # Enforce YouTube API batch limit
         if batch_size > 50:
-            logger.warning(
-                f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50."
-            )
+            logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
             batch_size = 50
 
         targets = await fetch_targets(batch_size=batch_size)
         stats["videos_fetched"] = len(targets)
 
         if not targets:
-            logger.info(
-                "No videos need tracking updates. Tracker cycle complete (idle)."
-            )
+            logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
             return stats
 
         updated_count = await update_stats(targets)
@@ -200,7 +185,7 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
 def main() -> None:
     """Entry point for running the Tracker as a standalone service."""
     try:
-        asyncio.run(run_tracker_cycle())
+        asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
     except SystemExit as e:
         # Hydra Protocol: Exit with specific code for rate limit
         logger.critical(f"Tracker terminated: {e}")

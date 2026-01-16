@@ -51,6 +51,7 @@ class DiscordNotifier:
                 logger.warning(f"No webhook configured for channel {channel.value}")
                 return
 
+        assert secret is not None, "Webhook secret should not be None at this point"
         webhook_url = secret.get_secret_value()
 
         embed = {

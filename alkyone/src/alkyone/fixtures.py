@@ -1,10 +1,10 @@
 import asyncio
 import logging
 import os
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 
 import pytest
-import pytest_asyncio
+import pytest_asyncio  # type: ignore[import-not-found]
 
 from atlas.config import settings
 
@@ -20,7 +20,7 @@ logger = logging.getLogger("alkyone.fixtures")
 
 
 @pytest_asyncio.fixture(scope="session")
-async def system_init():
+async def system_init() -> AsyncGenerator[None, None]:
     """
     Session-level setup.
     Initializes the DB connection pool once for the whole test suite.
@@ -33,7 +33,7 @@ async def system_init():
 
 
 @pytest_asyncio.fixture(scope="function")
-async def fresh_db(system_init) -> AsyncGenerator:
+async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
     """
     Function-level fixture.
     Wipes and Re-Provisions the DB schema before EVERY test function.
@@ -49,7 +49,7 @@ async def fresh_db(system_init) -> AsyncGenerator:
 
         # 3. Provision Schema using Atlas's own SQL definition
         # We look up the file location dynamically from the installed package
-        import atlas.schema
+        import atlas.schema  # type: ignore[import-not-found]
 
         schema_path = os.path.join(os.path.dirname(atlas.schema.__file__), "schema.sql")
 
@@ -68,7 +68,7 @@ async def fresh_db(system_init) -> AsyncGenerator:
 
 
 @pytest.fixture
-def mock_search_queue_item():
+def mock_search_queue_item() -> Dict[str, Any]:
     """Mock search queue item for Hunter tests."""
     return {
         "id": 1,
@@ -80,7 +80,7 @@ def mock_search_queue_item():
 
 
 @pytest.fixture
-def mock_youtube_search_response():
+def mock_youtube_search_response() -> Dict[str, Any]:
     """Mock YouTube search API response."""
     return {
         "items": [
@@ -101,7 +101,7 @@ def mock_youtube_search_response():
 
 
 @pytest.fixture
-def mock_tracker_target():
+def mock_tracker_target() -> Dict[str, Any]:
     """Mock tracker target video."""
     return {
         "id": "TEST123",
@@ -112,7 +112,7 @@ def mock_tracker_target():
 
 
 @pytest.fixture
-def mock_youtube_stats_response():
+def mock_youtube_stats_response() -> Dict[str, Any]:
     """Mock YouTube statistics API response."""
     return {
         "items": [
