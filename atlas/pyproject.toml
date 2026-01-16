@@ -69,7 +69,13 @@ module = [
     "huggingface_hub.*",
     "yt_dlp.*",
     "cv2.*",
-    "youtube_transcript_api.*"
+    "youtube_transcript_api.*",
+    "pydantic.*",
+    "pydantic_settings.*",
+    "aiohttp.*",
+    "psycopg.*",
+    "psycopg_pool.*",
+    "orjson.*"
 ]
 ignore_missing_imports = true
 
