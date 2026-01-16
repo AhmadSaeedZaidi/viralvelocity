@@ -9,14 +9,19 @@ from atlas.config import settings
 
 try:
     from google.cloud import storage  # type: ignore[import-not-found,import-untyped]
-    from google.cloud.storage import Client as GCSClient  # type: ignore[import-not-found,import-untyped]
+    from google.cloud.storage import (  # type: ignore[import-not-found,import-untyped]
+        Client as GCSClient,
+    )
 except ImportError:
     storage = None
     GCSClient = None
 
 try:
     import pandas as pd  # type: ignore[import-untyped]
-    from huggingface_hub import HfApi, hf_hub_download  # type: ignore[import-not-found,import-untyped]
+    from huggingface_hub import (  # type: ignore[import-not-found,import-untyped]
+        HfApi,
+        hf_hub_download,
+    )
 except ImportError:
     HfApi = None
     pd = None
