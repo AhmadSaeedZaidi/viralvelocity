@@ -42,7 +42,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
         True, description="Verify data exists in Vault before deletion"
     )
 
-    @model_validator(mode="after")  # type: ignore[misc]
+    @model_validator(mode="after")  # type: ignore[untyped-decorator]
     def validate_vault_config(self) -> "Settings":
         if self.VAULT_PROVIDER == "huggingface":
             if not self.HF_DATASET_ID or not self.HF_TOKEN:
