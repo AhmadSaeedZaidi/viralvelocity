@@ -17,11 +17,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from prefect import flow, get_run_logger, task
-
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
 from atlas.vault import vault
+from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 

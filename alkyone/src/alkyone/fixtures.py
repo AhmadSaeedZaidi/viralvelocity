@@ -5,7 +5,6 @@ from typing import Any, AsyncGenerator, Dict
 
 import pytest
 import pytest_asyncio
-
 from atlas.config import settings
 
 # We import the infrastructure directly from Atlas

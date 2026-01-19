@@ -4,9 +4,8 @@ import asyncio
 import logging
 from typing import Any, Dict
 
-from prefect import flow, get_run_logger, task
-
 from atlas.adapters.maia import MaiaDAO
+from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
