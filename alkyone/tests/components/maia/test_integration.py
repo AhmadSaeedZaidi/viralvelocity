@@ -5,9 +5,10 @@ These tests verify end-to-end behavior of Hunter and Tracker cycles.
 Mark as integration tests: pytest -m integration
 """
 
-import pytest
+from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Dict, Any
+
+import pytest
 
 from maia.hunter import run_hunter_cycle
 from maia.tracker import run_tracker_cycle

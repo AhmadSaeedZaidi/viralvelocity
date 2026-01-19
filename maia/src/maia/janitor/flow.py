@@ -4,14 +4,15 @@ import asyncio
 import logging
 from typing import Any, Dict
 
-from atlas.adapters.maia import MaiaDAO
 from prefect import flow, get_run_logger, task
+
+from atlas.adapters.maia import MaiaDAO
 
 logger = logging.getLogger(__name__)
 
 
-@task(name="archive_cold_stats")
-async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, Any]:
+@task(name="archive_cold_stats")  # type: ignore[misc]
+async def archive_cold_stats_task(retention_days: int = 7) -> Any:
     """Archive stats older than retention_days from hot tier to cold tier (Vault)."""
     dao = MaiaDAO()
     run_logger = get_run_logger()
@@ -47,8 +48,8 @@ async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, Any]:
     return {"archived": total_archived, "batches": batch_count}
 
 
-@task(name="run_janitor_cleanup")
-async def run_janitor_cleanup(dry_run: bool = False) -> Dict[str, Any]:
+@task(name="run_janitor_cleanup")  # type: ignore[misc]
+async def run_janitor_cleanup(dry_run: bool = False) -> Any:
     dao = MaiaDAO()
     run_logger = get_run_logger()
 

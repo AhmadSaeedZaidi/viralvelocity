@@ -2,13 +2,14 @@ import json
 import logging
 from typing import Dict, List, Literal, Optional
 
-from pydantic import Field, PostgresDsn, SecretStr, field_validator, model_validator
+from pydantic import (Field, PostgresDsn, SecretStr, field_validator,
+                      model_validator)
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger("atlas.config")
 
 
-class Settings(BaseSettings):
+class Settings(BaseSettings):  # type: ignore[misc]
     DATABASE_URL: PostgresDsn = Field(..., description="Neon/Postgres Connection String")
     VAULT_PROVIDER: Literal["huggingface", "gcs"] = Field(
         "huggingface", description="Storage Backend Provider"
@@ -105,4 +106,4 @@ class Settings(BaseSettings):
 
 # Initialize settings - will load from environment variables and .env file
 # Pydantic will validate all required fields are present at runtime
-settings = Settings()  # type: ignore[call-arg]
+settings = Settings()

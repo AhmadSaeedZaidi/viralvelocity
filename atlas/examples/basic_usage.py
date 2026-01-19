@@ -5,7 +5,8 @@ Basic usage examples for Atlas infrastructure library.
 import asyncio
 from typing import List
 
-from atlas import AlertChannel, AlertLevel, db, events, notifier, settings, vault
+from atlas import (AlertChannel, AlertLevel, db, events, notifier, settings,
+                   vault)
 
 
 async def database_example() -> None:

@@ -2,9 +2,10 @@
 Tests for Maia Tracker module.
 """
 
-import pytest
+from typing import Any, Dict
 from unittest.mock import AsyncMock, patch
-from typing import Dict, Any
+
+import pytest
 
 from maia.tracker import fetch_targets, update_stats
 

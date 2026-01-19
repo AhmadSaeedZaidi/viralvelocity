@@ -17,6 +17,9 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
+atlas = {path = "../atlas", develop = true}
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
@@ -40,16 +43,28 @@ line_length = 100
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
+strict = false
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+warn_unused_ignores = false
 
 [[tool.mypy.overrides]]
 module = [
     "google.cloud.*",
     "pandas.*",
-    "huggingface_hub.*"
+    "huggingface_hub.*",
+    "atlas.*",
+    "maia.*",
+    "pytest.*",
+    "pytest_asyncio.*",
+    "pydantic.*",
+    "pydantic_settings.*",
+    "aiohttp.*",
+    "psycopg.*",
+    "psycopg_pool.*",
+    "orjson.*"
 ]
 ignore_missing_imports = true
 

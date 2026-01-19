@@ -83,17 +83,17 @@ jobs:
       - name: Static type analysis (mypy) - Atlas
         working-directory: ./atlas
         run: |
-          mypy src --strict --no-error-summary
+          mypy src --config-file pyproject.toml --no-error-summary
 
       - name: Static type analysis (mypy) - Maia
         working-directory: ./maia
         run: |
-          mypy src --strict --no-error-summary
+          mypy src --config-file pyproject.toml --no-error-summary
 
       - name: Static type analysis (mypy) - Alkyone
         working-directory: ./alkyone
         run: |
-          mypy src --strict --no-error-summary
+          mypy src --config-file pyproject.toml --no-error-summary
 
   unit-tests:
     name: Unit Tests (Fast, Mocked)

@@ -4,9 +4,10 @@ Validation tests for Maia components.
 Tests for input validation, error handling, and edge cases.
 """
 
-import pytest
+from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Dict, Any
+
+import pytest
 
 from maia.hunter import ingest_results
 from maia.tracker import update_stats

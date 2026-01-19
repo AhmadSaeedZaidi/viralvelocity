@@ -3,10 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from prefect import get_run_logger
 from youtube_transcript_api import (  # type: ignore[attr-defined]
-    TooManyRequests,
-    TranscriptsDisabled,
-    YouTubeTranscriptApi,
-)
+    TooManyRequests, TranscriptsDisabled, YouTubeTranscriptApi)
 
 
 class TranscriptLoader:

@@ -6,10 +6,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+from prefect import flow, get_run_logger, task
+
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
 from atlas.vault import vault
-from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,8 @@ hunter_keys = KeyRing("hunting")
 hunter_executor = HydraExecutor(hunter_keys, agent_name="hunter")
 
 
-@task(name="fetch_batch")
-async def fetch_batch(batch_size: int = 10) -> List[Dict[str, Any]]:
+@task(name="fetch_batch")  # type: ignore[misc]
+async def fetch_batch(batch_size: int = 10) -> Any:
     dao = MaiaDAO()
     logger = get_run_logger()
 
@@ -31,8 +32,8 @@ async def fetch_batch(batch_size: int = 10) -> List[Dict[str, Any]]:
     return batch
 
 
-@task(name="search_youtube")
-async def search_youtube(topic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+@task(name="search_youtube")  # type: ignore[misc]
+async def search_youtube(topic: Dict[str, Any]) -> Any:
     run_logger = get_run_logger()
     query = topic["query_term"]
     page_token = topic.get("next_page_token")

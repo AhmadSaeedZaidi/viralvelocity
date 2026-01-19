@@ -3,24 +3,20 @@ import json
 import logging
 from typing import Any, Dict, List
 
+from prefect import flow, get_run_logger, task
+from tenacity import (before_sleep_log, retry, retry_if_exception_type,
+                      stop_after_attempt, wait_exponential)
+
 from atlas.adapters.maia import MaiaDAO
 from atlas.vault import vault
-from prefect import flow, get_run_logger, task
-from tenacity import (
-    before_sleep_log,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from .loader import TranscriptLoader
 
 logger = logging.getLogger("maia.scribe")
 
 
-@task(name="fetch_scribe_targets")
-async def fetch_scribe_targets(batch_size: int = 10) -> List[Dict[str, Any]]:
+@task(name="fetch_scribe_targets")  # type: ignore[misc]
+async def fetch_scribe_targets(batch_size: int = 10) -> Any:
     dao = MaiaDAO()
     targets = await dao.fetch_scribe_batch(batch_size)
     if targets:

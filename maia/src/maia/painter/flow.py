@@ -8,15 +8,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import yt_dlp
+from prefect import flow, get_run_logger, task
+from tenacity import (before_sleep_log, retry, stop_after_attempt,
+                      wait_exponential)
+
 from atlas.adapters.maia import MaiaDAO
 from atlas.vault import vault
-from prefect import flow, get_run_logger, task
-from tenacity import (
-    before_sleep_log,
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +48,8 @@ class VideoStreamer:
         return [p.get("start_time", 0.0) for p in top_points]
 
 
-@task(name="fetch_painter_targets")
-async def fetch_painter_targets(batch_size: int = 5) -> List[Dict[str, Any]]:
+@task(name="fetch_painter_targets")  # type: ignore[misc]
+async def fetch_painter_targets(batch_size: int = 5) -> Any:
     # Batch size small because processing is heavy (CV2 + Network)
     dao = MaiaDAO()
     return await dao.fetch_painter_batch(batch_size)

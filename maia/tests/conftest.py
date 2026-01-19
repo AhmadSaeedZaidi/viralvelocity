@@ -2,8 +2,9 @@
 Pytest configuration and fixtures for Maia tests.
 """
 
+from typing import Any, Dict
+
 import pytest
-from typing import Dict, Any
 
 
 @pytest.fixture

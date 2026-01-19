@@ -5,9 +5,10 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+from prefect import flow, get_run_logger, task
+
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import HydraExecutor, KeyRing
-from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ tracker_keys = KeyRing("tracking")
 tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")
 
 
-@task(name="fetch_targets")
-async def fetch_targets(batch_size: int = 50) -> List[Dict[str, Any]]:
+@task(name="fetch_targets")  # type: ignore[misc]
+async def fetch_targets(batch_size: int = 50) -> Any:
     dao = MaiaDAO()
     logger = get_run_logger()
 

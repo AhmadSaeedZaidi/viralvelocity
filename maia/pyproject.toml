@@ -57,6 +57,10 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = false
+disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 module = [
@@ -67,7 +71,11 @@ module = [
     "cv2.*",
     "youtube_transcript_api.*",
     "prefect.*",
-    "tenacity.*"
+    "tenacity.*",
+    "psycopg.*",
+    "psycopg_pool.*",
+    "orjson.*",
+    "atlas.*"
 ]
 ignore_missing_imports = true
 

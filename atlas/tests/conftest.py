@@ -1,7 +1,7 @@
 """Pytest configuration and fixtures for Atlas tests."""
 
 import os
-from typing import AsyncGenerator, Dict, Any
+from typing import Any, AsyncGenerator, Dict
 
 import pytest
 import pytest_asyncio

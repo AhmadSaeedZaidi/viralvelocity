@@ -16,10 +16,7 @@ except ImportError:
 
 try:
     import pandas as pd
-    from huggingface_hub import (
-        HfApi,
-        hf_hub_download,
-    )
+    from huggingface_hub import HfApi, hf_hub_download
 except ImportError:
     HfApi = None
     pd = None
