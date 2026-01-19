@@ -2,8 +2,7 @@ import json
 import logging
 from typing import Dict, List, Literal, Optional
 
-from pydantic import (Field, PostgresDsn, SecretStr, field_validator,
-                      model_validator)
+from pydantic import Field, PostgresDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger("atlas.config")

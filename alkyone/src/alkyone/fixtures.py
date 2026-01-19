@@ -7,6 +7,7 @@ import pytest
 import pytest_asyncio
 
 from atlas.config import settings
+
 # We import the infrastructure directly from Atlas
 from atlas.db import db
 

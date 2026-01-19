@@ -4,8 +4,13 @@ import logging
 from typing import Any, Dict, List
 
 from prefect import flow, get_run_logger, task
-from tenacity import (before_sleep_log, retry, retry_if_exception_type,
-                      stop_after_attempt, wait_exponential)
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from atlas.adapters.maia import MaiaDAO
 from atlas.vault import vault
