@@ -17,9 +17,7 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-atlas = {path = "../atlas", develop = true}
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.0"
+pleiades-atlas = {path = "../atlas", develop = true}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
