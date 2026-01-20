@@ -54,7 +54,7 @@ def test_vault_validation_hf(monkeypatch):
 
     try:
         # Create a test script that will run in isolation
-        test_script = '''
+        test_script = """
 import os
 import sys
 # Clear any existing environment variables that might interfere
@@ -90,7 +90,7 @@ except (ValidationError, ImportError) as e:
     else:
         print(f"ERROR: Unexpected error: {e}")
         sys.exit(1)
-'''
+"""
 
         # Run the test script in a subprocess with proper PYTHONPATH
         result = subprocess.run(
@@ -98,7 +98,7 @@ except (ValidationError, ImportError) as e:
             capture_output=True,
             text=True,
             cwd=atlas_root,
-            env={**os.environ, "PYTHONPATH": os.path.join(atlas_root, "src")}
+            env={**os.environ, "PYTHONPATH": os.path.join(atlas_root, "src")},
         )
 
         # Report the results
