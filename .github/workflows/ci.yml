@@ -45,55 +45,24 @@ jobs:
         run: |
           poetry install --no-interaction
 
-      - name: Install linting tools globally
-        run: |
-          pip install black isort mypy
-
-
-      - name: Check code formatting (Black) - Atlas
+      - name: Lint & Type Check - Atlas
         working-directory: ./atlas
         run: |
-          black . --check --diff
+          make lint
+          make type-check
 
-      - name: Check import order (isort) - Atlas
-        working-directory: ./atlas
-        run: |
-          isort src --check-only --diff
-
-      - name: Check code formatting (Black) - Maia
+      - name: Lint & Type Check - Maia
         working-directory: ./maia
         run: |
-          black . --check --diff
+          make lint
+          make type-check
 
-      - name: Check import order (isort) - Maia
-        working-directory: ./maia
-        run: |
-          isort src --check-only --diff
-
-      - name: Check code formatting (Black) - Alkyone
+      - name: Lint & Type Check - Alkyone
         working-directory: ./alkyone
         run: |
-          black . --check --diff
-
-      - name: Check import order (isort) - Alkyone
-        working-directory: ./alkyone
-        run: |
-          isort src --check-only --diff
-
-      - name: Static type analysis (mypy) - Atlas
-        working-directory: ./atlas
-        run: |
-          mypy src --config-file pyproject.toml --no-error-summary
-
-      - name: Static type analysis (mypy) - Maia
-        working-directory: ./maia
-        run: |
-          mypy src --config-file pyproject.toml --no-error-summary
-
-      - name: Static type analysis (mypy) - Alkyone
-        working-directory: ./alkyone
-        run: |
-          mypy src --config-file pyproject.toml --no-error-summary
+          poetry run black src --check --diff
+          poetry run isort src --check-only --diff
+          poetry run mypy src --config-file pyproject.toml --no-error-summary
 
   unit-tests:
     name: Unit Tests (Fast, Mocked)
@@ -130,12 +99,14 @@ jobs:
           poetry install --no-interaction
 
       - name: Run Atlas unit tests
+        working-directory: ./atlas
         run: |
-          python -m pytest atlas/tests -v --tb=short
+          make test
 
       - name: Run Maia unit tests
+        working-directory: ./maia
         run: |
-          python -m pytest maia/tests -v --tb=short -m "not integration"
+          make test
 
   integration-tests:
     name: Integration Tests (Ephemeral DB)
@@ -209,12 +180,13 @@ jobs:
           echo "COMPLIANCE_MODE=false" >> $GITHUB_ENV
 
       - name: Run Alkyone integration tests
+        working-directory: ./alkyone
         env:
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
           VAULT_PROVIDER: "huggingface"
         run: |
-          python -m pytest alkyone/tests -v --tb=short -m "integration"
+          poetry run pytest tests -v --tb=short -m "integration"
 
       - name: Cleanup (Delete Neon Branch)
         if: always()

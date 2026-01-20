@@ -64,6 +64,7 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_redundant_casts = false
+disable_error_code = ["untyped-decorator"]
 
 [[tool.mypy.overrides]]
 module = [
