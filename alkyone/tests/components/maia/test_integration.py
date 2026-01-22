@@ -9,6 +9,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from maia.hunter import run_hunter_cycle
 from maia.tracker import run_tracker_cycle
 
