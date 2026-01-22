@@ -105,4 +105,4 @@ class Settings(BaseSettings):  # type: ignore[misc]
 
 # Initialize settings - will load from environment variables and .env file
 # Pydantic will validate all required fields are present at runtime
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]
