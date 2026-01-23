@@ -62,6 +62,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Create Ephemeral Neon Branch
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch_name: unit-tests-${{ github.run_id }}
+          username: neondb_owner
+          parent: main
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -85,6 +95,22 @@ jobs:
         working-directory: ./alkyone
         run: poetry install --no-interaction
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Run database migrations
+        run: |
+          # Apply schema to ephemeral Neon branch
+          psql "${{ steps.create-branch.outputs.db_url }}" -f atlas/src/atlas/schema.sql
+        continue-on-error: false
+
+      - name: Configure test environment
+        run: |
+          echo "DATABASE_URL=${{ steps.create-branch.outputs.db_url }}" >> $GITHUB_ENV
+          echo "COMPLIANCE_MODE=false" >> $GITHUB_ENV
+
       - name: Run Atlas unit tests
         working-directory: ./atlas
         run: make test
@@ -96,6 +122,14 @@ jobs:
       - name: Run Alkyone unit tests
         working-directory: ./alkyone
         run: make test
+
+      - name: Cleanup (Delete Neon Branch)
+        if: always()
+        run: |
+          curl -X DELETE \
+            "https://console.neon.tech/api/v2/projects/${{ vars.NEON_PROJECT_ID }}/branches/${{ steps.create-branch.outputs.branch_id }}" \
+            -H "Authorization: Bearer ${{ secrets.NEON_API_KEY }}" \
+            -H "Accept: application/json"
 
   integration-tests:
     name: Integration Tests (Ephemeral DB)

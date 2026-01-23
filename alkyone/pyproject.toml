@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Integration Test Suite for Project Pleiades"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11, <3.12"
 authors = [
     {name = "Ahmad Saeed Zaidi"}
 ]
@@ -15,9 +15,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Typing :: Typed",
 ]
-dependencies = [
-    "pleiades-atlas>=0.2.1",
-]
+dependencies = []
 
 [tool.poetry]
 name = "pleiades-alkyone"
@@ -37,6 +35,7 @@ isort = ">=5.13.0,<6.0.0"
 mypy = ">=1.8.0,<2.0.0"
 pytest = ">=8.0.0,<9.0.0"
 pytest-asyncio = ">=0.23.0,<1.0.0"
+pytest-env = ">=1.1.0,<2.0.0"
 
 
 [build-system]
@@ -92,6 +91,10 @@ addopts = [
     "--strict-markers",
     "--tb=short",
     "--disable-warnings",
+]
+env = [
+    "YOUTUBE_API_KEY_POOL_JSON=[]",
+    "COMPLIANCE_MODE=false"
 ]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
