@@ -155,7 +155,6 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: pr-${{ github.event.number }}-alkyone
           username: neondb_owner
-          parent: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -179,12 +178,7 @@ jobs:
       - name: Install Alkyone dependencies
         working-directory: ./alkyone
         run: poetry install --no-interaction
-
-      - name: Install PostgreSQL client
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
+        
       - name: Run database migrations
         run: |
           # Apply schema to ephemeral Neon branch
