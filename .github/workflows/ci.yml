@@ -12,8 +12,8 @@ env:
   POETRY_VERSION: "1.7.1"
 
 jobs:
-  lint-and-type-check:
-    name: Linting & Type Safety
+  quality:
+    name: Quality (Linting & Type Checking)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -30,44 +30,34 @@ jobs:
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry config virtualenvs.in-project true
 
-      - name: Install Atlas dependencies (Poetry)
+      - name: Install Atlas dependencies
         working-directory: ./atlas
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
-      - name: Install Maia dependencies (Poetry)
+      - name: Install Maia dependencies
         working-directory: ./maia
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
-      - name: Install Alkyone dependencies (Poetry)
+      - name: Install Alkyone dependencies
         working-directory: ./alkyone
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
       - name: Lint & Type Check - Atlas
         working-directory: ./atlas
-        run: |
-          make lint
-          make type-check
+        run: make lint
 
       - name: Lint & Type Check - Maia
         working-directory: ./maia
-        run: |
-          make lint
-          make type-check
+        run: make lint
 
       - name: Lint & Type Check - Alkyone
         working-directory: ./alkyone
-        run: |
-          poetry run black src --check --diff
-          poetry run isort src --check-only --diff
-          poetry run mypy src --config-file pyproject.toml --no-error-summary
+        run: make lint
 
   unit-tests:
     name: Unit Tests (Fast, Mocked)
     runs-on: ubuntu-latest
-    needs: lint-and-type-check
+    needs: quality
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -83,30 +73,29 @@ jobs:
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry config virtualenvs.in-project true
 
-      - name: Install Atlas dependencies (Poetry)
+      - name: Install Atlas dependencies
         working-directory: ./atlas
-        run: |
-          poetry install --no-interaction --only main
+        run: poetry install --no-interaction --only main
 
-      - name: Install Maia dependencies (Poetry)
+      - name: Install Maia dependencies
         working-directory: ./maia
-        run: |
-          poetry install --no-interaction --only main
+        run: poetry install --no-interaction --only main
 
-      - name: Install Alkyone dependencies (Poetry)
+      - name: Install Alkyone dependencies
         working-directory: ./alkyone
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
       - name: Run Atlas unit tests
         working-directory: ./atlas
-        run: |
-          make test
+        run: make test
 
       - name: Run Maia unit tests
         working-directory: ./maia
-        run: |
-          make test
+        run: make test
+
+      - name: Run Alkyone unit tests
+        working-directory: ./alkyone
+        run: make test
 
   integration-tests:
     name: Integration Tests (Ephemeral DB)
@@ -147,20 +136,17 @@ jobs:
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry config virtualenvs.in-project true
 
-      - name: Install Atlas dependencies (Poetry)
+      - name: Install Atlas dependencies
         working-directory: ./atlas
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
-      - name: Install Maia dependencies (Poetry)
+      - name: Install Maia dependencies
         working-directory: ./maia
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
-      - name: Install Alkyone dependencies (Poetry)
+      - name: Install Alkyone dependencies
         working-directory: ./alkyone
-        run: |
-          poetry install --no-interaction
+        run: poetry install --no-interaction
 
       - name: Install PostgreSQL client
         run: |
@@ -185,8 +171,7 @@ jobs:
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
           VAULT_PROVIDER: "huggingface"
-        run: |
-          poetry run pytest tests -v --tb=short -m "integration"
+        run: poetry run pytest tests -v --tb=short -m "integration"
 
       - name: Cleanup (Delete Neon Branch)
         if: always()

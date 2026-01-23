@@ -1,3 +1,43 @@
+[project]
+name = "pleiades-maia"
+version = "0.1.0"
+description = "The Stateless Agent Layer for Project Pleiades - High-velocity video discovery and viral velocity monitoring"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = "^3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Typing :: Typed",
+]
+dependencies = [
+    "prefect>=2.16.0,<3.0.0",
+    "aiohttp>=3.9.0,<4.0.0",
+    "tenacity>=8.2.0,<9.0.0",
+    "opencv-python>=4.9.0,<5.0.0",
+    "yt-dlp>=2024.1.0,<2025.0.0",
+    "numpy>=1.26.0,<2.0.0",
+    "youtube-transcript-api>=0.6.1,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "black>=24.0.0,<25.0.0",
+    "isort>=5.13.0,<6.0.0",
+    "mypy>=1.8.0,<2.0.0",
+]
+
+[project.scripts]
+maia-hunter = "maia.hunter:main"
+maia-tracker = "maia.tracker:main"
+maia-scribe = "maia.scribe:main"
+maia-painter = "maia.painter:main"
+maia-janitor = "maia.janitor:main"
+
 [tool.poetry]
 name = "pleiades-maia"
 version = "0.1.0"
@@ -6,37 +46,6 @@ authors = ["Ahmad Saeed Zaidi"]
 readme = "README.md"
 license = "MIT"
 packages = [{include = "maia", from = "src"}]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
-    "Typing :: Typed",
-]
-
-[tool.poetry.dependencies]
-python = ">=3.11, <3.12"
-prefect = "^2.16.0"
-aiohttp = "^3.9.0"
-tenacity = "^8.2.0"
-opencv-python = "^4.9.0"
-yt-dlp = "^2024.1.0"
-numpy = "^1.26.0"
-youtube-transcript-api = "^0.6.1"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-asyncio = "^0.23.0"
-black = "^24.0.0"
-isort = "^5.13.0"
-mypy = "^1.8.0"
-
-[tool.poetry.scripts]
-maia-hunter = "maia.hunter:main"
-maia-tracker = "maia.tracker:main"
-maia-scribe = "maia.scribe:main"
-maia-painter = "maia.painter:main"
-maia-janitor = "maia.janitor:main"
 
 [build-system]
 requires = ["poetry-core"]
