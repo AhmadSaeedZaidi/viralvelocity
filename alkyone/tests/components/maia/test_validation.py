@@ -8,7 +8,6 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from maia.hunter import ingest_results
 from maia.tracker import update_stats
 

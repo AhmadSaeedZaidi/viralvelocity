@@ -4,7 +4,6 @@ Run with: pytest tests/test_smoke.py or make smoke-test
 """
 
 import pytest
-
 from atlas import db, settings, vault
 
 
