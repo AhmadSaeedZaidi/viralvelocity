@@ -75,11 +75,11 @@ jobs:
 
       - name: Install Atlas dependencies
         working-directory: ./atlas
-        run: poetry install --no-interaction --only main
+        run: poetry install --no-interaction
 
       - name: Install Maia dependencies
         working-directory: ./maia
-        run: poetry install --no-interaction --only main
+        run: poetry install --no-interaction
 
       - name: Install Alkyone dependencies
         working-directory: ./alkyone

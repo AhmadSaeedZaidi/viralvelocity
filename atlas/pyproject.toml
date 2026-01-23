@@ -4,7 +4,10 @@ version = "0.2.1"
 description = "Core Infrastructure Library for Pleiades Surveillance Platform"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = "^3.11"
+requires-python = "==3.11"
+authors = [
+    {name = "Ahmad Saeed Zaidi"}
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -39,13 +42,6 @@ all = [
     "pyarrow>=15.0.0,<16.0.0",
     "prefect>=2.16.0,<3.0.0",
 ]
-dev = [
-    "black>=24.0.0,<25.0.0",
-    "isort>=5.13.0,<6.0.0",
-    "mypy>=1.8.0,<2.0.0",
-    "pytest>=8.0.0,<9.0.0",
-    "pytest-asyncio>=0.23.0,<1.0.0",
-]
 
 [project.scripts]
 atlas = "atlas.__main__:main"
@@ -58,6 +54,13 @@ authors = ["Ahmad Saeed Zaidi"]
 readme = "README.md"
 license = "MIT"
 packages = [{include = "atlas", from = "src"}]
+
+[tool.poetry.group.dev.dependencies]
+black = ">=24.0.0,<25.0.0"
+isort = ">=5.13.0,<6.0.0"
+mypy = ">=1.8.0,<2.0.0"
+pytest = ">=8.0.0,<9.0.0"
+pytest-asyncio = ">=0.23.0,<1.0.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -81,7 +84,7 @@ disallow_untyped_defs = true
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_redundant_casts = false
-disable_error_code = ["untyped-decorator"]
+disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 module = [

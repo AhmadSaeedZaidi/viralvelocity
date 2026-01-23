@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "The Stateless Agent Layer for Project Pleiades - High-velocity video discovery and viral velocity monitoring"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = "^3.11"
+requires-python = "==3.11"
+authors = [
+    {name = "Ahmad Saeed Zaidi"}
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -13,6 +16,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "pleiades-atlas>=0.2.1",
     "prefect>=2.16.0,<3.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     "tenacity>=8.2.0,<9.0.0",
@@ -20,15 +24,6 @@ dependencies = [
     "yt-dlp>=2024.1.0,<2025.0.0",
     "numpy>=1.26.0,<2.0.0",
     "youtube-transcript-api>=0.6.1,<1.0.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0,<9.0.0",
-    "pytest-asyncio>=0.23.0,<1.0.0",
-    "black>=24.0.0,<25.0.0",
-    "isort>=5.13.0,<6.0.0",
-    "mypy>=1.8.0,<2.0.0",
 ]
 
 [project.scripts]
@@ -49,6 +44,13 @@ packages = [{include = "maia", from = "src"}]
 
 [tool.poetry.dependencies]
 pleiades-atlas = {path = "../atlas", develop = true}
+
+[tool.poetry.group.dev.dependencies]
+black = ">=24.0.0,<25.0.0"
+isort = ">=5.13.0,<6.0.0"
+mypy = ">=1.8.0,<2.0.0"
+pytest = ">=8.0.0,<9.0.0"
+pytest-asyncio = ">=0.23.0,<1.0.0"
 
 [build-system]
 requires = ["poetry-core"]

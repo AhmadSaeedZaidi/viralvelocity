@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Integration Test Suite for Project Pleiades"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = "^3.11"
+requires-python = "==3.11"
+authors = [
+    {name = "Ahmad Saeed Zaidi"}
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -13,15 +16,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0,<9.0.0",
-    "pytest-asyncio>=0.23.0,<1.0.0",
-    "black>=24.0.0,<25.0.0",
-    "isort>=5.13.0,<6.0.0",
-    "mypy>=1.8.0,<2.0.0",
+    "pleiades-atlas>=0.2.1",
 ]
 
 [tool.poetry]
@@ -35,6 +30,13 @@ packages = [{include = "alkyone", from = "src"}]
 
 [tool.poetry.dependencies]
 pleiades-atlas = {path = "../atlas", develop = true}
+
+[tool.poetry.group.dev.dependencies]
+black = ">=24.0.0,<25.0.0"
+isort = ">=5.13.0,<6.0.0"
+mypy = ">=1.8.0,<2.0.0"
+pytest = ">=8.0.0,<9.0.0"
+pytest-asyncio = ">=0.23.0,<1.0.0"
 
 
 [build-system]
@@ -58,6 +60,8 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 warn_unused_ignores = false
+warn_redundant_casts = false
+disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 module = [
