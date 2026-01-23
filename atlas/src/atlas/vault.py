@@ -3,7 +3,7 @@ import io
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from atlas.config import settings
 
@@ -11,6 +11,7 @@ HAS_GCS = False
 try:
     from google.cloud import storage  # type: ignore
     from google.cloud.storage import Client as GCSClient  # type: ignore
+
     HAS_GCS = True
 except ImportError:
     pass
@@ -20,6 +21,7 @@ HAS_PANDAS = False
 try:
     import pandas as pd
     from huggingface_hub import HfApi, hf_hub_download
+
     HAS_HF = True
     HAS_PANDAS = True
 except ImportError:
@@ -108,7 +110,7 @@ class HuggingFaceVault(VaultStrategy):
 
         self.repo_id = settings.HF_DATASET_ID
         self.token = settings.HF_TOKEN.get_secret_value() if settings.HF_TOKEN else None
-        
+
         self.api = HfApi(token=self.token)
 
     def store_json(self, path: str, data: Any) -> None:
@@ -155,7 +157,7 @@ class HuggingFaceVault(VaultStrategy):
     def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
         try:
             if not HAS_PANDAS:
-                 raise ImportError("Pandas required for visual evidence")
+                raise ImportError("Pandas required for visual evidence")
 
             data = [
                 {"video_id": video_id, "frame_index": idx, "image": img_bytes}
@@ -227,9 +229,9 @@ class HuggingFaceVault(VaultStrategy):
         if not data:
             logger.warning("No metrics data to append")
             return
-            
+
         if not HAS_PANDAS:
-             raise ImportError("Pandas required for metrics")
+            raise ImportError("Pandas required for metrics")
 
         if date is None:
             date = datetime.utcnow().strftime("%Y-%m-%d")
@@ -279,7 +281,7 @@ class HuggingFaceVault(VaultStrategy):
 
 
 class GCSVault(VaultStrategy):
-    def __init__(self) -> None
+    def __init__(self) -> None:
         if not HAS_GCS:
             raise ImportError(
                 "Google Cloud Storage not installed. "
