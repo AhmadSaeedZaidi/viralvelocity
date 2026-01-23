@@ -3,23 +3,40 @@ import io
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from atlas.config import settings
 
+HAS_GCS = False
 try:
-    from google.cloud import storage
-    from google.cloud.storage import Client as GCSClient
+    from google.cloud import storage  # type: ignore
+    from google.cloud.storage import Client as GCSClient  # type: ignore
+    HAS_GCS = True
 except ImportError:
-    storage = None
-    GCSClient = None
+    pass
 
+HAS_HF = False
+HAS_PANDAS = False
 try:
     import pandas as pd
     from huggingface_hub import HfApi, hf_hub_download
+    HAS_HF = True
+    HAS_PANDAS = True
 except ImportError:
-    HfApi = None
-    pd = None
+    pass
+
+if TYPE_CHECKING:
+    try:
+        from google.cloud import storage
+        from google.cloud.storage import Client as GCSClient
+    except ImportError:
+        pass
+
+    try:
+        import pandas as pd
+        from huggingface_hub import HfApi, hf_hub_download
+    except ImportError:
+        pass
 
 logger = logging.getLogger("atlas.vault")
 
@@ -81,7 +98,7 @@ class VaultStrategy(abc.ABC):
 
 class HuggingFaceVault(VaultStrategy):
     def __init__(self) -> None:
-        if not HfApi or not pd:
+        if not HAS_HF or not HAS_PANDAS:
             raise ImportError(
                 "HuggingFace dependencies not installed. "
                 "Install with: pip install huggingface-hub pandas pyarrow"
@@ -91,6 +108,7 @@ class HuggingFaceVault(VaultStrategy):
 
         self.repo_id = settings.HF_DATASET_ID
         self.token = settings.HF_TOKEN.get_secret_value() if settings.HF_TOKEN else None
+        
         self.api = HfApi(token=self.token)
 
     def store_json(self, path: str, data: Any) -> None:
@@ -136,6 +154,9 @@ class HuggingFaceVault(VaultStrategy):
 
     def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
         try:
+            if not HAS_PANDAS:
+                 raise ImportError("Pandas required for visual evidence")
+
             data = [
                 {"video_id": video_id, "frame_index": idx, "image": img_bytes}
                 for idx, img_bytes in frames
@@ -202,12 +223,13 @@ class HuggingFaceVault(VaultStrategy):
     ) -> None:
         """
         Append time-series metrics to partitioned Parquet files.
-
-        Uses Hive-style partitioning: metrics/date=YYYY-MM-DD/hour=HH/stats.parquet
         """
         if not data:
             logger.warning("No metrics data to append")
             return
+            
+        if not HAS_PANDAS:
+             raise ImportError("Pandas required for metrics")
 
         if date is None:
             date = datetime.utcnow().strftime("%Y-%m-%d")
@@ -217,7 +239,6 @@ class HuggingFaceVault(VaultStrategy):
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
 
         try:
-            # Try to fetch existing file
             existing_df = None
             try:
                 local_path = hf_hub_download(
@@ -231,21 +252,17 @@ class HuggingFaceVault(VaultStrategy):
             except Exception:
                 logger.info(f"No existing metrics file at {path}, creating new")
 
-            # Create DataFrame from new data
             new_df = pd.DataFrame(data)
 
-            # Concat if existing data found
             if existing_df is not None:
                 combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             else:
                 combined_df = new_df
 
-            # Write to buffer
             buffer = io.BytesIO()
             combined_df.to_parquet(buffer, engine="pyarrow", index=False)
             buffer.seek(0)
 
-            # Upload
             self.api.upload_file(
                 path_or_fileobj=buffer,
                 path_in_repo=path,
@@ -262,8 +279,8 @@ class HuggingFaceVault(VaultStrategy):
 
 
 class GCSVault(VaultStrategy):
-    def __init__(self) -> None:
-        if not storage or not GCSClient:
+    def __init__(self) -> None
+        if not HAS_GCS:
             raise ImportError(
                 "Google Cloud Storage not installed. "
                 "Install with: pip install google-cloud-storage"
@@ -350,14 +367,12 @@ class GCSVault(VaultStrategy):
     ) -> None:
         """
         Append time-series metrics to partitioned Parquet files in GCS.
-
-        Uses Hive-style partitioning: metrics/date=YYYY-MM-DD/hour=HH/stats.parquet
         """
         if not data:
             logger.warning("No metrics data to append")
             return
 
-        if not pd:
+        if not HAS_PANDAS:
             raise ImportError(
                 "pandas required for metrics append. Install: pip install pandas pyarrow"
             )
@@ -370,7 +385,6 @@ class GCSVault(VaultStrategy):
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
 
         try:
-            # Try to fetch existing file
             existing_df = None
             blob = self.bucket.blob(path)
             if blob.exists():
@@ -382,16 +396,13 @@ class GCSVault(VaultStrategy):
             else:
                 logger.info(f"No existing metrics file at {path}, creating new")
 
-            # Create DataFrame from new data
             new_df = pd.DataFrame(data)
 
-            # Concat if existing data found
             if existing_df is not None:
                 combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             else:
                 combined_df = new_df
 
-            # Write to buffer
             buffer = io.BytesIO()
             combined_df.to_parquet(buffer, engine="pyarrow", index=False)
             buffer.seek(0)
