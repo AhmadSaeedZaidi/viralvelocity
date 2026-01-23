@@ -47,6 +47,9 @@ readme = "README.md"
 license = "MIT"
 packages = [{include = "maia", from = "src"}]
 
+[tool.poetry.dependencies]
+pleiades-atlas = {path = "../atlas", develop = true}
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
