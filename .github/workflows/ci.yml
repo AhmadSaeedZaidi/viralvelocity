@@ -70,8 +70,6 @@ jobs:
           api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: unit-tests-${{ github.run_id }}
           username: neondb_owner
-          parent: main
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
