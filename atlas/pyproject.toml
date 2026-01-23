@@ -120,7 +120,10 @@ addopts = [
 ]
 env = [
     "YOUTUBE_API_KEY_POOL_JSON=[]",
-    "COMPLIANCE_MODE=false"
+    "COMPLIANCE_MODE=false",
+    "VAULT_PROVIDER=huggingface",
+    "HF_DATASET_ID=mock/dataset",
+    "HF_TOKEN=mock_token",
 ]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
