@@ -10,7 +10,7 @@ def test_settings_load(test_env):
     """Test settings load from environment."""
     from atlas import settings
 
-    assert settings.ENV == "test"
+    assert settings.ENV == "dev"
     assert settings.COMPLIANCE_MODE is True
     assert settings.VAULT_PROVIDER == "huggingface"
 

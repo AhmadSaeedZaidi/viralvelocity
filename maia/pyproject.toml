@@ -105,7 +105,7 @@ addopts = [
     "--color=yes",
 ]
 env = [
-    "YOUTUBE_API_KEY_POOL_JSON=[]",
+    "YOUTUBE_API_KEY_POOL_JSON=[key1]",
     "COMPLIANCE_MODE=false",
     "VAULT_PROVIDER=huggingface",
     "HF_DATASET_ID=mock/dataset",
