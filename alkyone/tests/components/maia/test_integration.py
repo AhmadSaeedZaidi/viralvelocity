@@ -77,29 +77,38 @@ async def test_tracker_cycle_complete_flow(
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
-
-        # Setup mocks
+        # Setup DAO mocks
         mock_dao = MockDAO.return_value
         mock_dao.fetch_tracker_targets = AsyncMock(return_value=[mock_tracker_target])
         mock_dao.update_video_stats_batch = AsyncMock()
+
+        # --- FIX: Configure ClientSession as Async Context Manager
+        mock_session_instance = MagicMock()
+        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+        
+        # Configure session.get() as Async Context Manager
+        mock_get_context = MagicMock()
+        mock_get_context.__aenter__ = AsyncMock() # Will set return_value below
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_instance.get.return_value = mock_get_context
+        MockSession.return_value = mock_session_instance
+        # ----------------------------------------------------
 
         # Mock YouTube API response
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=mock_youtube_stats_response)
-
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.return_value.__aenter__.return_value = mock_response
+        mock_get_context.__aenter__.return_value = mock_response
 
         # Execute cycle
         stats = await run_tracker_cycle(batch_size=1)
-
         # Assertions
         assert stats["videos_fetched"] == 1
         assert stats["videos_updated"] == 1
         assert stats["updates_failed"] == 0
 
-        # Verify DAO calls
         mock_dao.fetch_tracker_targets.assert_called_once_with(1)
         mock_dao.update_video_stats_batch.assert_called_once()
 
@@ -112,7 +121,6 @@ async def test_hunter_handles_hydra_protocol():
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
     ):
-
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(
             return_value=[
@@ -126,14 +134,22 @@ async def test_hunter_handles_hydra_protocol():
             ]
         )
 
+        mock_session_instance = MagicMock()
+        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_get_context = MagicMock()
+        mock_get_context.__aenter__ = AsyncMock()
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_instance.get.return_value = mock_get_context
+        MockSession.return_value = mock_session_instance
+
         # Mock 429 response
         mock_response = AsyncMock()
         mock_response.status = 429
+        mock_get_context.__aenter__.return_value = mock_response
 
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.return_value.__aenter__.return_value = mock_response
-
-        # Should raise SystemExit (Hydra Protocol)
         with pytest.raises(SystemExit, match="429 Rate Limit"):
             await run_hunter_cycle(batch_size=1)
 
@@ -146,7 +162,6 @@ async def test_tracker_handles_hydra_protocol():
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
-
         mock_dao = MockDAO.return_value
         mock_dao.fetch_tracker_targets = AsyncMock(
             return_value=[
@@ -159,14 +174,24 @@ async def test_tracker_handles_hydra_protocol():
             ]
         )
 
+        # --- FIX START ---
+        mock_session_instance = MagicMock()
+        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_get_context = MagicMock()
+        mock_get_context.__aenter__ = AsyncMock()
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_instance.get.return_value = mock_get_context
+        MockSession.return_value = mock_session_instance
+        # --- FIX END ---
+
         # Mock 429 response
         mock_response = AsyncMock()
         mock_response.status = 429
+        mock_get_context.__aenter__.return_value = mock_response
 
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.return_value.__aenter__.return_value = mock_response
-
-        # Should raise SystemExit (Hydra Protocol)
         with pytest.raises(SystemExit, match="429 Rate Limit"):
             await run_tracker_cycle(batch_size=1)
 
