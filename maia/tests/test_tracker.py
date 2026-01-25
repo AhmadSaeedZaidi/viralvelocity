@@ -48,7 +48,7 @@ async def test_update_stats_handles_api_errors(mock_tracker_target: Dict[str, An
     """Test update_stats handles API errors gracefully."""
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         mock_dao = MockDAO.return_value
