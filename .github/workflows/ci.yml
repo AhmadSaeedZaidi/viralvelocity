@@ -62,7 +62,7 @@ jobs:
         working-directory: ./maia
         run: make lint
 
-      - name: Lint & Type Check - Alkyone
+      - name: Lint Alkyone
         working-directory: ./alkyone
         run: make lint
 
@@ -74,15 +74,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create Ephemeral Neon Branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-          branch_name: unit-tests-${{ github.run_id }}
-          username: neondb_owner
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -102,80 +93,31 @@ jobs:
 
       - name: Install Poetry
         run: |
-          python -m pip install --upgrade pip
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry config virtualenvs.in-project true
 
-      - name: Install Atlas dependencies
+      - name: Install Dependencies
+        run: |
+          cd atlas && poetry install --no-interaction
+          cd maia && poetry install --no-interaction
+          # Alkyone dependencies not needed for unit tests of Atlas/Maia
+
+      - name: Test Atlas (Unit)
         working-directory: ./atlas
-        run: poetry install --no-interaction
+        run: poetry run pytest tests -v
 
-      - name: Install Maia dependencies
+      - name: Test Maia (Unit)
         working-directory: ./maia
-        run: poetry install --no-interaction
-
-      - name: Install Alkyone dependencies
-        working-directory: ./alkyone
-        run: poetry install --no-interaction
-
-      - name: Run database migrations
-        run: |
-          # Apply schema to ephemeral Neon branch
-          psql "${{ steps.create-branch.outputs.db_url }}" -f atlas/src/atlas/schema.sql
-        continue-on-error: false
-
-      - name: Configure test environment
-        run: |
-          echo "DATABASE_URL=${{ steps.create-branch.outputs.db_url }}" >> $GITHUB_ENV
-          echo "COMPLIANCE_MODE=false" >> $GITHUB_ENV
-
-      - name: Run Atlas unit tests
-        working-directory: ./atlas
-        run: make test
-
-      - name: Run Maia unit tests
-        working-directory: ./maia
-        run: make test
-
-      - name: Run Alkyone unit tests
-        working-directory: ./alkyone
-        run: make test
-
-      - name: Cleanup (Delete Neon Branch)
-        if: always()
-        run: |
-          curl -X DELETE \
-            "https://console.neon.tech/api/v2/projects/${{ vars.NEON_PROJECT_ID }}/branches/${{ steps.create-branch.outputs.branch_id }}" \
-            -H "Authorization: Bearer ${{ secrets.NEON_API_KEY }}" \
-            -H "Accept: application/json"
+        run: poetry run pytest tests -v
 
   integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
     needs: unit-tests
-    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine Environment
-        id: env
-        run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "name=Production" >> $GITHUB_OUTPUT
-          else
-            echo "name=Development" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Ephemeral Neon Branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-          branch_name: pr-${{ github.event.number }}-alkyone
-          username: neondb_owner
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -195,46 +137,44 @@ jobs:
 
       - name: Install Poetry
         run: |
-          python -m pip install --upgrade pip
           pip install poetry==${{ env.POETRY_VERSION }}
           poetry config virtualenvs.in-project true
 
-      - name: Install Atlas dependencies
-        working-directory: ./atlas
-        run: poetry install --no-interaction
+      - name: Install Dependencies
+        run: |
+          cd atlas && poetry install --no-interaction
+          cd maia && poetry install --no-interaction
+          cd alkyone && poetry install --no-interaction
 
-      - name: Install Maia dependencies
-        working-directory: ./maia
-        run: poetry install --no-interaction
+      - name: Create Ephemeral Neon Branch
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: ci-run-${{ github.run_id }}-${{ github.run_attempt }}
+          username: ${{ vars.NEON_USERNAME }}
+          api_key: ${{ secrets.NEON_API_KEY }}
 
-      - name: Install Alkyone dependencies
-        working-directory: ./alkyone
-        run: poetry install --no-interaction
-
-      - name: Run database migrations
+      - name: Run Database Migrations
         run: |
           # Apply schema to ephemeral Neon branch
           psql "${{ steps.create-branch.outputs.db_url }}" -f atlas/src/atlas/schema.sql
         continue-on-error: false
 
-      - name: Configure test environment
-        run: |
-          echo "DATABASE_URL=${{ steps.create-branch.outputs.db_url }}" >> $GITHUB_ENV
-          echo "ENV=${{ steps.env.outputs.name }}" >> $GITHUB_ENV
-          echo "COMPLIANCE_MODE=false" >> $GITHUB_ENV
-
-      - name: Run Alkyone integration tests
+      - name: Run Alkyone Tests
         working-directory: ./alkyone
         env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
           VAULT_PROVIDER: "huggingface"
-        run: poetry run pytest tests -v --tb=short -m "integration"
+        # Run ALL Alkyone tests (unit + integration) in this environment
+        run: poetry run pytest tests -v --tb=short
 
       - name: Cleanup (Delete Neon Branch)
         if: always()
         run: |
           curl -X DELETE \
             "https://console.neon.tech/api/v2/projects/${{ vars.NEON_PROJECT_ID }}/branches/${{ steps.create-branch.outputs.branch_id }}" \
-            -H "Authorization: Bearer ${{ secrets.NEON_API_KEY }}" \
-            -H "Accept: application/json"
+            -H 'Accept: application/json' \
+            -H "Authorization: Bearer ${{ secrets.NEON_API_KEY }}"
