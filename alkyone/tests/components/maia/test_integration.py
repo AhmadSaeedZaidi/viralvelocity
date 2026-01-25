@@ -33,13 +33,23 @@ async def test_hunter_cycle_complete_flow(
         mock_dao.update_search_state = AsyncMock()
         mock_vault.store_metadata = MagicMock()
 
+        # Configure ClientSession to be an Async Context Manager
+        mock_session_instance = MagicMock()
+        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+        
         # Mock YouTube API response
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=mock_youtube_search_response)
-
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.return_value.__aenter__.return_value = mock_response
+        
+        # Configure session.get() to be an Async Context Manager
+        mock_get_context = MagicMock()
+        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_instance.get.return_value = mock_get_context
+        MockSession.return_value = mock_session_instance
 
         # Execute cycle
         stats = await run_hunter_cycle(batch_size=1)

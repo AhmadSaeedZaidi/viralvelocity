@@ -7,13 +7,27 @@ import pytest
 from atlas import db, settings, vault
 
 
+@pytest.fixture(autouse=True)
+async def reset_db_singleton():
+    """Force reset the DB singleton to prevent event loop mismatch."""
+    # If a pool exists from a previous loop, detach it (loop is dead)
+    if db._pool:
+        db._pool = None
+    yield
+    # Ensure clean closure after test
+    await db.close()
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_database_connectivity():
+async def test_database_connectivity(reset_db_singleton):
     """Verify actual database connection to Neon."""
+    # Initialize fresh connection on the CURRENT loop
+    await db.initialize()
+    
     is_healthy = await db.health_check()
     assert is_healthy, "Database health check failed - verify DATABASE_URL in .env"
-    await db.close()
+    # db.close() is handled by the fixture
 
 
 @pytest.mark.integration
