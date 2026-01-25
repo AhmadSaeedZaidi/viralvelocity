@@ -23,6 +23,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'poetry'
 
       - name: Install Poetry
         run: |
@@ -74,6 +75,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'poetry'
 
       - name: Install Poetry
         run: |
@@ -92,6 +94,11 @@ jobs:
       - name: Install Alkyone dependencies
         working-directory: ./alkyone
         run: poetry install --no-interaction
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
       - name: Run database migrations
         run: |
@@ -155,6 +162,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'poetry'
 
       - name: Install Poetry
         run: |
