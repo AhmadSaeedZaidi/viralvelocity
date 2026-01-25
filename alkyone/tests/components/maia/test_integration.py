@@ -65,7 +65,7 @@ async def test_tracker_cycle_complete_flow(
     """Test complete Tracker cycle from fetch to update."""
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         # Setup mocks
@@ -134,7 +134,7 @@ async def test_tracker_handles_hydra_protocol():
     """Test Tracker raises SystemExit on 429 rate limit (Hydra Protocol)."""
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         mock_dao = MockDAO.return_value

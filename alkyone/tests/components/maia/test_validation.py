@@ -8,8 +8,8 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from maia.hunter import ingest_results
-from maia.tracker import update_stats
+from maia.hunter.flow import ingest_results
+from maia.tracker.flow import update_stats
 
 
 @pytest.mark.asyncio
@@ -140,7 +140,7 @@ async def test_update_stats_handles_deleted_videos():
 
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         mock_dao = MockDAO.return_value
@@ -168,7 +168,7 @@ async def test_update_stats_handles_network_errors():
 
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         mock_dao = MockDAO.return_value
@@ -193,7 +193,7 @@ async def test_update_stats_partial_success():
 
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         mock_dao = MockDAO.return_value
