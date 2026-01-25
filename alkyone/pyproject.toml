@@ -27,6 +27,7 @@ license = "MIT"
 packages = [{include = "alkyone", from = "src"}]
 
 [tool.poetry.dependencies]
+python = ">=3.11, <3.12"
 pleiades-atlas = {path = "../atlas", develop = true}
 
 [tool.poetry.group.dev.dependencies]
