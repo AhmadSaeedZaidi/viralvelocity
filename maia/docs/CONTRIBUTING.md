@@ -131,7 +131,7 @@ from unittest.mock import AsyncMock, patch
 @pytest.mark.asyncio
 async def test_my_feature():
     """Test description explaining what is being verified."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO:
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.my_method = AsyncMock(return_value=expected_value)
         

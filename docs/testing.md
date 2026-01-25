@@ -157,7 +157,7 @@ from maia.hunter import run_hunter_cycle
 @pytest.mark.asyncio
 async def test_hunter_cycle():
     """Test Hunter cycle with mocked DAO."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO:
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(return_value=[])
         
@@ -198,7 +198,7 @@ alkyone/tests/components/
 @pytest.mark.asyncio
 async def test_hunter_cycle_complete_flow():
     """Test complete Hunter cycle from fetch to ingest."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO, \
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO, \
          patch("maia.hunter.vault") as mock_vault, \
          patch("maia.hunter.aiohttp.ClientSession") as MockSession:
         

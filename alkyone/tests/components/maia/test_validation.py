@@ -30,7 +30,7 @@ async def test_ingest_results_handles_missing_video_id():
     }
 
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.vault") as mock_vault,
     ):
 
@@ -65,7 +65,7 @@ async def test_ingest_results_handles_empty_tags():
     }
 
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.vault") as mock_vault,
     ):
 
@@ -101,7 +101,7 @@ async def test_ingest_results_handles_missing_tags():
     }
 
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.vault") as mock_vault,
     ):
 
@@ -123,7 +123,7 @@ async def test_ingest_results_handles_none_response():
     """Test ingest_results returns early on None response."""
     topic = {"id": 1, "query_term": "test"}
 
-    with patch("maia.hunter.MaiaDAO") as MockDAO:
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
 
@@ -139,7 +139,7 @@ async def test_update_stats_handles_deleted_videos():
     videos = [{"id": "deleted123", "title": "Deleted Video"}]
 
     with (
-        patch("maia.tracker.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.aiohttp.ClientSession") as MockSession,
     ):
 
@@ -167,7 +167,7 @@ async def test_update_stats_handles_network_errors():
     videos = [{"id": "test123", "title": "Test Video"}]
 
     with (
-        patch("maia.tracker.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.aiohttp.ClientSession") as MockSession,
     ):
 
@@ -192,7 +192,7 @@ async def test_update_stats_partial_success():
     ]
 
     with (
-        patch("maia.tracker.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.aiohttp.ClientSession") as MockSession,
     ):
 

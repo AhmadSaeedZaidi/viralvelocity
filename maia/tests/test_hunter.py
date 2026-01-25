@@ -13,7 +13,7 @@ from maia.hunter.flow import fetch_batch, ingest_results
 @pytest.mark.asyncio
 async def test_fetch_batch_empty_queue():
     """Test fetch_batch when queue is empty."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO:
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(return_value=[])
 
@@ -26,7 +26,7 @@ async def test_fetch_batch_empty_queue():
 @pytest.mark.asyncio
 async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
     """Test fetch_batch with items in queue."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO:
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(return_value=[mock_search_queue_item])
 
@@ -42,7 +42,7 @@ async def test_ingest_results_with_snowball(
 ):
     """Test ingest_results implements Snowball effect."""
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.vault") as mock_vault,
     ):
 
@@ -74,7 +74,7 @@ async def test_ingest_results_handles_vault_failure(
 ):
     """Test ingest_results continues even if vault storage fails."""
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.vault") as mock_vault,
     ):
 

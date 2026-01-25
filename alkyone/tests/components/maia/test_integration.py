@@ -20,7 +20,7 @@ async def test_hunter_cycle_complete_flow(
 ):
     """Test complete Hunter cycle from fetch to ingest."""
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.vault") as mock_vault,
         patch("maia.hunter.aiohttp.ClientSession") as MockSession,
     ):
@@ -64,7 +64,7 @@ async def test_tracker_cycle_complete_flow(
 ):
     """Test complete Tracker cycle from fetch to update."""
     with (
-        patch("maia.tracker.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.aiohttp.ClientSession") as MockSession,
     ):
 
@@ -99,7 +99,7 @@ async def test_tracker_cycle_complete_flow(
 async def test_hunter_handles_hydra_protocol():
     """Test Hunter raises SystemExit on 429 rate limit (Hydra Protocol)."""
     with (
-        patch("maia.hunter.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.aiohttp.ClientSession") as MockSession,
     ):
 
@@ -133,7 +133,7 @@ async def test_hunter_handles_hydra_protocol():
 async def test_tracker_handles_hydra_protocol():
     """Test Tracker raises SystemExit on 429 rate limit (Hydra Protocol)."""
     with (
-        patch("maia.tracker.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.aiohttp.ClientSession") as MockSession,
     ):
 
@@ -165,7 +165,7 @@ async def test_tracker_handles_hydra_protocol():
 @pytest.mark.asyncio
 async def test_hunter_empty_queue_returns_idle():
     """Test Hunter handles empty queue gracefully."""
-    with patch("maia.hunter.MaiaDAO") as MockDAO:
+    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(return_value=[])
 
@@ -179,7 +179,7 @@ async def test_hunter_empty_queue_returns_idle():
 @pytest.mark.asyncio
 async def test_tracker_no_stale_videos_returns_idle():
     """Test Tracker handles no stale videos gracefully."""
-    with patch("maia.tracker.MaiaDAO") as MockDAO:
+    with patch("maia.tracker.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_tracker_targets = AsyncMock(return_value=[])
 
@@ -193,7 +193,7 @@ async def test_tracker_no_stale_videos_returns_idle():
 @pytest.mark.asyncio
 async def test_tracker_enforces_batch_size_limit():
     """Test Tracker enforces YouTube API batch size limit of 50."""
-    with patch("maia.tracker.MaiaDAO") as MockDAO:
+    with patch("maia.tracker.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_tracker_targets = AsyncMock(return_value=[])
 

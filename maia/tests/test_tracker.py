@@ -13,7 +13,7 @@ from maia.tracker.flow import fetch_targets, update_stats
 @pytest.mark.asyncio
 async def test_fetch_targets_empty():
     """Test fetch_targets when no videos need updates."""
-    with patch("maia.tracker.MaiaDAO") as MockDAO:
+    with patch("maia.tracker.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_tracker_targets = AsyncMock(return_value=[])
 
@@ -26,7 +26,7 @@ async def test_fetch_targets_empty():
 @pytest.mark.asyncio
 async def test_fetch_targets_with_videos(mock_tracker_target: Dict[str, Any]):
     """Test fetch_targets returns videos needing updates."""
-    with patch("maia.tracker.MaiaDAO") as MockDAO:
+    with patch("maia.tracker.flow.MaiaDAO") as MockDAO:
         mock_dao = MockDAO.return_value
         mock_dao.fetch_tracker_targets = AsyncMock(return_value=[mock_tracker_target])
 
@@ -47,7 +47,7 @@ async def test_update_stats_empty_list():
 async def test_update_stats_handles_api_errors(mock_tracker_target: Dict[str, Any]):
     """Test update_stats handles API errors gracefully."""
     with (
-        patch("maia.tracker.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.aiohttp.ClientSession") as MockSession,
     ):
 
