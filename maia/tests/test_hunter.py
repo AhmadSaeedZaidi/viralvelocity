@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from maia.hunter import fetch_batch, ingest_results
+from maia.hunter.flow import fetch_batch, ingest_results
 
 
 @pytest.mark.asyncio

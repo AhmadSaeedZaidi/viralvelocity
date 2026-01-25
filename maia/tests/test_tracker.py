@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from maia.tracker import fetch_targets, update_stats
+from maia.tracker.flow import fetch_targets, update_stats
 
 
 @pytest.mark.asyncio
