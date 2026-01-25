@@ -31,7 +31,7 @@ async def test_ingest_results_handles_missing_video_id():
 
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.vault") as mock_vault,
+        patch("maia.hunter.flow.vault") as mock_vault,
     ):
 
         mock_dao = MockDAO.return_value
@@ -66,7 +66,7 @@ async def test_ingest_results_handles_empty_tags():
 
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.vault") as mock_vault,
+        patch("maia.hunter.flow.vault") as mock_vault,
     ):
 
         mock_dao = MockDAO.return_value
@@ -102,7 +102,7 @@ async def test_ingest_results_handles_missing_tags():
 
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.vault") as mock_vault,
+        patch("maia.hunter.flow.vault") as mock_vault,
     ):
 
         mock_dao = MockDAO.return_value

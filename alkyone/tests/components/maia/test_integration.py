@@ -21,8 +21,8 @@ async def test_hunter_cycle_complete_flow(
     """Test complete Hunter cycle from fetch to ingest."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.vault") as mock_vault,
-        patch("maia.hunter.aiohttp.ClientSession") as MockSession,
+        patch("maia.hunter.flow.vault") as mock_vault,
+        patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         # Setup mocks
@@ -100,7 +100,7 @@ async def test_hunter_handles_hydra_protocol():
     """Test Hunter raises SystemExit on 429 rate limit (Hydra Protocol)."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.aiohttp.ClientSession") as MockSession,
+        patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
     ):
 
         mock_dao = MockDAO.return_value

@@ -272,7 +272,7 @@ def mock_vault(monkeypatch):
 
     from atlas import vault
 
-    monkeypatch.setattr(vault.vault, "append_metrics", mock_append)
+    monkeypatch.setattr(vault, "append_metrics", mock_append)
 
     return storage
 
@@ -286,4 +286,4 @@ def mock_vault_failing(monkeypatch):
 
     from atlas import vault
 
-    monkeypatch.setattr(vault.vault, "append_metrics", mock_append_fail)
+    monkeypatch.setattr(vault, "append_metrics", mock_append_fail)
