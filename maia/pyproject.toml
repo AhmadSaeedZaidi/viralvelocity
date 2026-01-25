@@ -16,7 +16,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pleiades-atlas",
+    "pleiades-atlas[hf]",
     "prefect>=2.16.0,<3.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     "tenacity>=8.2.0,<9.0.0",

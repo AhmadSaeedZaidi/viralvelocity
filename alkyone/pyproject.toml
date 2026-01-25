@@ -16,7 +16,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pleiades-atlas"
+    "pleiades-atlas[hf]"
 ]
 
 [tool.poetry]
