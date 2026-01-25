@@ -99,8 +99,7 @@ jobs:
       - name: Install Dependencies
         run: |
           cd atlas && poetry install --no-interaction
-          cd maia && poetry install --no-interaction
-          # Alkyone dependencies not needed for unit tests of Atlas/Maia
+          cd ../maia && poetry install --no-interaction
 
       - name: Test Atlas (Unit)
         working-directory: ./atlas
@@ -114,6 +113,7 @@ jobs:
     name: Integration Tests
     needs: unit-tests
     runs-on: ubuntu-latest
+    environment: Development
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -168,7 +168,6 @@ jobs:
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
           VAULT_PROVIDER: "huggingface"
-        # Run ALL Alkyone tests (unit + integration) in this environment
         run: poetry run pytest tests -v --tb=short
 
       - name: Cleanup (Delete Neon Branch)
