@@ -127,7 +127,6 @@ addopts = [
 filterwarnings = [
     "ignore::DeprecationWarning:prefect.*",
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
-    "ignore::sqlalchemy.exc.SAWarning",
 ]
 env = [
     "YOUTUBE_API_KEY_POOL_JSON=[\"test_key_1\"]",
