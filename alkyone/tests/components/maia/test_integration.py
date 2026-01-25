@@ -86,12 +86,12 @@ async def test_tracker_cycle_complete_flow(
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-        
+
         # Configure session.get() as Async Context Manager
         mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = AsyncMock() # Will set return_value below
+        mock_get_context.__aenter__ = AsyncMock()  # Will set return_value below
         mock_get_context.__aexit__ = AsyncMock(return_value=None)
-        
+
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
         # ----------------------------------------------------
@@ -137,11 +137,11 @@ async def test_hunter_handles_hydra_protocol():
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-        
+
         mock_get_context = MagicMock()
         mock_get_context.__aenter__ = AsyncMock()
         mock_get_context.__aexit__ = AsyncMock(return_value=None)
-        
+
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
@@ -178,11 +178,11 @@ async def test_tracker_handles_hydra_protocol():
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-        
+
         mock_get_context = MagicMock()
         mock_get_context.__aenter__ = AsyncMock()
         mock_get_context.__aexit__ = AsyncMock(return_value=None)
-        
+
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
         # --- FIX END ---
