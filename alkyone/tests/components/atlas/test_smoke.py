@@ -24,7 +24,7 @@ async def test_database_connectivity(reset_db_singleton):
     """Verify actual database connection to Neon."""
     # Initialize fresh connection on the CURRENT loop
     await db.initialize()
-    
+
     is_healthy = await db.health_check()
     assert is_healthy, "Database health check failed - verify DATABASE_URL in .env"
     # db.close() is handled by the fixture
