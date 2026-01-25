@@ -195,9 +195,9 @@ async def test_update_stats_partial_success():
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
-
         mock_dao = MockDAO.return_value
         mock_dao.update_video_stats_batch = AsyncMock()
+        mock_dao.log_video_stats_batch = AsyncMock()
 
         # API returns only one video (other deleted/private)
         mock_response = AsyncMock()

@@ -317,9 +317,9 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
 
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
-        # Step 1: Select old stats
+        # Step 1: Select old stats (no 'id', use composite key)
         select_query = """
-            SELECT id, video_id, views, likes, comment_count, timestamp
+            SELECT video_id, views, likes, comment_count, timestamp
             FROM video_stats_log
             WHERE timestamp < %s
             ORDER BY timestamp ASC
@@ -334,28 +334,22 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
 
         # Step 2: Prepare for Vault (group by date)
         try:
-            # Group stats by date for efficient Parquet storage
             from collections import defaultdict
 
             stats_by_date = defaultdict(list)
 
             for stat in stats:
-                date_str = (
-                    stat["timestamp"].strftime("%Y-%m-%d")
-                    if isinstance(stat["timestamp"], datetime)
-                    else stat["timestamp"][:10]
-                )
+                ts = stat["timestamp"]
+                date_str = ts.strftime("%Y-%m-%d") if isinstance(ts, datetime) else ts[:10]
+                iso_ts = ts.isoformat() if isinstance(ts, datetime) else ts
+
                 stats_by_date[date_str].append(
                     {
                         "video_id": stat["video_id"],
                         "views": stat["views"],
                         "likes": stat["likes"],
                         "comment_count": stat["comment_count"],
-                        "timestamp": (
-                            stat["timestamp"].isoformat()
-                            if isinstance(stat["timestamp"], datetime)
-                            else stat["timestamp"]
-                        ),
+                        "timestamp": iso_ts,
                     }
                 )
 
@@ -364,13 +358,16 @@ class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
                 vault.append_metrics(day_stats, date=date_str)
                 logger.info(f"Archived {len(day_stats)} stats for date {date_str}")
 
-            # Step 4: Purge from hot tier (only after successful Vault upload)
-            stat_ids = [stat["id"] for stat in stats]
+            # Step 4: Purge from hot tier (using composite key deletion)
             delete_query = """
                 DELETE FROM video_stats_log
-                WHERE id = ANY(%s)
+                WHERE (video_id, timestamp) IN (
+                    SELECT unnest(%s::text[]), unnest(%s::timestamp[])
+                )
             """
-            await self._execute(delete_query, (stat_ids,))
+            video_ids = [s["video_id"] for s in stats]
+            timestamps = [s["timestamp"] for s in stats]
+            await self._execute(delete_query, (video_ids, timestamps))
 
             logger.info(f"Archived and purged {len(stats)} stats from hot tier")
             return len(stats)
