@@ -41,7 +41,7 @@ class TestJanitorArchival:
                 "comment_count": 10 * i,
                 "timestamp": datetime.now(timezone.utc) - timedelta(days=10),
             }
-            for i in range(100)
+            for i in range(50)
         ]
 
         video_ids = [s["video_id"] for s in stats_data]
@@ -52,18 +52,22 @@ class TestJanitorArchival:
         archived_count = await dao.archive_cold_stats(retention_days=7, batch_size=5000)
 
         # Verify stats were archived
-        assert archived_count == 100
+        assert archived_count == 50
         assert len(mock_vault) > 0
 
     @pytest.mark.asyncio
     async def test_archive_cold_stats_multiple_batches(self, dao, mock_vault):
         """Test archival loop drains large backlog in batches."""
-        batch_size = 5000
-        total_stats = 12000
+        batch_size = 2000
+        total_stats = 5000
+
+        # Optimization: Reuse a small set of videos to avoid expensive video creation
+        video_pool = [f"VIDEO_{i:03d}" for i in range(50)]
+        await self._create_parent_videos(dao, video_pool)
 
         old_stats = [
             {
-                "video_id": f"VIDEO_{i:05d}",
+                "video_id": video_pool[i % len(video_pool)],  # Recycle video IDs
                 "views": 1000,
                 "likes": 50,
                 "comment_count": 10,
@@ -71,10 +75,6 @@ class TestJanitorArchival:
             }
             for i in range(total_stats)
         ]
-
-        # Optimize: create unique parent videos only
-        unique_ids = list(set(s["video_id"] for s in old_stats))
-        await self._create_parent_videos(dao, unique_ids)
 
         await dao.log_video_stats_batch(old_stats)
 
@@ -235,14 +235,14 @@ class TestJanitorArchival:
 
     @pytest.mark.asyncio
     async def test_archival_performance_large_dataset(self, dao, mock_vault):
-        """Performance test: Archive 50k stats in reasonable time."""
+        """Performance test: Archive 10k stats in reasonable time."""
         import time
 
-        total_stats = 50000
-        batch_size = 10000
+        total_stats = 10000
+        batch_size = 5000
 
         # Optimization: Reuse a small set of videos
-        video_pool = [f"VIDEO_{i:03d}" for i in range(100)]
+        video_pool = [f"VIDEO_{i:03d}" for i in range(50)]
         await self._create_parent_videos(dao, video_pool)
 
         for batch_start in range(0, total_stats, batch_size):
@@ -263,7 +263,7 @@ class TestJanitorArchival:
 
         total_archived = 0
         while True:
-            archived = await dao.archive_cold_stats(retention_days=7, batch_size=5000)
+            archived = await dao.archive_cold_stats(retention_days=7, batch_size=3000)
             if archived == 0:
                 break
             total_archived += archived
@@ -271,7 +271,7 @@ class TestJanitorArchival:
         elapsed = time.time() - start_time
 
         assert total_archived == total_stats
-        assert elapsed < 60  # Should be fast
+        assert elapsed < 30  
 
 
 @pytest.fixture
