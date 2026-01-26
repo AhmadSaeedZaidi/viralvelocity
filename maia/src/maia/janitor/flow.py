@@ -83,7 +83,7 @@ async def janitor_cycle(dry_run: bool = False, archive_stats: bool = True) -> Di
         - Daily at 3 AM UTC
         - After major processing cycles complete
         - When database size alerts trigger
-    
+
     Returns:
         Dict with keys: stats_archived, videos_deleted, cleanup_stats
     """
@@ -120,7 +120,7 @@ async def janitor_cycle(dry_run: bool = False, archive_stats: bool = True) -> Di
     run_logger.info(f"Stats archived: {results.get('stats_archived', 0)}")
     run_logger.info(f"Videos deleted: {results.get('videos_deleted', 0)}")
     run_logger.info("=" * 60)
-    
+
     return results
 
 
