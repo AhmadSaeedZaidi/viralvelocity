@@ -10,42 +10,40 @@ import pytest_asyncio
 @pytest.fixture(scope="session")
 def test_env() -> Dict[str, str]:
     """
-    Set up test environment variables.
-
+    Provide test environment variables for reference.
+    
     Returns environment dict for reuse in other test modules.
     """
-    env_vars = {
-        "DATABASE_URL": "postgresql://test:test@localhost:5432/test",
-        "VAULT_PROVIDER": "huggingface",
-        "HF_DATASET_ID": "test/dataset",
-        "HF_TOKEN": "hf_test_token",
-        "YOUTUBE_API_KEY_POOL_JSON": '["test_key_1", "test_key_2", "test_key_3"]',
-        "COMPLIANCE_MODE": "true",
-        "ENV": "test",
-        "JANITOR_ENABLED": "false",  # Disable janitor in tests
-        "JANITOR_RETENTION_DAYS": "7",
+    return {
+        "DATABASE_URL": os.getenv("DATABASE_URL", "postgresql://test:test@localhost:5432/test"),
+        "VAULT_PROVIDER": os.getenv("VAULT_PROVIDER", "huggingface"),
+        "HF_DATASET_ID": os.getenv("HF_DATASET_ID", "test/dataset"),
+        "HF_TOKEN": os.getenv("HF_TOKEN", "hf_test_token"),
+        "YOUTUBE_API_KEY_POOL_JSON": os.getenv("YOUTUBE_API_KEY_POOL_JSON", '["test_key_1", "test_key_2", "test_key_3"]'),
+        "COMPLIANCE_MODE": os.getenv("COMPLIANCE_MODE", "true"),
+        "ENV": os.getenv("ENV", "test"),
+        "JANITOR_ENABLED": os.getenv("JANITOR_ENABLED", "false"),
+        "JANITOR_RETENTION_DAYS": os.getenv("JANITOR_RETENTION_DAYS", "7"),
     }
-    os.environ.update(env_vars)
-    return env_vars
 
 
-@pytest_asyncio.fixture
-async def db_connection(test_env):
-    """
-    Provide a test database connection with proper lifecycle management.
+# @pytest_asyncio.fixture
+# async def db_connection(test_env):
+#     """
+#     Provide a test database connection with proper lifecycle management.
 
-    Note: Uses Atlas's db module for consistent connection handling.
-    """
-    from atlas import db
+#     Note: Uses Atlas's db module for consistent connection handling.
+#     """
+#     from atlas import db
 
-    # Initialize connection pool
-    await db.initialize()
+#     # Initialize connection pool
+#     await db.initialize()
 
-    # Provide connection to tests
-    yield db
+#     # Provide connection to tests
+#     yield db
 
-    # Cleanup
-    await db.close()
+#     # Cleanup
+#     await db.close()
 
 
 @pytest.fixture

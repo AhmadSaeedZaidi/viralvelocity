@@ -107,6 +107,9 @@ env = [
     "VAULT_PROVIDER=huggingface",
     "HF_DATASET_ID=mock/dataset",
     "HF_TOKEN=mock_token",
+    "ENV=dev",
+    "JANITOR_ENABLED=false",
+    "JANITOR_RETENTION_DAYS=7",
 ]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
