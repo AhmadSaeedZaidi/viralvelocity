@@ -271,7 +271,7 @@ class TestJanitorArchival:
         elapsed = time.time() - start_time
 
         assert total_archived == total_stats
-        assert elapsed < 30  
+        assert elapsed < 30
 
 
 @pytest.fixture
