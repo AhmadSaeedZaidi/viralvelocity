@@ -1,4 +1,4 @@
-name: Hydra CI (The Gatekeeper)
+name: CI
 
 on:
   push:
@@ -143,8 +143,8 @@ jobs:
       - name: Install Dependencies
         run: |
           cd atlas && poetry install --no-interaction
-          cd maia && poetry install --no-interaction
-          cd alkyone && poetry install --no-interaction
+          cd ../maia && poetry install --no-interaction
+          cd ../alkyone && poetry install --no-interaction
 
       - name: Create Ephemeral Neon Branch
         id: create-branch
