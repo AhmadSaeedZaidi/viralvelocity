@@ -183,9 +183,15 @@ class TestJanitorArchival:
         assert len(mock_vault) >= 3
 
     @pytest.mark.asyncio
-    async def test_janitor_full_cycle(self, dao, mock_vault):
+    async def test_janitor_full_cycle(self, dao, mock_vault, monkeypatch):
         """Test complete Janitor cycle: archive stats + cleanup videos."""
         from maia.janitor.flow import janitor_cycle
+
+        # Enable janitor for this test
+        from atlas import settings
+        monkeypatch.setattr(settings, "JANITOR_ENABLED", True)
+        monkeypatch.setattr(settings, "JANITOR_RETENTION_DAYS", 7)
+        monkeypatch.setattr(settings, "JANITOR_SAFETY_CHECK", True)
 
         # Setup: Create old video with stats
         video_id = "VIDEO_JANITOR_TEST"
