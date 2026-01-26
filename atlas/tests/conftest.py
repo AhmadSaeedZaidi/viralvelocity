@@ -11,7 +11,7 @@ import pytest_asyncio
 def test_env() -> Dict[str, str]:
     """
     Provide test environment variables for reference.
-    
+
     Returns environment dict for reuse in other test modules.
     """
     return {
@@ -19,7 +19,9 @@ def test_env() -> Dict[str, str]:
         "VAULT_PROVIDER": os.getenv("VAULT_PROVIDER", "huggingface"),
         "HF_DATASET_ID": os.getenv("HF_DATASET_ID", "test/dataset"),
         "HF_TOKEN": os.getenv("HF_TOKEN", "hf_test_token"),
-        "YOUTUBE_API_KEY_POOL_JSON": os.getenv("YOUTUBE_API_KEY_POOL_JSON", '["test_key_1", "test_key_2", "test_key_3"]'),
+        "YOUTUBE_API_KEY_POOL_JSON": os.getenv(
+            "YOUTUBE_API_KEY_POOL_JSON", '["test_key_1", "test_key_2", "test_key_3"]'
+        ),
         "COMPLIANCE_MODE": os.getenv("COMPLIANCE_MODE", "true"),
         "ENV": os.getenv("ENV", "test"),
         "JANITOR_ENABLED": os.getenv("JANITOR_ENABLED", "false"),
