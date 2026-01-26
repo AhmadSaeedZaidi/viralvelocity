@@ -205,7 +205,11 @@ async def test_update_stats_partial_success():
                 "items": [
                     {
                         "id": "valid1",
-                        "statistics": {"viewCount": "1000", "likeCount": "50", "commentCount": "10"},
+                        "statistics": {
+                            "viewCount": "1000",
+                            "likeCount": "50",
+                            "commentCount": "10",
+                        },
                     }
                 ]
             }
