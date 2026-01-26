@@ -193,31 +193,26 @@ async def test_update_stats_partial_success():
 
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.tracker_executor") as MockExecutor,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.update_video_stats_batch = AsyncMock()
         mock_dao.log_video_stats_batch = AsyncMock()
 
-        # API returns only one video (other deleted/private)
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(
+        # Mock the HydraExecutor to return API response
+        MockExecutor.execute_async = AsyncMock(
             return_value={
                 "items": [
                     {
                         "id": "valid1",
-                        "statistics": {"viewCount": "1000", "likeCount": "50"},
+                        "statistics": {"viewCount": "1000", "likeCount": "50", "commentCount": "10"},
                     }
                 ]
             }
         )
 
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.return_value.__aenter__.return_value = mock_response
-
         result = await update_stats(videos)
 
         # Should return 1 (partial success)
         assert result == 1
-        mock_dao.update_video_stats_batch.assert_called_once()
+        mock_dao.log_video_stats_batch.assert_called_once()
