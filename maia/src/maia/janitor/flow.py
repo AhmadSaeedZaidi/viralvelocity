@@ -1,4 +1,4 @@
-"""Maia Janitor: Hot queue cleanup agent."""
+"""Maia Janitor: Tiered storage cleanup agent."""
 
 import asyncio
 import logging

@@ -93,7 +93,7 @@ Edit `maia/.env`:
 # YouTube API Keys (JSON array)
 YOUTUBE_API_KEY_POOL_JSON='["AIzaSy...", "AIzaSy..."]'
 
-# Hydra Protocol
+# Resiliency Strategy
 HYDRA_ENABLED=true
 HYDRA_RETRY_ATTEMPTS=3
 ```
@@ -194,7 +194,7 @@ python -m maia.tracker.flow
 
 Expected output:
 ```
-INFO - === Starting Tracker Cycle (Ghost Tracking) ===
+INFO - === Starting Tracker Cycle (Adaptive Scheduling) ===
 INFO - Fetched 50 videos from watchlist
 INFO - ✓ Stored 50 metrics to Vault
 INFO - ✓ Updated 50 watchlist schedules
@@ -206,8 +206,8 @@ INFO - === Tracker Cycle Complete ===
 ## Next Steps
 
 - **[Architecture Guide](architecture.md)** - Understand the system design
-- **[Ghost Tracking](ghost-tracking.md)** - Learn about infinite video tracking
-- **[Hydra Protocol](hydra-protocol.md)** - Understand API key management
+- **[Adaptive Scheduling](adaptive-scheduling.md)** - Learn about infinite video tracking
+- **[Resiliency Strategy](resiliency-strategy.md)** - Understand API key management
 - **[Testing Guide](testing.md)** - Run tests and contribute
 
 ---

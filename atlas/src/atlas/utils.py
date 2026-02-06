@@ -214,9 +214,9 @@ class KeyRing:
 
 class HydraExecutor:
     """
-    Unified executor for Google API requests with Hydra Protocol termination.
+    Unified executor for Google API requests with Resiliency Strategy termination.
 
-    The Hydra Protocol:
+    The Resiliency Strategy:
     - Exit 0 (Clean Death): All keys exhausted for a request → Container restarts cleanly
     - Exit 1 (Dirty Death): Unexpected error → Container restarts with error signal
 
@@ -234,7 +234,7 @@ class HydraExecutor:
         error_classifier: Optional[Callable[[Exception], tuple[bool, bool]]] = None,
     ) -> Optional[Any]:
         """
-        Execute an async API request with key rotation and Hydra Protocol termination.
+        Execute an async API request with key rotation and Resiliency Strategy termination.
 
         Args:
             request_func: Async function that takes an API key and returns result
@@ -275,9 +275,9 @@ class HydraExecutor:
                         if self.key_ring.attempt_rotation(session_id):
                             continue  # Retry with next key
                         else:
-                            # All keys exhausted - Hydra Protocol: Clean Death
+                            # All keys exhausted - Resiliency Strategy: Clean Death
                             self.logger.critical(
-                                f"🔥 HYDRA PROTOCOL: All keys exhausted for {self.agent_name}. "
+                                f"🔥 RESILIENCY STRATEGY: All keys exhausted for {self.agent_name}. "
                                 f"Initiating clean container termination (exit 0)."
                             )
                             sys.exit(0)  # Clean death - container will restart
@@ -321,7 +321,7 @@ async def execute_youtube_request_async(
     agent_name: str = "youtube_api",
 ) -> Optional[Any]:
     """
-    Convenience function for executing YouTube API requests with Hydra Protocol.
+    Convenience function for executing YouTube API requests with Resiliency Strategy.
 
     Args:
         key_ring: KeyRing instance for key rotation
@@ -332,7 +332,7 @@ async def execute_youtube_request_async(
         API response or None
 
     Raises:
-        SystemExit: On key exhaustion (Hydra Protocol)
+        SystemExit: On key exhaustion (Resiliency Strategy)
     """
     executor = HydraExecutor(key_ring, agent_name)
     return await executor.execute_async(request_func)

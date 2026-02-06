@@ -1,4 +1,4 @@
-.PHONY: help install lint test clean
+.PHONY: help install lint test test-unit migrate clean
 
 help:
 	@echo "Atlas Development Commands:"
@@ -6,6 +6,8 @@ help:
 	@echo "  make setup       - Provision database schema"
 	@echo "  make lint        - Run linters (black, isort, mypy)"
 	@echo "  make test        - Run unit tests"
+	@echo "  make test-unit   - Run unit tests (alias for test)"
+	@echo "  make migrate     - Apply database schema (requires DATABASE_URL)"
 	@echo "  make clean       - Clean build artifacts"
 
 install:
@@ -20,7 +22,16 @@ lint:
 	poetry run mypy src/atlas --config-file pyproject.toml --no-error-summary
 
 test:
-	poetry run pytest -v
+	poetry run pytest tests -v
+
+test-unit: test
+
+migrate:
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "ERROR: DATABASE_URL environment variable is required"; \
+		exit 1; \
+	fi
+	psql "$$DATABASE_URL" -f src/atlas/schema.sql
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

@@ -75,7 +75,7 @@ async def hunt_history(year: int, month: int) -> None:
                             logger.warning(f"Archeologist Key {key[-6:]} burned. Rotating.")
                             continue
                         elif resp.status == 429:
-                            logger.critical("Archeologist hit 429. Aborting to Hydra.")
+                            logger.critical("Archeologist hit 429. Aborting to Resiliency.")
                             raise SystemExit("429 Rate Limit - Archeologist")
                         else:
                             logger.error(f"HTTP {resp.status} for historical search")
@@ -99,7 +99,7 @@ async def run_archeology_campaign(start_year: int = 2005, end_year: int = 2024) 
         for month in range(1, 13):
             await hunt_history(year, month)
             # Sleep slightly to be polite to the API?
-            # Nah, let Hydra handle the limits.
+            # Nah, let Resiliency handle the limits.
 
 
 if __name__ == "__main__":

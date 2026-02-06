@@ -32,7 +32,7 @@ async with db.get_connection() as conn:
     await conn.execute("SELECT * FROM search_queue")
 ```
 
-### 3. Hydra Protocol (Churn & Burn)
+### 3. Resiliency Strategy (Churn & Burn)
 
 Maia operates in a "disposable container" environment (GitHub Actions, Cloud Run, etc.). When a rate limit (429) is encountered, Maia **immediately terminates** to force container restart and IP rotation:
 
@@ -68,7 +68,7 @@ This prevents quota contamination between agents. Configuration is handled by `a
 
 **Key Features**:
 - Automatic key rotation on 403 (quota exceeded)
-- Immediate termination on 429 (Hydra Protocol)
+- Immediate termination on 429 (Resiliency Strategy)
 - Stale token reset (>12h old pagination tokens are discarded)
 - Cold archive to vault (metadata stored for reproducibility)
 - Hot index to database (queryable structured data)
@@ -119,7 +119,7 @@ YouTube API → Tracker
 | Error | Response |
 |-------|----------|
 | 403 Quota Exceeded | Rotate to next key in ring, retry |
-| 429 Rate Limit | **Raise SystemExit** (Hydra Protocol) |
+| 429 Rate Limit | **Raise SystemExit** (Resiliency Strategy) |
 | Network Errors | Log warning, skip query |
 | Exhausted Key Ring | Log critical, skip query |
 | Vault Failures | Log warning, continue (non-blocking) |
@@ -130,7 +130,7 @@ YouTube API → Tracker
 | Error | Response |
 |-------|----------|
 | 403 Quota Exceeded | Rotate to next key in ring, retry |
-| 429 Rate Limit | **Raise SystemExit** (Hydra Protocol) |
+| 429 Rate Limit | **Raise SystemExit** (Resiliency Strategy) |
 | Network Errors | Log error, return 0 updates |
 | Empty API Response | Log warning, return 0 (videos deleted/private) |
 | Database Failures | Log error, raise exception |
@@ -233,7 +233,7 @@ Mock all external dependencies:
 ### Integration Tests
 Use `@pytest.mark.integration` marker:
 - End-to-end flow tests
-- Hydra Protocol tests (verify SystemExit on 429)
+- Resiliency Strategy tests (verify SystemExit on 429)
 - Edge case handling
 
 ### Running Tests
@@ -281,13 +281,13 @@ async def fetch_batch(batch_size: int = 10) -> List[Dict[str, Any]]:
     # ...
 ```
 
-### 4. Hydra Protocol Implementation
+### 4. Resiliency Strategy Implementation
 ```python
 try:
     # ... main logic ...
 except SystemExit:
     # Log but DON'T catch - must propagate
-    logger.critical("Hydra Protocol activated")
+    logger.critical("Resiliency Strategy activated")
     raise
 except Exception as e:
     # Other errors can be handled
@@ -333,7 +333,7 @@ When making changes to Maia, verify:
 
 - [ ] No raw SQL (all queries in `MaiaDAO`)
 - [ ] No local state persistence
-- [ ] Hydra Protocol respected (429 → SystemExit)
+- [ ] Resiliency Strategy respected (429 → SystemExit)
 - [ ] All functions have type hints
 - [ ] Tests added for new functionality
 - [ ] Error handling follows strategy above

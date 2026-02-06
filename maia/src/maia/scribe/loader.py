@@ -24,7 +24,7 @@ class TranscriptLoader:
     def fetch(self, video_id: str) -> Optional[List[Dict[Any, Any]]]:
         """
         Fetches transcript.
-        Implements Hydra Protocol: If blocked (TooManyRequests), raises SystemExit.
+        Implements Resiliency Strategy: If blocked (TooManyRequests), raises SystemExit.
         """
         try:
             # We fetch the list object to inspect available transcripts
@@ -50,7 +50,7 @@ class TranscriptLoader:
 
         except TooManyRequests:
             self.logger.critical(
-                f"IP BLOCKED by YouTube (TooManyRequests). Initiating Hydra Protocol for Scribe."
+                f"IP BLOCKED by YouTube (TooManyRequests). Initiating Resiliency Strategy for Scribe."
             )
             # CRITICAL: This kills the container to force a rotation
             raise SystemExit("429 Rate Limit (Scribe) - Container Suicide")

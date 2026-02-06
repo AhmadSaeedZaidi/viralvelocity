@@ -1,8 +1,8 @@
-# Hydra Protocol
+# Resiliency Strategy
 
 **Intelligent API key management and graceful termination**
 
-The Hydra Protocol is Pleiades' intelligent API key management system that handles quota exhaustion, automatic key rotation, and clean service termination.
+The Resiliency Strategy is Pleiades' intelligent API key management system that handles quota exhaustion, automatic key rotation, and clean service termination.
 
 ---
 
@@ -18,14 +18,14 @@ YouTube Data API v3 has strict quota limits (10,000 units/day per key). Traditio
 
 ### The Solution
 
-**Hydra Protocol** provides:
+**Resiliency Strategy** provides:
 - ✅ Multi-key pool management (KeyRing)
 - ✅ Automatic key rotation on failure
 - ✅ Clean termination when all keys exhausted (SystemExit)
 - ✅ Retry logic with exponential backoff
 - ✅ Container orchestration integration
 
-Named after the mythological Hydra: "Cut off one head, two more grow back" - When one key fails, rotate to the next.
+Inspired by the Hydra pattern: When one key fails, seamlessly rotate to the next.
 
 ---
 
@@ -83,7 +83,7 @@ try:
     result = await executor.execute_async(make_request)
 except SystemExit:
     # All keys exhausted - clean termination
-    logger.critical("Hydra Protocol: All API keys exhausted")
+    logger.critical("Resiliency Strategy: All API keys exhausted")
     raise
 ```
 
@@ -142,7 +142,7 @@ async def run_hunter_cycle():
         result = await hunter_executor.execute_async(make_request)
         
     except SystemExit:
-        # Hydra Protocol termination - propagate immediately
+        # Resiliency Strategy termination - propagate immediately
         logger.critical("Hunter terminated: All API keys exhausted")
         raise  # Clean exit
 ```
@@ -199,13 +199,13 @@ assert all(len(key) > 10 for key in settings.api_keys)
 
 ## Exit Codes
 
-The Hydra Protocol uses specific exit codes:
+The Resiliency Strategy uses specific exit codes:
 
 | Exit Code | Meaning | Action |
 |-----------|---------|--------|
 | 0 | Normal exit | - |
 | 1 | Unexpected error | Restart container |
-| 42 | Hydra Protocol: All keys exhausted | Do NOT restart |
+| 42 | Resiliency Strategy: All keys exhausted | Do NOT restart |
 | 130 | SIGINT (Ctrl+C) | User-initiated stop |
 
 ### Docker Compose Integration
@@ -267,7 +267,7 @@ logger.warning(f"Rotated to next API key (exhausted: {keys.exhausted_count})")
 ```python
 except SystemExit as e:
     # Log for monitoring
-    logger.critical(f"Hydra Protocol triggered: {e}")
+    logger.critical(f"Resiliency Strategy triggered: {e}")
     
     # Alert via notifier
     await notifier.send(
@@ -403,7 +403,7 @@ curl "https://www.googleapis.com/youtube/v3/search?part=snippet&q=test&key=YOUR_
 
 ## Summary
 
-**Hydra Protocol** enables resilient API usage:
+**Resiliency Strategy** enables resilient API usage:
 
 - ✅ Multi-key pool management
 - ✅ Automatic rotation on quota exhaustion  

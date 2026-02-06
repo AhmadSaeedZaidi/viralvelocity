@@ -1,8 +1,8 @@
-# Ghost Tracking
+# Adaptive Scheduling
 
 **Infinite video tracking with minimal SQL footprint**
 
-Ghost Tracking decouples video metadata (ephemeral, cleaned after 7 days) from tracking schedules (persistent) and metrics data (Parquet in Vault), enabling:
+Adaptive Scheduling decouples video metadata (ephemeral, cleaned after 7 days) from tracking schedules (persistent) and metrics data (Parquet in Vault), enabling:
 - Track videos **forever**
 - Store unlimited time-series data in Vault
 - Maintain <0.5 GB SQL footprint
@@ -22,11 +22,11 @@ Traditional approaches store all video data and metrics in SQL:
 
 ### The Solution
 
-**Ghost Tracking** separates concerns:
+**Adaptive Scheduling** separates concerns:
 
 ```
 ┌─────────────────────────────────────┐
-│   HOT QUEUE (PostgreSQL <0.5GB)    │
+│   TIERED STORAGE (PostgreSQL <0.5GB)    │
 │                                     │
 │  videos: Deleted after 7 days      │  ← Ephemeral metadata
 │  watchlist: Persists forever       │  ← Lightweight schedule
@@ -159,7 +159,7 @@ Day 1 (00:00): Track #24 → Switches to DAILY
 Day 2 (00:00): Track #25 → DAILY
 Day 7 (00:00): Track #30 → Switches to WEEKLY
 Day 7 (12:00): Janitor deletes video row
-Day 14 (00:00): Track #31 → Still works! (Ghost Tracking)
+Day 14 (00:00): Track #31 → Still works! (Adaptive Scheduling)
 ```
 
 ---
@@ -221,13 +221,13 @@ vault.append_metrics(metrics)
 
 ### Space Efficiency
 
-**Before Ghost Tracking:**
+**Before Adaptive Scheduling:**
 - All metrics in SQL
 - ~100 bytes per metric point
 - 1 video tracked hourly for 1 year = 876,000 bytes
 - 100k videos = 87.6 GB
 
-**After Ghost Tracking:**
+**After Adaptive Scheduling:**
 - Only schedule in SQL (~50 bytes per video)
 - Metrics in compressed Parquet (~20 bytes per point)
 - 100k videos watchlist = 5 MB in SQL
@@ -407,7 +407,7 @@ EOF
 
 ## Migration
 
-### From Old Tracker to Ghost Tracking
+### From Old Tracker to Adaptive Scheduling
 
 ```sql
 -- 1. Create watchlist from existing videos
@@ -428,7 +428,7 @@ SELECT COUNT(*) FROM watchlist;
 
 ## Summary
 
-**Ghost Tracking** enables infinite video tracking while maintaining SQL efficiency:
+**Adaptive Scheduling** enables infinite video tracking while maintaining SQL efficiency:
 
 - ✅ Track videos forever (even after deletion)
 - ✅ Unlimited metrics in Parquet (compressed, columnar)

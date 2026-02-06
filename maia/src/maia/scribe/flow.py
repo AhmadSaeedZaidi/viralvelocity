@@ -75,7 +75,7 @@ async def process_transcript(video: Dict[str, Any]) -> None:
             await dao.mark_video_transcript_safe(vid_id)
 
     except SystemExit:
-        # Re-raise SystemExit to ensure the Hydra Protocol triggers
+        # Re-raise SystemExit to ensure the Resiliency strategy triggers
         raise
     except Exception as e:
         run_logger.error(f"Failed to scribe {vid_id} after retries: {e}")

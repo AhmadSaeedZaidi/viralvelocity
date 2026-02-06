@@ -1,10 +1,11 @@
-.PHONY: help install lint test clean
+.PHONY: help install lint test test-unit clean
 
 help:
 	@echo "Maia Development Commands:"
 	@echo "  make install     - Install dependencies (editable mode)"
 	@echo "  make lint        - Run linters (black, isort, mypy)"
 	@echo "  make test        - Run unit tests"
+	@echo "  make test-unit   - Run unit tests (alias for test)"
 	@echo "  make clean       - Clean build artifacts"
 
 install:
@@ -16,7 +17,9 @@ lint:
 	poetry run mypy src/maia --config-file pyproject.toml --no-error-summary
 
 test:
-	poetry run pytest -v
+	poetry run pytest tests -v
+
+test-unit: test
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

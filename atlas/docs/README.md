@@ -67,7 +67,7 @@ Located in `src/atlas/schema.sql`:
 ### Core Tables
 - `videos` - Video metadata (7-day retention)
 - `video_stats_log` - Stats hot tier (7-day retention)
-- `watchlist` - Ghost Tracking schedule (persistent)
+- `watchlist` - Adaptive Scheduling schedule (persistent)
 - `channels` - Channel metadata
 - `search_queue` - Hunter query queue
 
@@ -162,7 +162,7 @@ await dao.ingest_video_metadata(video_data)
 await dao.fetch_scribe_batch(10)
 await dao.mark_video_done("VIDEO_123")
 
-# Ghost Tracking
+# Adaptive Scheduling
 await dao.add_to_watchlist("VIDEO_123", tier="HOURLY")
 batch = await dao.fetch_tracking_batch(50)
 
@@ -205,21 +205,21 @@ result = await executor.execute_async(make_request)
 
 ## Architecture Patterns
 
-### Hot Queue
+### Tiered Storage
 - 7-day retention in SQL
 - Constant database size (<0.5 GB)
 - Fast queries on recent data
 
 **See**: [docs/hot-queue.md](../../docs/hot-queue.md)
 
-### Ghost Tracking
+### Adaptive Scheduling
 - Persistent `watchlist` table
 - Survives Janitor cleanup
 - Adaptive tracking tiers
 
 **See**: [docs/ghost-tracking.md](../../docs/ghost-tracking.md)
 
-### Hydra Protocol
+### Resiliency Strategy
 - Multi-key rotation
 - Clean termination (exit 0)
 - Quota management

@@ -1,4 +1,4 @@
-"""Ghost Tracking extensions for MaiaDAO."""
+"""Adaptive Scheduling extensions for MaiaDAO."""
 
 import logging
 from datetime import datetime, timedelta, timezone
@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     from atlas.adapters import DatabaseAdapter
 
-logger = logging.getLogger("atlas.adapters.maia.ghost")
+logger = logging.getLogger("atlas.adapters.maia.adaptive_scheduling")
 
 
-class GhostTrackingMixin:
+class AdaptiveSchedulingMixin:
     """Persistent video tracking beyond Janitor cleanup.
 
     This mixin requires the class to have _execute, _fetch_all, and _execute_many methods

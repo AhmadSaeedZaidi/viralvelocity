@@ -1,11 +1,11 @@
 """
-Maia Tracker - Ghost Tracking Implementation
+Maia Tracker - Adaptive Scheduling Implementation
 
-Monitors viral velocity using the Ghost Tracking watchlist.
-Operates independently of the videos table - tracks videos forever
-even after they've been cleaned up from the hot queue.
+Monitors viral velocity using adaptive tracking schedules.
+Operates independently of the videos table - tracks videos indefinitely
+even after they've been archived from tiered storage.
 
-Key Changes:
+Key Features:
 - Uses watchlist table instead of videos table
 - Stores metrics in Vault (Parquet) instead of SQL
 - Adaptive tracking tiers based on video age
@@ -25,7 +25,7 @@ from prefect import flow, get_run_logger, task
 logger = logging.getLogger(__name__)
 
 tracker_keys = KeyRing("tracking")
-tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")
+tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")  # Resiliency strategy
 
 
 @task(name="fetch_targets")  # type: ignore[misc]
@@ -33,8 +33,8 @@ async def fetch_targets(batch_size: int = 50) -> Any:
     """
     Fetch videos from watchlist needing updates.
 
-    Ghost Tracking: Operates on watchlist, not videos table.
-    Videos may have been cleaned up but still need tracking.
+    Adaptive Scheduling: Operates on watchlist, not videos table.
+    Videos may have been archived but still need tracking.
 
     Args:
         batch_size: Maximum number of videos to fetch (max 50 for YouTube API)
@@ -59,7 +59,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     """
     Fetch statistics from YouTube API and store to Vault.
 
-    Ghost Tracking Changes:
+    Adaptive Scheduling:
     - Does NOT update videos table (row may not exist)
     - Stores metrics to Vault as Parquet
     - Updates watchlist schedule based on video age
@@ -104,11 +104,11 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
                     run_logger.error(f"Tracker HTTP {resp.status}: {error_text[:200]}")
                     raise Exception(f"HTTP {resp.status}")
 
-    # Execute with HydraExecutor
+    # Execute with resiliency strategy
     try:
         response_json = await tracker_executor.execute_async(make_request)
     except SystemExit:
-        # Hydra Protocol - propagate clean termination
+        # Resiliency strategy - propagate clean termination
         raise
     except Exception as e:
         run_logger.error(f"Failed to fetch stats: {e}")
@@ -201,9 +201,9 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
 @flow(name="run_tracker_cycle")
 async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     """
-    Execute a complete Tracker cycle using Ghost Tracking.
+    Execute a complete Tracker cycle using Adaptive Scheduling.
 
-    Ghost Tracking: Fetches from watchlist, stores to Vault.
+    Adaptive Scheduling: Fetches from watchlist, stores to Vault.
 
     Args:
         batch_size: Number of videos to process (max 50 for YouTube API)
@@ -212,7 +212,7 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
         Dictionary with cycle statistics
     """
     run_logger = get_run_logger()
-    run_logger.info("=== Starting Tracker Cycle (Ghost Tracking) ===")
+    run_logger.info("=== Starting Tracker Cycle (Adaptive Scheduling) ===")
 
     stats = {
         "videos_fetched": 0,
@@ -245,8 +245,8 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
         )
 
     except SystemExit:
-        # Hydra Protocol: Rate limit detected - propagate immediately
-        run_logger.critical("Tracker Cycle terminated by Hydra Protocol (429 Rate Limit)")
+        # Resiliency strategy: Rate limit detected - propagate immediately
+        run_logger.critical("Tracker Cycle terminated by resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
         run_logger.exception(f"Tracker cycle failed with unexpected error: {e}")
@@ -256,17 +256,17 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
 
 
 def main() -> None:
-    """Entry point for running the Ghost Tracker as a standalone service."""
+    """Entry point for running the Adaptive Tracker as a standalone service."""
     try:
         asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
     except SystemExit as e:
-        # Hydra Protocol: Exit with specific code for rate limit
-        logger.critical(f"Ghost Tracker terminated: {e}")
+        # Resiliency strategy: Exit with specific code for rate limit
+        logger.critical(f"Adaptive Tracker terminated: {e}")
         raise
     except KeyboardInterrupt:
-        logger.info("Ghost Tracker stopped by user (SIGINT)")
+        logger.info("Adaptive Tracker stopped by user (SIGINT)")
     except Exception as e:
-        logger.exception(f"Ghost Tracker failed with error: {e}")
+        logger.exception(f"Adaptive Tracker failed with error: {e}")
         raise
 
 

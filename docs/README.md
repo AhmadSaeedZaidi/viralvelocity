@@ -11,9 +11,9 @@
 - **[Architecture Overview](architecture.md)** - System design and components
 
 ### Core Features
-- **[Ghost Tracking](ghost-tracking.md)** - Infinite video tracking with minimal SQL footprint
-- **[Hydra Protocol](hydra-protocol.md)** - Intelligent API key management and rotation
-- **[Hot Queue Architecture](hot-queue.md)** - Ephemeral data management for high-throughput ingestion
+- **[Adaptive Scheduling](adaptive-scheduling.md)** - Infinite video tracking with minimal SQL footprint
+- **[Resiliency Strategy](resiliency-strategy.md)** - Intelligent API key management and rotation
+- **[Tiered Storage Architecture](tiered-storage.md)** - Ephemeral data management for high-throughput ingestion
 
 ### Component Guides
 - **[Atlas](../atlas/docs/README.md)** - Infrastructure layer (DB, Vault, Events, Notifications)
@@ -41,7 +41,7 @@
 ### For Operators
 1. Review deployment architecture
 2. Configure environment variables
-3. Monitor with Hydra Protocol guidelines
+3. Monitor with Resiliency Strategy guidelines
 
 ---
 
@@ -57,13 +57,13 @@
 │  │                                                      │   │
 │  │  Hunter Agent  → Discover new videos               │   │
 │  │  Tracker Agent → Monitor viral velocity            │   │
-│  │  (Ghost Tracking for infinite history)             │   │
+│  │  (Adaptive Scheduling for infinite history)             │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                   │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │                  ATLAS LIBRARY                       │   │
 │  │                                                      │   │
-│  │  Database   → PostgreSQL (Hot Queue <7 days)       │   │
+│  │  Database   → PostgreSQL (Tiered Storage <7 days)       │   │
 │  │  Vault      → HF/GCS (Cold storage, Parquet)       │   │
 │  │  Events     → Observer pattern event bus            │   │
 │  │  Notifier   → Alerts and notifications             │   │
@@ -80,7 +80,7 @@
 
 ## Key Features
 
-### 🚀 Ghost Tracking
+### 🚀 Adaptive Scheduling
 Track videos **forever** while keeping SQL under 0.5 GB:
 - Lightweight `watchlist` table in SQL for scheduling
 - Heavy time-series metrics in Parquet files (Vault)
@@ -89,7 +89,7 @@ Track videos **forever** while keeping SQL under 0.5 GB:
 
 [Learn more →](ghost-tracking.md)
 
-### 🔑 Hydra Protocol
+### 🔑 Resiliency Strategy
 Intelligent API key management:
 - Automatic key rotation on quota exhaustion
 - Clean termination (SystemExit) when all keys exhausted
@@ -98,11 +98,11 @@ Intelligent API key management:
 
 [Learn more →](hydra-protocol.md)
 
-### ⚡ Hot Queue Architecture
+### ⚡ Tiered Storage Architecture
 Ephemeral data management for high throughput:
 - Videos purged after 7 days
 - Search queue for discovery coordination
-- Watchlist persists forever (Ghost Tracking)
+- Watchlist persists forever (Adaptive Scheduling)
 - Maintains <0.5 GB SQL footprint
 
 [Learn more →](hot-queue.md)
@@ -117,9 +117,9 @@ pleiades/
 │   ├── README.md            # This file
 │   ├── quickstart.md        # Getting started guide
 │   ├── architecture.md      # System architecture
-│   ├── ghost-tracking.md    # Ghost Tracking guide
-│   ├── hydra-protocol.md    # Hydra Protocol guide
-│   ├── hot-queue.md         # Hot Queue architecture
+│   ├── adaptive-scheduling.md  # Adaptive Scheduling guide
+│   ├── resiliency-strategy.md  # Resiliency Strategy guide
+│   ├── tiered-storage.md    # Tiered Storage architecture
 │   ├── testing.md           # Testing guide
 │   └── contributing.md      # Development guide
 │

@@ -67,7 +67,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
                     result: Dict[str, Any] = await resp.json()
                     return result
                 elif resp.status in (403, 429):
-                    # Raise exception for Hydra Protocol handling
+                    # Raise exception for Resiliency strategy handling
                     error_text = await resp.text()
                     raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
                 else:
@@ -79,7 +79,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     try:
         response_json = await tracker_executor.execute_async(make_request)
     except SystemExit:
-        # Hydra Protocol - propagate clean termination
+        # Resiliency strategy - propagate clean termination
         raise
     except Exception as e:
         run_logger.error(f"Failed to fetch stats: {e}")
@@ -171,8 +171,8 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
         )
 
     except SystemExit:
-        # Hydra Protocol: Rate limit detected - propagate immediately
-        logger.critical("Tracker Cycle terminated by Hydra Protocol (429 Rate Limit)")
+        # Resiliency strategy: Rate limit detected - propagate immediately
+        logger.critical("Tracker Cycle terminated by Resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
         logger.exception(f"Tracker cycle failed with unexpected error: {e}")
@@ -186,7 +186,7 @@ def main() -> None:
     try:
         asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
     except SystemExit as e:
-        # Hydra Protocol: Exit with specific code for rate limit
+        # Resiliency strategy: Exit with specific code for rate limit
         logger.critical(f"Tracker terminated: {e}")
         raise
     except KeyboardInterrupt:

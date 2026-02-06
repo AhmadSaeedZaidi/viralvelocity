@@ -111,7 +111,7 @@ async def test_tracker_cycle_complete_flow(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_hunter_handles_hydra_protocol():
-    """Test Hunter raises SystemExit on 429 rate limit (Hydra Protocol)."""
+    """Test Hunter raises SystemExit on 429 rate limit (Resiliency Strategy)."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
         patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
@@ -152,7 +152,7 @@ async def test_hunter_handles_hydra_protocol():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tracker_handles_hydra_protocol():
-    """Test Tracker raises SystemExit on 429 rate limit (Hydra Protocol)."""
+    """Test Tracker raises SystemExit on 429 rate limit (Resiliency Strategy)."""
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
         patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,

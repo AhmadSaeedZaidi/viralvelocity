@@ -1,4 +1,4 @@
-"""Integration tests for Ghost Tracking functionality."""
+"""Integration tests for Adaptive Scheduling functionality."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -7,8 +7,8 @@ import pytest
 
 
 @pytest.mark.integration
-class TestGhostTracking:
-    """Test Ghost Tracking watchlist operations and Vault integration."""
+class TestAdaptiveScheduling:
+    """Test Adaptive Scheduling watchlist operations and Vault integration."""
 
     @pytest.mark.asyncio
     async def test_add_to_watchlist(self, dao, mock_vault):
@@ -139,7 +139,7 @@ class TestGhostTracking:
 
     @pytest.mark.asyncio
     async def test_vault_metrics_storage(self, dao, mock_vault):
-        """Test metrics are properly stored in Vault via Ghost Tracking."""
+        """Test metrics are properly stored in Vault via Adaptive Scheduling."""
         from atlas.vault import vault
 
         # Prepare metrics data

@@ -13,8 +13,8 @@ Pleiades is a high-throughput video intelligence platform that:
 
 - 🔍 **Discovers** viral content through intelligent YouTube search
 - 📊 **Tracks** video metrics forever with minimal SQL footprint (<0.5 GB)
-- 🚀 **Scales** to 100k+ videos/day using Ghost Tracking architecture
-- 🔑 **Manages** API quotas intelligently via Hydra Protocol
+- 🚀 **Scales** to 100k+ videos/day using Adaptive Scheduling architecture
+- 🔑 **Manages** API quotas intelligently via Resiliency Strategy
 - 🗄️ **Stores** time-series data efficiently in Parquet files
 
 ---
@@ -96,7 +96,7 @@ docker-compose up -d
 │                        ↓                                 │
 │  ┌────────────────────────────────────────────────┐    │
 │  │             ATLAS LIBRARY                       │    │
-│  │  • Database   → PostgreSQL (Hot Queue)         │    │
+│  │  • Database   → PostgreSQL (Tiered Storage)    │    │
 │  │  • Vault      → HF/GCS (Cold storage)          │    │
 │  │  • Events     → Event bus                      │    │
 │  │  • Notifier   → Alerts                         │    │
@@ -115,7 +115,7 @@ docker-compose up -d
 
 ## Key Features
 
-### 🎯 Ghost Tracking
+### 🎯 Adaptive Scheduling
 
 Track videos **forever** while keeping SQL under 0.5 GB:
 
@@ -132,9 +132,9 @@ await dao.add_to_watchlist("VIDEO_123", tier="HOURLY")
 # Track continues forever, even after Janitor cleanup
 ```
 
-**[Learn more →](docs/ghost-tracking.md)**
+**[Learn more →](docs/adaptive-scheduling.md)**
 
-### 🔑 Hydra Protocol
+### 🔑 Resiliency Strategy
 
 Intelligent API key management:
 
@@ -151,9 +151,9 @@ result = await executor.execute_async(make_request)
 # Automatically rotates through keys on 403/429
 ```
 
-**[Learn more →](docs/hydra-protocol.md)**
+**[Learn more →](docs/resiliency-strategy.md)**
 
-### ⚡ Hot Queue Architecture
+### ⚡ Tiered Storage Architecture
 
 Ephemeral data management for high throughput:
 
@@ -162,7 +162,7 @@ Ephemeral data management for high throughput:
 - Fast queries on recent data only
 - 100k+ videos/day ingestion capacity
 
-**[Learn more →](docs/hot-queue.md)**
+**[Learn more →](docs/tiered-storage.md)**
 
 ---
 
@@ -173,9 +173,9 @@ Ephemeral data management for high throughput:
 - **[Architecture Overview](docs/architecture.md)** - System design and components
 
 ### Core Features
-- **[Ghost Tracking](docs/ghost-tracking.md)** - Infinite video tracking
-- **[Hydra Protocol](docs/hydra-protocol.md)** - API key management
-- **[Hot Queue](docs/hot-queue.md)** - Ephemeral data management
+- **[Adaptive Scheduling](docs/adaptive-scheduling.md)** - Infinite video tracking
+- **[Resiliency Strategy](docs/resiliency-strategy.md)** - API key management
+- **[Tiered Storage](docs/tiered-storage.md)** - Ephemeral data management
 
 ### Development
 - **[Testing Guide](docs/testing.md)** - Unit, integration, and smoke testing
@@ -196,9 +196,9 @@ pleiades/
 │   ├── README.md            # Documentation index
 │   ├── quickstart.md        # Getting started
 │   ├── architecture.md      # System design
-│   ├── ghost-tracking.md    # Ghost Tracking guide
-│   ├── hydra-protocol.md    # Hydra Protocol guide
-│   ├── hot-queue.md         # Hot Queue architecture
+│   ├── adaptive-scheduling.md  # Adaptive Scheduling guide
+│   ├── resiliency-strategy.md  # Resiliency Strategy guide
+│   ├── tiered-storage.md    # Tiered Storage architecture
 │   ├── testing.md           # Testing guide
 │   └── contributing.md      # Development guide
 │
@@ -212,7 +212,7 @@ pleiades/
 │   │   ├── schema.sql       # Database schema
 │   │   └── adapters/
 │   │       ├── maia.py      # MaiaDAO
-│   │       └── maia_ghost.py # Ghost Tracking
+│   │       └── maia_adaptive_scheduling.py # Ghost Tracking
 │   ├── docs/                # Atlas-specific docs
 │   └── tests/               # Unit tests
 │

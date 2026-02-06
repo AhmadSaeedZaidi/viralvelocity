@@ -1,4 +1,4 @@
-"""Maia Janitor - Hot Queue Cleanup Agent"""
+"""Maia Janitor - Tiered Storage Cleanup Agent"""
 
 from .flow import janitor_cycle, main
 

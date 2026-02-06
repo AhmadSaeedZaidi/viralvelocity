@@ -3,13 +3,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from atlas.adapters import DatabaseAdapter
-from atlas.adapters.maia_ghost import GhostTrackingMixin
+from atlas.adapters.maia_adaptive_scheduling import AdaptiveSchedulingMixin
 from atlas.config import settings
 
 logger = logging.getLogger("atlas.adapters.maia")
 
 
-class MaiaDAO(DatabaseAdapter, GhostTrackingMixin):
+class MaiaDAO(DatabaseAdapter, AdaptiveSchedulingMixin):
     """Data Access Object for Maia service."""
 
     async def fetch_hunter_batch(self, batch_size: int = 10) -> List[Dict[str, Any]]:

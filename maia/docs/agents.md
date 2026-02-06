@@ -37,7 +37,7 @@ Discover new video content through YouTube search queries and implement recursiv
 - **Cold archive**: Stores raw API responses to vault for reproducibility
 - **Hot index**: Structured metadata in database for fast queries
 
-### Hydra Protocol
+### Resiliency Strategy
 ```python
 if resp.status == 429:
     logger.critical("HIT 429 RATE LIMIT. INITIATING CHURN & BURN.")
@@ -181,15 +181,15 @@ Transcript priority order:
 4. Marks status in database (`available` or `unavailable`)
 
 ### Key Features
-- **Hydra Protocol**: Raises `SystemExit` on `TooManyRequests`
+- **Resiliency Strategy**: Raises `SystemExit` on `TooManyRequests`
 - **Quality prioritization**: Prefers manual over generated
 - **Graceful handling**: Marks videos without captions as `unavailable`
 - **Async execution**: Runs blocking API calls in executor
 
-### Hydra Protocol
+### Resiliency Strategy
 ```python
 except TooManyRequests:
-    logger.critical("IP BLOCKED by YouTube. Initiating Hydra Protocol.")
+    logger.critical("IP BLOCKED by YouTube. Initiating Resiliency Strategy.")
     raise SystemExit("429 Rate Limit (Scribe) - Container Suicide")
 ```
 
@@ -261,8 +261,8 @@ await run_painter_cycle()
 
 ## Common Patterns
 
-### 1. Hydra Protocol Implementation
-All agents that interact with external APIs implement the Hydra Protocol:
+### 1. Resiliency Strategy Implementation
+All agents that interact with external APIs implement the Resiliency Strategy:
 
 ```python
 try:
@@ -388,7 +388,7 @@ Total Keys: 10
 ### Best Practices
 
 1. **Always use MaiaDAO** - Never write raw SQL
-2. **Implement Hydra Protocol** - Raise SystemExit on 429
+2. **Implement Resiliency Strategy** - Raise SystemExit on 429
 3. **Use dedicated KeyRing** - Prevent quota contamination
 4. **Store to vault** - Keep raw data for reproducibility
 5. **Log comprehensively** - Use `get_run_logger()`
@@ -405,7 +405,7 @@ Total Keys: 10
 - Check key ring configuration
 
 ### Rate Limits
-- **Expected behavior**: Hydra Protocol triggers container restart
+- **Expected behavior**: Resiliency Strategy triggers container restart
 - **Prevention**: Use separate key rings per agent
 - **Monitoring**: Check logs for 403/429 responses
 

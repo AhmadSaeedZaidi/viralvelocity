@@ -181,7 +181,7 @@ fix(tracker): handle deleted videos gracefully
 
 docs: update ARCHITECTURE.md with 3-Zone Defense details
 
-test(integration): add Hydra Protocol verification tests
+test(integration): add Resiliency Strategy verification tests
 ```
 
 ## Core Rules
@@ -229,7 +229,7 @@ async def get_data():
     return await dao.fetch_data()
 ```
 
-### 3. Hydra Protocol
+### 3. Resiliency Strategy
 
 **Rate limits (429) must trigger immediate termination.**
 
@@ -243,7 +243,7 @@ try:
     await search_youtube(topic)
 except SystemExit:
     # Log but MUST re-raise
-    logger.critical("Hydra Protocol activated")
+    logger.critical("Resiliency Strategy activated")
     raise  # Critical - must propagate
 except Exception as e:
     # Other errors can be handled normally
@@ -294,7 +294,7 @@ import aiohttp
 1. Add database method to `MaiaDAO` if needed
 2. Create task function with Prefect decorator
 3. Add type hints and docstring
-4. Implement error handling (Hydra Protocol)
+4. Implement error handling (Resiliency Strategy)
 5. Add unit tests
 6. Add integration test
 7. Update documentation
@@ -323,7 +323,7 @@ import aiohttp
 - [ ] Tests added and passing
 - [ ] Documentation updated
 - [ ] No raw SQL in Maia (DAO pattern followed)
-- [ ] Hydra Protocol respected
+- [ ] Resiliency Strategy respected
 - [ ] No local state persistence
 - [ ] Imports follow standards
 - [ ] Commit messages follow conventions

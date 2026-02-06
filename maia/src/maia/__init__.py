@@ -15,7 +15,7 @@ Architecture:
 Core Principles:
 - Stateless: All state persists in Atlas
 - DAO Pattern: Database access via atlas.adapters.maia.MaiaDAO only
-- Hydra Protocol: Rate limit = immediate container suicide for IP rotation
+- Resiliency Strategy: Rate limit = immediate container suicide for IP rotation
 """
 
 __version__ = "0.1.0"

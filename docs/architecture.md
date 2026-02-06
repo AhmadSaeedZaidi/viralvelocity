@@ -26,7 +26,7 @@ pleiades/
 │   │       ├── schema.sql       # Database schema
 │   │       └── adapters/
 │   │           ├── maia.py      # MaiaDAO (data access)
-│   │           └── maia_ghost.py # Ghost Tracking mixin
+│   │           └── maia_adaptive_scheduling.py # Adaptive Scheduling mixin
 │   ├── docs/                    # Atlas-specific docs
 │   └── tests/                   # Atlas unit tests
 │
@@ -39,9 +39,9 @@ pleiades/
 │   │       ├── hunter/
 │   │       │   └── flow.py      # Discovery agent
 │   │       ├── tracker/
-│   │       │   └── flow.py      # Monitoring agent (Ghost Tracking)
+│   │       │   └── flow.py      # Monitoring agent (Adaptive Scheduling)
 │   │       ├── janitor/
-│   │       │   └── flow.py      # Cleanup agent (Hot Queue)
+│   │       │   └── flow.py      # Cleanup agent (Tiered Storage)
 │   │       ├── painter/
 │   │       │   └── flow.py      # Metadata enrichment
 │   │       └── scribe/
@@ -88,7 +88,7 @@ from atlas import vault
 # Store metadata
 vault.store_metadata("video_123", data)
 
-# Append time-series metrics (Ghost Tracking)
+# Append time-series metrics (Adaptive Scheduling)
 vault.append_metrics([
     {"video_id": "123", "views": 1000, "timestamp": "..."}
 ])
@@ -143,7 +143,7 @@ batch = await dao.fetch_hunter_batch(10)
 # Video operations
 await dao.ingest_video_metadata(video_data)
 
-# Ghost Tracking operations
+# Adaptive Scheduling operations
 await dao.add_to_watchlist(video_id)
 batch = await dao.fetch_tracking_batch(50)
 await dao.update_watchlist_schedule(updates)
@@ -176,16 +176,16 @@ async def run_hunter_cycle(batch_size: int = 10):
         # 3. Ingest videos
         for video in results:
             await dao.ingest_video_metadata(video)
-            await dao.add_to_watchlist(video["id"])  # Ghost Tracking
+            await dao.add_to_watchlist(video["id"])  # Adaptive Scheduling
         
         # 4. Update pagination
         await dao.update_search_state(query["id"], next_page_token)
 ```
 
 **Features**:
-- Hydra Protocol for key management
+- Resiliency Strategy for key management
 - Snowball effect (adds related queries)
-- Hot Queue integration
+- Tiered Storage integration
 
 #### 2. Tracker (Monitoring)
 Monitors video statistics:
@@ -193,7 +193,7 @@ Monitors video statistics:
 ```python
 @flow(name="run_tracker_cycle")
 async def run_tracker_cycle(batch_size: int = 50):
-    # 1. Fetch from watchlist (Ghost Tracking)
+    # 1. Fetch from watchlist (Adaptive Scheduling)
     videos = await dao.fetch_tracking_batch(batch_size)
     
     # 2. Query YouTube API
@@ -215,9 +215,9 @@ async def run_tracker_cycle(batch_size: int = 50):
 ```
 
 **Features**:
-- Ghost Tracking (infinite monitoring)
+- Adaptive Scheduling (infinite monitoring)
 - Adaptive tiers (HOURLY → DAILY → WEEKLY)
-- Hydra Protocol integration
+- Resiliency Strategy integration
 
 #### 3. Janitor (Cleanup)
 Enforces 7-day retention:
@@ -232,7 +232,7 @@ async def run_janitor_cycle():
 ```
 
 **Features**:
-- Hot Queue management
+- Tiered Storage management
 - Safety checks
 - Watchlist protection
 
@@ -298,7 +298,7 @@ async def test_database_connectivity():
 ```python
 @pytest.mark.asyncio
 async def test_tracker_handles_deleted_videos():
-    """Test Ghost Tracking continues after video deletion."""
+    """Test Adaptive Scheduling continues after video deletion."""
     # ... test implementation
 ```
 
@@ -311,11 +311,11 @@ async def test_tracker_handles_deleted_videos():
 ```
 1. Hunter fetches search query from search_queue
    ↓
-2. Hunter queries YouTube API (Hydra Protocol)
+2. Hunter queries YouTube API (Resiliency Strategy)
    ↓
-3. Hunter ingests video to videos table (Hot Queue)
+3. Hunter ingests video to videos table (Tiered Storage)
    ↓
-4. Hunter adds video to watchlist (Ghost Tracking)
+4. Hunter adds video to watchlist (Adaptive Scheduling)
    ↓
 5. Hunter updates search_queue with next_page_token
 ```
@@ -325,7 +325,7 @@ async def test_tracker_handles_deleted_videos():
 ```
 1. Tracker fetches from watchlist (not videos!)
    ↓
-2. Tracker queries YouTube API (Hydra Protocol)
+2. Tracker queries YouTube API (Resiliency Strategy)
    ↓
 3. Tracker stores metrics to Vault (Parquet)
    ↓
@@ -343,7 +343,7 @@ async def test_tracker_handles_deleted_videos():
    ↓
 3. Janitor deletes from videos (NOT watchlist!)
    ↓
-4. Ghost Tracking continues (watchlist intact)
+4. Adaptive Scheduling continues (watchlist intact)
 ```
 
 ---
@@ -394,7 +394,7 @@ async def on_video_discovered(data: dict):
     await process_new_video(data)
 ```
 
-### 4. Hydra Protocol
+### 4. Resiliency Strategy
 
 All external API calls use HydraExecutor:
 
@@ -499,7 +499,7 @@ JANITOR_RETENTION_DAYS=7
 
 ### Resource Usage
 
-- **SQL**: <0.5 GB (Hot Queue + Watchlist)
+- **SQL**: <0.5 GB (Tiered Storage + Watchlist)
 - **Vault**: Unlimited (compressed Parquet)
 - **Memory**: 256MB per agent
 - **CPU**: 0.5 core per agent
@@ -512,8 +512,8 @@ Pleiades architecture enables:
 
 - ✅ **High throughput** (100k+ videos/day)
 - ✅ **Low SQL footprint** (<0.5 GB)
-- ✅ **Infinite tracking** (Ghost Tracking)
-- ✅ **Resilient API usage** (Hydra Protocol)
+- ✅ **Infinite tracking** (Adaptive Scheduling)
+- ✅ **Resilient API usage** (Resiliency Strategy)
 - ✅ **Clean separation** (Atlas ↔ Maia ↔ Alkyone)
 - ✅ **Stateless agents** (Easy scaling)
 

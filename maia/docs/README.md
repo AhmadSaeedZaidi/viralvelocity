@@ -10,9 +10,9 @@
 
 - **[Main Documentation](../../docs/README.md)** - Platform overview and architecture
 - **[Quick Start Guide](../../docs/quickstart.md)** - Get up and running
-- **[Ghost Tracking](../../docs/ghost-tracking.md)** - Persistent video tracking
-- **[Hydra Protocol](../../docs/hydra-protocol.md)** - API key management
-- **[Hot Queue Architecture](../../docs/hot-queue.md)** - Ephemeral data pattern
+- **[Adaptive Scheduling](../../docs/ghost-tracking.md)** - Persistent video tracking
+- **[Resiliency Strategy](../../docs/hydra-protocol.md)** - API key management
+- **[Tiered Storage Architecture](../../docs/hot-queue.md)** - Ephemeral data pattern
 - **[Testing Guide](../../docs/testing.md)** - Test suite and coverage
 - **[Contributing](../../docs/contributing.md)** - Development workflow
 
@@ -28,7 +28,7 @@ Maia is a multi-agent system for YouTube video collection. Each agent has a focu
 **Responsibilities**:
 - Search YouTube with multiple queries
 - Filter videos published in last 24 hours
-- Add videos to Ghost Tracking watchlist
+- Add videos to Adaptive Scheduling watchlist
 - Extract tags for snowball effect
 
 **CLI**:
@@ -42,7 +42,7 @@ maia-hunter
 **Purpose**: Monitor viral velocity and metrics
 
 **Responsibilities**:
-- Fetch from persistent watchlist (Ghost Tracking)
+- Fetch from persistent watchlist (Adaptive Scheduling)
 - Query YouTube Statistics API
 - Log metrics to hot tier (SQL)
 - Update adaptive tracking schedule
@@ -92,7 +92,7 @@ maia-painter
 **Responsibilities**:
 - Archive stats from SQL to Vault (7-day retention)
 - Delete old processed videos
-- Preserve Ghost Tracking watchlist
+- Preserve Adaptive Scheduling watchlist
 - Dry-run mode for safety
 
 **CLI**:
@@ -147,12 +147,12 @@ JANITOR_RETENTION_DAYS=7
 
 ## Architecture Patterns
 
-### Ghost Tracking
+### Adaptive Scheduling
 Videos tracked forever via `watchlist` table, even after Janitor cleanup.
 
 **See**: [docs/ghost-tracking.md](../../docs/ghost-tracking.md)
 
-### Hydra Protocol
+### Resiliency Strategy
 Multi-key rotation with clean termination (exit 0) on quota exhaustion.
 
 **See**: [docs/hydra-protocol.md](../../docs/hydra-protocol.md)

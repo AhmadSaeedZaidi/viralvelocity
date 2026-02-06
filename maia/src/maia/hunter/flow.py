@@ -201,7 +201,7 @@ async def run_hunter_cycle(batch_size: int = 10) -> Dict[str, Any]:
                 else:
                     stats["searches_failed"] += 1
             except SystemExit:
-                # Hydra Protocol: Don't catch - let it propagate
+                # Resiliency strategy: Don't catch - let it propagate
                 raise
             except Exception as e:
                 logger.error(f"Error processing topic '{topic.get('query_term')}': {e}")
@@ -216,8 +216,8 @@ async def run_hunter_cycle(batch_size: int = 10) -> Dict[str, Any]:
         )
 
     except SystemExit:
-        # Hydra Protocol: Rate limit detected - propagate immediately
-        logger.critical("Hunter Cycle terminated by Hydra Protocol (429 Rate Limit)")
+        # Resiliency strategy: Rate limit detected - propagate immediately
+        logger.critical("Hunter Cycle terminated by Resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
         logger.exception(f"Hunter cycle failed with unexpected error: {e}")
@@ -231,7 +231,7 @@ def main() -> None:
     try:
         asyncio.run(run_hunter_cycle())  # type: ignore[arg-type]
     except SystemExit as e:
-        # Hydra Protocol: Exit with specific code for rate limit
+        # Resiliency strategy: Exit with specific code for rate limit
         logger.critical(f"Hunter terminated: {e}")
         raise
     except KeyboardInterrupt:

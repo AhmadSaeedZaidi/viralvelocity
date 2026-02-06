@@ -1,8 +1,8 @@
-# Hot Queue Architecture
+# Tiered Storage Architecture
 
 **Ephemeral data management for high-throughput ingestion**
 
-The Hot Queue is Pleiades' ephemeral data management system that enables ingestion of 100k+ videos/day while maintaining a <0.5 GB SQL footprint.
+The Tiered Storage system is Pleiades' ephemeral data management architecture that enables ingestion of 100k+ videos/day while maintaining a <0.5 GB SQL footprint.
 
 ---
 
@@ -18,11 +18,11 @@ Traditional approaches store all discovered content permanently:
 
 ### The Solution
 
-**Hot Queue Architecture** implements time-based retention:
+**Tiered Storage Architecture** implements time-based retention:
 - ✅ Videos auto-deleted after 7 days
 - ✅ SQL footprint stays constant (<0.5 GB)
 - ✅ Fast queries on recent data only
-- ✅ Long-term tracking via Ghost Tracking
+- ✅ Long-term tracking via Adaptive Scheduling
 
 ---
 
@@ -49,7 +49,7 @@ Traditional approaches store all discovered content permanently:
 │  watchlist (Tracking Schedule)                            │
 │  ┌──────────────────────────────────────┐                │
 │  │ video_id, tracking_tier, next_track  │                │
-│  │ Persistent forever (Ghost Tracking)  │                │
+│  │ Persistent forever (Adaptive Scheduling)  │                │
 │  └──────────────────────────────────────┘                │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
@@ -114,7 +114,7 @@ CREATE TABLE videos (
 
 **Purpose**: Provide rich context for analysis, then cleanup
 
-### watchlist (Persistent - Ghost Tracking)
+### watchlist (Persistent - Adaptive Scheduling)
 
 Lightweight tracking schedule:
 
@@ -141,7 +141,7 @@ CREATE TABLE watchlist (
 ```
 Hunter → Discovers video
        → Inserts into videos table
-       → Adds to watchlist (Ghost Tracking)
+       → Adds to watchlist (Adaptive Scheduling)
 ```
 
 ### Days 1-7: Processing
@@ -164,7 +164,7 @@ Janitor → Scans videos table
         → Watchlist remains intact
 ```
 
-### Day 8+: Ghost Tracking
+### Day 8+: Adaptive Scheduling
 
 ```
 Tracker → Still reads from watchlist
@@ -239,14 +239,14 @@ JANITOR_SAFETY_CHECK=true
 
 ### Space Efficiency
 
-**Without Hot Queue:**
+**Without Tiered Storage:**
 ```
 Day 1:  10,000 videos → 100 MB
 Day 30: 300,000 videos → 3 GB
 Day 90: 900,000 videos → 9 GB
 ```
 
-**With Hot Queue:**
+**With Tiered Storage:**
 ```
 Day 1:  10,000 videos → 100 MB
 Day 7:  70,000 videos → 700 MB (stable)
@@ -256,21 +256,21 @@ Day 90: 70,000 videos → 700 MB (stable)
 
 ### Query Performance
 
-**Without Hot Queue:**
+**Without Tiered Storage:**
 - Sequential scan on 900k rows (slow)
 - Index size grows proportionally
 
-**With Hot Queue:**
+**With Tiered Storage:**
 - Sequential scan on 70k rows only (fast)
 - Index size stays constant
 
 ### Cost Savings
 
-**Without Hot Queue:**
+**Without Tiered Storage:**
 - SQL storage: $0.23/GB/month × 9 GB = $2.07/month
 - Growing linearly
 
-**With Hot Queue:**
+**With Tiered Storage:**
 - SQL storage: $0.23/GB/month × 0.7 GB = $0.16/month
 - Constant over time
 
@@ -307,14 +307,14 @@ The Janitor explicitly excludes the watchlist table:
 DELETE FROM videos WHERE discovered_at < cutoff;
 
 # ❌ Never deletes from watchlist
-# (Watchlist is for Ghost Tracking - persists forever)
+# (Watchlist is for Adaptive Scheduling - persists forever)
 ```
 
 ---
 
 ## Monitoring
 
-### Hot Queue Health
+### Tiered Storage Health
 
 ```sql
 -- Current hot queue size
@@ -395,7 +395,7 @@ JANITOR_SAFETY_CHECK=false
 JANITOR_SAFETY_CHECK=true
 ```
 
-### 4. Combine with Ghost Tracking
+### 4. Combine with Adaptive Scheduling
 
 ```python
 # When ingesting videos
@@ -409,7 +409,7 @@ await dao.add_to_watchlist(video_id)          # → watchlist (persistent)
 
 ## Migration
 
-### Enable Hot Queue on Existing Database
+### Enable Tiered Storage on Existing Database
 
 ```sql
 -- 1. Add discovered_at to existing videos
@@ -425,7 +425,7 @@ WHERE discovered_at IS NULL;
 -- (Or wait for scheduled run)
 ```
 
-### Disable Hot Queue (Revert to Permanent Storage)
+### Disable Tiered Storage (Revert to Permanent Storage)
 
 ```bash
 # Set very long retention
@@ -462,12 +462,12 @@ JANITOR_RETENTION_DAYS=36500  # 100 years
 
 ## Summary
 
-**Hot Queue Architecture** enables high-throughput ingestion:
+**Tiered Storage Architecture** enables high-throughput ingestion:
 
 - ✅ Constant SQL footprint (<0.5 GB)
 - ✅ Fast queries on recent data
 - ✅ Automatic cleanup after 7 days
-- ✅ Infinite tracking via Ghost Tracking
+- ✅ Infinite tracking via Adaptive Scheduling
 - ✅ Safety measures to prevent accidents
 
 **Result**: Ingest 100k+ videos/day indefinitely within SQL constraints.

@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
 );
 
 COMMENT ON TABLE watchlist IS 
-'Ghost Tracking: Persistent tracking schedule independent of video retention. 
+'Adaptive Scheduling: Persistent tracking schedule independent of video retention. 
 EXCLUDED from Janitor cleanup to enable long-term metrics collection.';
 
 SELECT create_hypertable('channel_stats_log', 'timestamp', 
