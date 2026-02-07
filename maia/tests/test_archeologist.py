@@ -69,7 +69,7 @@ async def test_hunt_history_successful_retrieval():
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        await hunt_history_task(year=2010, month=5, keys=mock_keys)
+        await hunt_history_task.fn(year=2010, month=5, keys=mock_keys)
 
         assert mock_dao.ingest_video_metadata.call_count == 10
 
@@ -116,7 +116,7 @@ async def test_hunt_history_handles_403_key_rotation():
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        await hunt_history_task(year=2010, month=1, keys=mock_keys)
+        await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
 
         assert call_count["count"] > 2
 
@@ -149,7 +149,7 @@ async def test_hunt_history_handles_429_resiliency_strategy():
         MockSession.return_value = mock_session_instance
 
         with pytest.raises(SystemExit):
-            await hunt_history_task(year=2010, month=1, keys=mock_keys)
+            await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
 
 
 @pytest.mark.asyncio
@@ -172,7 +172,7 @@ async def test_hunt_history_handles_network_errors():
         mock_session_instance.get = MagicMock(side_effect=ConnectionError("Network down"))
         MockSession.return_value = mock_session_instance
 
-        await hunt_history_task(year=2010, month=1, keys=mock_keys)
+        await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
 
         assert True
 
@@ -181,20 +181,20 @@ async def test_hunt_history_handles_network_errors():
 async def test_run_archeology_campaign_iterates_through_years():
     """Test archeology campaign iterates through multiple years and months."""
     with patch("maia.archeologist.flow.hunt_history_task") as mock_hunt_task:
-        mock_hunt_task.return_value = AsyncMock()
+        mock_hunt_task.fn = AsyncMock()
 
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(return_value="fake_key")
         mock_keys.size = 1
 
-        result = await archeology_flow(start_year=2010, end_year=2011, keys=mock_keys)
+        result = await archeology_flow.fn(start_year=2010, end_year=2011, keys=mock_keys)
 
-        assert mock_hunt_task.call_count == 24
+        assert mock_hunt_task.fn.call_count == 24
 
-        first_call = mock_hunt_task.call_args_list[0]
+        first_call = mock_hunt_task.fn.call_args_list[0]
         assert first_call[0] == (2010, 1, mock_keys)
 
-        last_call = mock_hunt_task.call_args_list[-1]
+        last_call = mock_hunt_task.fn.call_args_list[-1]
         assert last_call[0] == (2011, 12, mock_keys)
 
         assert result["years_processed"] == 2
@@ -232,6 +232,6 @@ async def test_hunt_history_handles_empty_response():
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        await hunt_history_task(year=2025, month=1, keys=mock_keys)
+        await hunt_history_task.fn(year=2025, month=1, keys=mock_keys)
 
         assert mock_dao.ingest_video_metadata.call_count == 0
