@@ -159,8 +159,10 @@ jobs:
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
-          HF_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
           VAULT_PROVIDER: "huggingface"
+          HF_DATASET_ID: ${{ secrets.HF_DATASET_ID }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ENV: "dev"
         run: make test-int
 
       - name: Cleanup (Delete Neon Branch)

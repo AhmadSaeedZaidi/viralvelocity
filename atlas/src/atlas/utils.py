@@ -226,7 +226,7 @@ class HydraExecutor:
     def __init__(self, key_ring: KeyRing, agent_name: str = "unknown"):
         self.key_ring = key_ring
         self.agent_name = agent_name
-        self.logger = logging.getLogger(f"atlas.hydra.{agent_name}")
+        self.logger = logging.getLogger(f"atlas.resiliency.{agent_name}")
 
     async def execute_async(
         self,

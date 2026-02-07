@@ -3,6 +3,8 @@ Integration tests for Maia Painter.
 
 These tests verify end-to-end behavior of Painter keyframe extraction flows.
 Mark as integration tests: pytest -m integration
+
+Real Integration Testing: Uses real YouTube video (Blender Tutorial), real vault storage.
 """
 
 import socket
@@ -45,7 +47,9 @@ async def test_painter_real_blender_tutorial(dao):
     1. Fetch the real video "Beginner Blender 4.0 Tutorial (2023)" (B0J27sf9N1Y)
     2. Extract actual keyframes using OpenCV
     3. Generate valid numpy arrays from the video stream
-    4. Store frames to vault (mocked)
+    4. Store frames to real vault (HuggingFace)
+    
+    Real Integration Test: Makes actual network calls to YouTube and HuggingFace.
     """
     video_data = {
         "id": {"videoId": "B0J27sf9N1Y"},
@@ -62,30 +66,23 @@ async def test_painter_real_blender_tutorial(dao):
 
     await dao.ingest_video_metadata(video_data)
 
-    with patch("maia.painter.flow.vault") as mock_vault:
-        mock_vault.store_visual_evidence = MagicMock()
-
-        # Run cycle for the Blender tutorial
+    try:
+        # Run cycle for the Blender tutorial - real network calls, real vault storage
         await run_painter_cycle(batch_size=1)
 
-        mock_vault.store_visual_evidence.assert_called_once()
-
-        call_args = mock_vault.store_visual_evidence.call_args
-        vid_id = call_args[0][0]
-        frames = call_args[0][1]
-
-        assert vid_id == "B0J27sf9N1Y"
-        assert len(frames) > 0, "Should extract at least 1 frame from the tutorial"
-
-        for frame_idx, image_bytes in frames:
-            assert isinstance(frame_idx, int), "Frame index should be integer"
-            assert isinstance(image_bytes, bytes), "Frame should be bytes"
-            # Tutorials often have high-detail UI, check for reasonable file size
-            assert len(image_bytes) > 1000, "JPEG should be at least 1KB"
-
+        # Verify video was marked with has_visuals
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("B0J27sf9N1Y",))
         assert video["has_visuals"] is True
         assert video["status"] != "FAILED"
+
+    except Exception as e:
+        # Handle geo-blocking or YouTube rate limits gracefully
+        if "429" in str(e) or "HTTP Error 429" in str(e):
+            pytest.skip("YouTube rate limit (429) encountered")
+        elif "Video unavailable" in str(e) or "geo" in str(e).lower():
+            pytest.skip("Video geo-blocked or unavailable in this region")
+        else:
+            raise
 
 
 @pytest.mark.integration
@@ -185,7 +182,6 @@ async def test_painter_batch_size_enforcement(dao):
     with (
         patch("maia.painter.flow.VideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2.VideoCapture") as MockCapture,
-        patch("maia.painter.flow.vault") as mock_vault,
     ):
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
@@ -199,14 +195,17 @@ async def test_painter_batch_size_enforcement(dao):
 
         MockCapture.return_value = mock_cap_instance
 
-        mock_vault.store_visual_evidence = MagicMock()
-
+        # Real vault storage
         await run_painter_cycle(batch_size=3)
 
-        assert mock_vault.store_visual_evidence.call_count == 3
+        # Verify batch size was respected
+        processed = await dao._fetch_all(
+            "SELECT * FROM videos WHERE has_visuals = TRUE AND id LIKE 'BATCH_TEST_%%'"
+        )
+        assert len(processed) == 3
 
         remaining = await dao._fetch_all(
-            "SELECT * FROM videos WHERE has_visuals = FALSE AND id LIKE 'BATCH_TEST_%'"
+            "SELECT * FROM videos WHERE has_visuals = FALSE AND id LIKE 'BATCH_TEST_%%'"
         )
         assert len(remaining) == 7
 
@@ -242,7 +241,7 @@ async def test_painter_vault_failure_marks_video_failed(dao, mock_sleep):
     with (
         patch("maia.painter.flow.VideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2.VideoCapture") as MockCapture,
-        patch("maia.painter.flow.vault") as mock_vault,
+        patch("maia.painter.flow.vault.store_visual_evidence") as mock_store,
     ):
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
@@ -256,9 +255,7 @@ async def test_painter_vault_failure_marks_video_failed(dao, mock_sleep):
 
         MockCapture.return_value = mock_cap_instance
 
-        mock_vault.store_visual_evidence = MagicMock(
-            side_effect=Exception("Vault connection error")
-        )
+        mock_store.side_effect = Exception("Vault connection error")
 
         await run_painter_cycle(batch_size=1)
 

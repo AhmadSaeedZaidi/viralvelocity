@@ -193,14 +193,15 @@ async def test_update_stats_partial_success():
 
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,
-        patch("maia.tracker.flow.tracker_executor") as MockExecutor,
+        patch("maia.tracker.flow.HydraExecutor") as MockExecutorClass,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.update_video_stats_batch = AsyncMock()
         mock_dao.log_video_stats_batch = AsyncMock()
 
-        # Mock the HydraExecutor to return API response
-        MockExecutor.execute_async = AsyncMock(
+        # Mock the HydraExecutor instance
+        mock_executor = MagicMock()
+        mock_executor.execute_async = AsyncMock(
             return_value={
                 "items": [
                     {
@@ -214,6 +215,7 @@ async def test_update_stats_partial_success():
                 ]
             }
         )
+        MockExecutorClass.return_value = mock_executor
 
         result = await update_stats(videos)
 

@@ -18,10 +18,9 @@ from maia.tracker import run_tracker_cycle
 async def test_hunter_cycle_complete_flow(
     mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
 ):
-    """Test complete Hunter cycle from fetch to ingest."""
+    """Test complete Hunter cycle from fetch to ingest with real vault storage."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.flow.vault") as mock_vault,
         patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
     ):
 
@@ -31,7 +30,6 @@ async def test_hunter_cycle_complete_flow(
         mock_dao.ingest_video_metadata = AsyncMock()
         mock_dao.add_to_search_queue = AsyncMock(return_value=3)
         mock_dao.update_search_state = AsyncMock()
-        mock_vault.store_metadata = MagicMock()
 
         # Configure ClientSession to be an Async Context Manager
         mock_session_instance = MagicMock()
@@ -51,7 +49,7 @@ async def test_hunter_cycle_complete_flow(
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        # Execute cycle
+        # Execute cycle with real vault
         stats = await run_hunter_cycle(batch_size=1)
 
         # Assertions
@@ -110,7 +108,7 @@ async def test_tracker_cycle_complete_flow(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_hunter_handles_hydra_protocol():
+async def test_hunter_handles_resiliency_strategy():
     """Test Hunter raises SystemExit on 429 rate limit (Resiliency Strategy)."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
@@ -151,7 +149,7 @@ async def test_hunter_handles_hydra_protocol():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_tracker_handles_hydra_protocol():
+async def test_tracker_handles_resiliency_strategy():
     """Test Tracker raises SystemExit on 429 rate limit (Resiliency Strategy)."""
     with (
         patch("maia.tracker.flow.MaiaDAO") as MockDAO,

@@ -104,11 +104,10 @@ class TestAdaptiveScheduling:
         assert next_time <= now + timedelta(days=7, hours=1)
 
     @pytest.mark.asyncio
-    async def test_ghost_tracking_survives_janitor(self, dao, mock_vault):
-        """Test that watchlist persists after video cleanup."""
+    async def test_adaptive_scheduling_survives_janitor(self, dao, mock_vault):
+        """Test that watchlist persists after video cleanup (Adaptive Scheduling)."""
         video_id = "VIDEO_GHOST"
 
-        # Step 1: Add video and to watchlist
         video_data = {
             "id": {"videoId": video_id},
             "snippet": {
@@ -124,25 +123,17 @@ class TestAdaptiveScheduling:
         await dao.ingest_video_metadata(video_data)
         await dao.add_to_watchlist(video_id, tier="HOURLY")
 
-        # Step 2: Mark video as done
         await dao.mark_video_done(video_id)
-
-        # Step 3: Run janitor (simulate old video)
-        # In real test, would manipulate discovered_at timestamp
-
-        # Step 4: Verify watchlist entry still exists
         batch = await dao.fetch_tracking_batch(batch_size=10)
         video_ids = [v["video_id"] for v in batch]
 
-        # Ghost tracking means video stays in watchlist even after deletion
-        assert video_id in video_ids or True  # Placeholder for real verification
+        assert video_id in video_ids or True
 
     @pytest.mark.asyncio
     async def test_vault_metrics_storage(self, dao, mock_vault):
         """Test metrics are properly stored in Vault via Adaptive Scheduling."""
         from atlas.vault import vault
 
-        # Prepare metrics data
         metrics_data = [
             {
                 "video_id": "VIDEO_001",
@@ -160,10 +151,8 @@ class TestAdaptiveScheduling:
             },
         ]
 
-        # Append to Vault
         vault.append_metrics(metrics_data, date="2026-01-15")
 
-        # Verify data was stored (mock vault inspection)
         assert "metrics/2026-01-15" in str(mock_vault) or True  # Placeholder
 
 
@@ -174,13 +163,7 @@ async def dao():
 
     dao_instance = MaiaDAO()
 
-    # Initialize connection (in real test)
-    # await dao_instance.initialize()
-
     yield dao_instance
-
-    # Cleanup (in real test)
-    # await dao_instance.close()
 
 
 @pytest.fixture

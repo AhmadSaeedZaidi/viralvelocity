@@ -19,11 +19,13 @@ async def test_archeologist_complete_hunt_cycle(dao, mock_youtube_search_respons
     """Test complete Archeologist hunt cycle for a single month."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-        patch("maia.archeologist.flow.archeo_keys") as mock_keys,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
     ):
-        # Setup key rotation
-        mock_keys.next_key = MagicMock(return_value="test_archeo_key_123")
-        mock_keys.size = 3
+        # Setup KeyRing mock
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(return_value="test_archeo_key_123")
+        mock_keyring.size = 3
+        MockKeyRing.return_value = mock_keyring
 
         # Configure ClientSession
         mock_session_instance = MagicMock()
@@ -44,15 +46,8 @@ async def test_archeologist_complete_hunt_cycle(dao, mock_youtube_search_respons
 
         # Execute hunt for January 2010
         await hunt_history(year=2010, month=1)
-
-        # Verify videos were ingested into database
-        # Should process 5 categories (TARGET_CATEGORIES), each with 1 video from mock response
         videos = await dao._fetch_all("SELECT * FROM videos ORDER BY discovered_at DESC LIMIT 10")
-
-        # We should have at least 5 videos (1 per category)
         assert len(videos) >= 5
-
-        # Verify the video from mock response was ingested
         video_ids = [v["id"] for v in videos]
         assert "dQw4w9WgXcQ" in video_ids
 
@@ -63,10 +58,12 @@ async def test_archeologist_high_priority_override(dao):
     """Test Archeologist assigns high priority (100) to historical videos."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-        patch("maia.archeologist.flow.archeo_keys") as mock_keys,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
     ):
-        mock_keys.next_key = MagicMock(return_value="test_key")
-        mock_keys.size = 1
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(return_value="test_key")
+        mock_keyring.size = 1
+        MockKeyRing.return_value = mock_keyring
 
         # Mock response with a historical video
         historical_video_response = {
@@ -115,14 +112,16 @@ async def test_archeologist_high_priority_override(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_archeologist_handles_hydra_protocol(dao):
+async def test_archeologist_handles_resiliency_strategy(dao):
     """Test Archeologist raises SystemExit on 429 rate limit (Resiliency Strategy)."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-        patch("maia.archeologist.flow.archeo_keys") as mock_keys,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
     ):
-        mock_keys.next_key = MagicMock(return_value="test_key")
-        mock_keys.size = 1
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(return_value="test_key")
+        mock_keyring.size = 1
+        MockKeyRing.return_value = mock_keyring
 
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
@@ -150,9 +149,8 @@ async def test_archeologist_key_rotation_on_403(dao):
     """Test Archeologist rotates keys on 403 Forbidden errors."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-        patch("maia.archeologist.flow.archeo_keys") as mock_keys,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
     ):
-        # Setup key rotation with multiple keys
         keys_used = []
 
         def track_key_usage():
@@ -160,14 +158,15 @@ async def test_archeologist_key_rotation_on_403(dao):
             keys_used.append(key)
             return key
 
-        mock_keys.next_key = MagicMock(side_effect=track_key_usage)
-        mock_keys.size = 3
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(side_effect=track_key_usage)
+        mock_keyring.size = 3
+        MockKeyRing.return_value = mock_keyring
 
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
 
-        # First two calls return 403, third succeeds
         call_count = {"count": 0}
 
         async def mock_get_response():
@@ -189,10 +188,8 @@ async def test_archeologist_key_rotation_on_403(dao):
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        # Execute
         await hunt_history(year=2010, month=1)
 
-        # Verify multiple keys were tried
         assert len(keys_used) > 1
 
 
@@ -202,14 +199,10 @@ async def test_archeologist_campaign_multi_month(dao):
     """Test Archeologist campaign iterates through multiple months."""
     with (patch("maia.archeologist.flow.hunt_history") as mock_hunt,):
         mock_hunt.return_value = AsyncMock()
-
-        # Run campaign for 2 months
         await run_archeology_campaign(start_year=2010, end_year=2010)
 
-        # Verify hunt_history was called for all 12 months of 2010
         assert mock_hunt.call_count == 12
 
-        # Verify correct month sequence
         for month in range(1, 13):
             mock_hunt.assert_any_call(2010, month)
 
@@ -220,12 +213,13 @@ async def test_archeologist_handles_empty_results(dao):
     """Test Archeologist handles months with no historical videos."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-        patch("maia.archeologist.flow.archeo_keys") as mock_keys,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
     ):
-        mock_keys.next_key = MagicMock(return_value="test_key")
-        mock_keys.size = 1
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(return_value="test_key")
+        mock_keyring.size = 1
+        MockKeyRing.return_value = mock_keyring
 
-        # Mock empty response (no videos found in that time period)
         empty_response = {"items": []}
 
         mock_session_instance = MagicMock()
@@ -243,15 +237,12 @@ async def test_archeologist_handles_empty_results(dao):
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        # Should complete without errors
         await hunt_history(year=2005, month=1)
 
-        # Verify no videos were ingested
         videos = await dao._fetch_all(
             "SELECT * FROM videos WHERE published_at BETWEEN %s AND %s",
             ("2005-01-01", "2005-02-01"),
         )
-        # Should be empty or have only pre-existing videos
         assert len(videos) == 0
 
 
@@ -261,10 +252,12 @@ async def test_archeologist_time_window_calculation(dao):
     """Test Archeologist correctly calculates time windows for searches."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-        patch("maia.archeologist.flow.archeo_keys") as mock_keys,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
     ):
-        mock_keys.next_key = MagicMock(return_value="test_key")
-        mock_keys.size = 1
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(return_value="test_key")
+        mock_keyring.size = 1
+        MockKeyRing.return_value = mock_keyring
 
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
@@ -281,11 +274,8 @@ async def test_archeologist_time_window_calculation(dao):
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        # Test December (wraps to next year)
         await hunt_history(year=2010, month=12)
 
-        # Verify the request was made with correct time parameters
-        # Check that the last call had December time range
         last_call = mock_session_instance.get.call_args_list[-1]
         params = last_call[1]["params"]
 

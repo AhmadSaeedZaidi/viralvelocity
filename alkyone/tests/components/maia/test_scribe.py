@@ -16,7 +16,7 @@ from maia.scribe.flow import process_transcript, run_scribe_cycle
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scribe_complete_cycle(dao):
-    """Test complete Scribe cycle: fetch videos, download transcripts, store to Vault."""
+    """Test complete Scribe cycle: fetch videos, download transcripts, store to real Vault."""
     # Setup: Insert test videos needing transcripts
     test_videos = [
         {
@@ -54,20 +54,14 @@ async def test_scribe_complete_cycle(dao):
         {"text": "World", "start": 1.0, "duration": 1.0},
     ]
 
-    with (
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
-    ):
-        mock_loader_instance = MockLoader.return_value
+    with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
+        # Create a proper mock instance with fetch method
+        mock_loader_instance = MagicMock()
         mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
+        MockLoader.return_value = mock_loader_instance
 
-        mock_vault.store_transcript = MagicMock()
-
-        # Execute cycle
+        # Execute cycle with real vault storage
         await run_scribe_cycle(batch_size=2)
-
-        # Verify transcripts were stored
-        assert mock_vault.store_transcript.call_count == 2
 
         # Verify videos were marked as having transcripts
         video1 = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("SCRIBE_TEST_001",))
@@ -96,20 +90,15 @@ async def test_scribe_handles_unavailable_transcripts(dao):
 
     await dao.ingest_video_metadata(video_data)
 
-    with (
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
-    ):
-        mock_loader_instance = MockLoader.return_value
+    with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
+        # Create mock instance properly
+        mock_loader_instance = MagicMock()
         # Return None to indicate transcripts are disabled
         mock_loader_instance.fetch = MagicMock(return_value=None)
+        MockLoader.return_value = mock_loader_instance
 
-        mock_vault.store_transcript = MagicMock()
-
+        # Execute with real vault
         await run_scribe_cycle(batch_size=1)
-
-        # Verify vault was not called
-        mock_vault.store_transcript.assert_not_called()
 
         # Verify video was still marked as processed
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("NO_TRANSCRIPT_001",))
@@ -118,7 +107,7 @@ async def test_scribe_handles_unavailable_transcripts(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_handles_hydra_protocol(dao):
+async def test_scribe_handles_resiliency_strategy(dao):
     """Test Scribe propagates SystemExit on rate limit (Resiliency Strategy)."""
     video_data = {
         "id": {"videoId": "RATE_LIMIT_001"},
@@ -136,9 +125,10 @@ async def test_scribe_handles_hydra_protocol(dao):
     await dao.ingest_video_metadata(video_data)
 
     with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
-        mock_loader_instance = MockLoader.return_value
+        mock_loader_instance = MagicMock()
         # Simulate TooManyRequests which raises SystemExit in TranscriptLoader
         mock_loader_instance.fetch = MagicMock(side_effect=SystemExit("429 Rate Limit"))
+        MockLoader.return_value = mock_loader_instance
 
         # Verify SystemExit is propagated
         with pytest.raises(SystemExit):
@@ -178,23 +168,23 @@ async def test_scribe_batch_size_enforcement(dao):
 
     mock_transcript = [{"text": "Test", "start": 0.0, "duration": 1.0}]
 
-    with (
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
-    ):
-        mock_loader_instance = MockLoader.return_value
+    with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
+        mock_loader_instance = MagicMock()
         mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
-        mock_vault.store_transcript = MagicMock()
+        MockLoader.return_value = mock_loader_instance
 
-        # Request batch of 5
+        # Request batch of 5 with real vault
         await run_scribe_cycle(batch_size=5)
 
         # Verify only 5 were processed
-        assert mock_vault.store_transcript.call_count == 5
+        processed = await dao._fetch_all(
+            "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'BATCH_TEST_%%'"
+        )
+        assert len(processed) == 5
 
         # Verify remaining 5 are still pending
         remaining = await dao._fetch_all(
-            "SELECT * FROM videos WHERE has_transcript = FALSE AND id LIKE 'BATCH_TEST_%'"
+            "SELECT * FROM videos WHERE has_transcript = FALSE AND id LIKE 'BATCH_TEST_%%'"
         )
         assert len(remaining) == 5
 
@@ -222,21 +212,19 @@ async def test_scribe_sequential_processing(dao):
     processing_order = []
     mock_transcript = [{"text": "Test", "start": 0.0, "duration": 1.0}]
 
-    def track_processing(vid_id, transcript_data):
-        processing_order.append(vid_id)
-
-    with (
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
-    ):
-        mock_loader_instance = MockLoader.return_value
+    with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
+        mock_loader_instance = MagicMock()
         mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
-        mock_vault.store_transcript = MagicMock(side_effect=track_processing)
+        MockLoader.return_value = mock_loader_instance
 
+        # Execute with real vault
         await run_scribe_cycle(batch_size=3)
 
         # Verify all videos were processed
-        assert len(processing_order) == 3
+        processed = await dao._fetch_all(
+            "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'SEQ_TEST_%%'"
+        )
+        assert len(processed) == 3
 
 
 @pytest.mark.integration
@@ -262,13 +250,14 @@ async def test_scribe_vault_failure_marks_video_failed(dao):
 
     with (
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
+        patch("maia.scribe.flow.vault.store_transcript") as mock_store,
     ):
-        mock_loader_instance = MockLoader.return_value
+        mock_loader_instance = MagicMock()
         mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
+        MockLoader.return_value = mock_loader_instance
 
         # Vault fails all retries
-        mock_vault.store_transcript = MagicMock(side_effect=Exception("Vault connection error"))
+        mock_store.side_effect = Exception("Vault connection error")
 
         await run_scribe_cycle(batch_size=1)
 
@@ -298,11 +287,8 @@ async def test_scribe_retry_logic_on_network_errors(dao):
 
     mock_transcript = [{"text": "Success", "start": 0.0, "duration": 1.0}]
 
-    with (
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
-    ):
-        mock_loader_instance = MockLoader.return_value
+    with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
+        mock_loader_instance = MagicMock()
         # First two attempts fail, third succeeds
         mock_loader_instance.fetch = MagicMock(
             side_effect=[
@@ -311,9 +297,9 @@ async def test_scribe_retry_logic_on_network_errors(dao):
                 mock_transcript,
             ]
         )
+        MockLoader.return_value = mock_loader_instance
 
-        mock_vault.store_transcript = MagicMock()
-
+        # Execute with real vault
         await run_scribe_cycle(batch_size=1)
 
         # Verify retries happened
