@@ -108,9 +108,7 @@ async def test_process_frames_successful_with_chapters():
 
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
-        mock_cap_instance.get.side_effect = lambda prop: (
-            30.0 if prop == 5 else 4500
-        )
+        mock_cap_instance.get.side_effect = lambda prop: (30.0 if prop == 5 else 4500)
         mock_cap_instance.read.return_value = (True, mock_frame)
         mock_cap_instance.set.return_value = None
         mock_cap_instance.release.return_value = None
