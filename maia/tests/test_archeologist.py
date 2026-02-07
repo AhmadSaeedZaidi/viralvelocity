@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from maia.archeologist.flow import ArcheologistAgent, hunt_history_task, archeology_flow
+from maia.archeologist.flow import ArcheologistAgent, archeology_flow, hunt_history_task
 
 
 @pytest.mark.asyncio
