@@ -21,7 +21,7 @@ async def test_hunt_history_successful_retrieval():
         mock_dao.ingest_video_metadata = AsyncMock()
 
         mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(return_value="fake_key_123")
+        mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])
         mock_keys.size = 3
 
         mock_response_data = {
@@ -71,7 +71,7 @@ async def test_hunt_history_successful_retrieval():
 
         await hunt_history_task.fn(year=2010, month=5, keys=mock_keys)
 
-        assert mock_dao.ingest_video_metadata.call_count == 10  # 2 items * 5 categories
+        assert mock_dao.ingest_video_metadata.call_count == 10
 
 
 @pytest.mark.asyncio
@@ -83,9 +83,8 @@ async def test_hunt_history_handles_403_key_rotation():
     ):
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
-
         mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(side_effect=["key1", "key2", "key3", "key4", "key5"])
+        mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])
         mock_keys.size = 3
 
         mock_session_instance = MagicMock()
