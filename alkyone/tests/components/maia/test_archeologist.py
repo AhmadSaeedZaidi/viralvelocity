@@ -200,9 +200,7 @@ async def test_archeologist_key_rotation_on_403(dao):
 @pytest.mark.asyncio
 async def test_archeologist_campaign_multi_month(dao):
     """Test Archeologist campaign iterates through multiple months."""
-    with (
-        patch("maia.archeologist.flow.hunt_history") as mock_hunt,
-    ):
+    with (patch("maia.archeologist.flow.hunt_history") as mock_hunt,):
         mock_hunt.return_value = AsyncMock()
 
         # Run campaign for 2 months

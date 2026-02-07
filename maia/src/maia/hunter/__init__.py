@@ -1,5 +1,5 @@
 """Maia Hunter - Discovery & Ingestion Agent"""
 
-from .flow import main, run_hunter_cycle
+from .flow import HunterAgent, main, run_hunter_cycle
 
-__all__ = ["run_hunter_cycle", "main"]
+__all__ = ["HunterAgent", "run_hunter_cycle", "main"]

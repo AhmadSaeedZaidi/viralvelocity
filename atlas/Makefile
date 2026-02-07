@@ -16,6 +16,11 @@ install:
 setup:
 	poetry run python -m atlas.setup
 
+lint-local:
+	poetry run black src/atlas tests
+	poetry run isort src/atlas tests
+	poetry run mypy src/atlas --config-file pyproject.toml --no-error-summary
+
 lint:
 	poetry run black --check src/atlas tests
 	poetry run isort --check-only src/atlas tests

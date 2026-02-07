@@ -1,8 +1,10 @@
 """Maia Tracker: Video metrics monitoring agent."""
 
+import argparse
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
@@ -11,31 +13,30 @@ from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
-tracker_keys = KeyRing("tracking")
-tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")
 
-
-@task(name="fetch_targets")  # type: ignore[misc]
-async def fetch_targets(batch_size: int = 50) -> Any:
+@task(name="fetch_targets")
+async def fetch_targets_task(batch_size: int) -> List[Dict[str, Any]]:
+    """Fetch videos that need statistics updates."""
     dao = MaiaDAO()
-    logger = get_run_logger()
+    run_logger = get_run_logger()
 
     try:
         targets = await dao.fetch_tracker_targets(batch_size)
-        logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
+        run_logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
         return targets
     except Exception as e:
-        logger.error(f"Failed to fetch tracker targets: {e}")
+        run_logger.error(f"Failed to fetch tracker targets: {e}")
         return []
 
 
 @task(name="update_stats")
-async def update_stats(videos: List[Dict[str, Any]]) -> int:
+async def update_stats_task(videos: List[Dict[str, Any]], executor: HydraExecutor) -> int:
     """
     Fetch and update statistics for a batch of videos.
 
     Args:
         videos: List of video records from fetch_targets
+        executor: HydraExecutor for API key rotation
 
     Returns:
         Number of videos successfully updated
@@ -57,7 +58,6 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         "id": id_str,
     }
 
-    # Define the request function for HydraExecutor
     async def make_request(api_key: str) -> Dict[str, Any]:
         params["key"] = api_key
 
@@ -67,7 +67,6 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
                     result: Dict[str, Any] = await resp.json()
                     return result
                 elif resp.status in (403, 429):
-                    # Raise exception for Resiliency strategy handling
                     error_text = await resp.text()
                     raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
                 else:
@@ -75,11 +74,9 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
                     run_logger.error(f"Tracker HTTP {resp.status}: {error_text[:200]}")
                     raise Exception(f"HTTP {resp.status}")
 
-    # Execute with HydraExecutor (handles key rotation and termination)
     try:
-        response_json = await tracker_executor.execute_async(make_request)
+        response_json = await executor.execute_async(make_request)
     except SystemExit:
-        # Resiliency strategy - propagate clean termination
         raise
     except Exception as e:
         run_logger.error(f"Failed to fetch stats: {e}")
@@ -95,9 +92,6 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         return 0
 
     try:
-        # Write to hot tier (video_stats_log table)
-        from datetime import datetime, timezone
-
         stats_list = []
         for item in items:
             stats = item.get("statistics", {})
@@ -113,10 +107,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
                 }
             )
 
-        # Log to hot tier
         await dao.log_video_stats_batch(stats_list)
-
-        # Also update last_updated_at on videos table (legacy behavior)
         await dao.update_video_stats_batch(items)
 
         run_logger.info(f"✓ Logged {len(stats_list)} stats to hot tier")
@@ -127,43 +118,43 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
 
 
 @flow(name="run_tracker_cycle")
-async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
+async def tracker_flow(batch_size: int, executor: HydraExecutor) -> Dict[str, Any]:
     """
     Execute a complete Tracker cycle: fetch stale videos, update stats.
 
     Args:
         batch_size: Number of videos to process (max 50 for YouTube API)
+        executor: HydraExecutor for API key rotation
 
     Returns:
         Dictionary with cycle statistics
     """
-    logger = get_run_logger()
-    logger.info("=== Starting Tracker Cycle ===")
+    run_logger = get_run_logger()
+    run_logger.info("=== Starting Tracker Cycle ===")
 
-    stats = {
+    stats: Dict[str, Any] = {
         "videos_fetched": 0,
         "videos_updated": 0,
         "updates_failed": 0,
     }
 
     try:
-        # Enforce YouTube API batch limit
         if batch_size > 50:
-            logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
+            run_logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
             batch_size = 50
 
-        targets = await fetch_targets(batch_size=batch_size)
+        targets = await fetch_targets_task(batch_size=batch_size)
         stats["videos_fetched"] = len(targets)
 
         if not targets:
-            logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
+            run_logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
             return stats
 
-        updated_count = await update_stats(targets)
+        updated_count = await update_stats_task(targets, executor)
         stats["videos_updated"] = updated_count
         stats["updates_failed"] = len(targets) - updated_count
 
-        logger.info(
+        run_logger.info(
             f"=== Tracker Cycle Complete === "
             f"Fetched: {stats['videos_fetched']}, "
             f"Updated: {stats['videos_updated']}, "
@@ -171,22 +162,85 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
         )
 
     except SystemExit:
-        # Resiliency strategy: Rate limit detected - propagate immediately
-        logger.critical("Tracker Cycle terminated by Resiliency strategy (429 Rate Limit)")
+        run_logger.critical("Tracker Cycle terminated by Resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
-        logger.exception(f"Tracker cycle failed with unexpected error: {e}")
+        run_logger.exception(f"Tracker cycle failed with unexpected error: {e}")
         raise
 
     return stats
 
 
+class TrackerAgent:
+    """
+    Tracker Agent: Video metrics monitoring and statistics tracking.
+
+    Implements the Agent protocol for polymorphic command dispatch.
+    """
+
+    name = "tracker"
+
+    def __init__(self) -> None:
+        """Initialize the Tracker agent with its KeyRing and executor."""
+        self.logger = logging.getLogger(self.name)
+        self.keys = KeyRing("tracking")
+        self.executor = HydraExecutor(self.keys, agent_name="tracker")
+
+    @staticmethod
+    def add_cli_args(parser: argparse.ArgumentParser) -> None:
+        """Register command-line arguments for the Tracker agent."""
+        parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=50,
+            help="Number of videos to track per cycle (max 50, default: 50)",
+        )
+
+    async def run(self, batch_size: int = 50, **kwargs: Any) -> Dict[str, Any]:
+        """
+        Execute a complete Tracker cycle.
+
+        Args:
+            batch_size: Number of videos to process (max 50 for YouTube API)
+            **kwargs: Additional arguments (ignored)
+
+        Returns:
+            Dictionary with cycle statistics
+        """
+        return await tracker_flow(batch_size=batch_size, executor=self.executor)
+
+
+@flow(name="run_tracker_cycle")
+async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
+    """
+    Legacy function wrapper for backward compatibility.
+
+    Prefer using TrackerAgent directly for new code.
+    """
+    agent = TrackerAgent()
+    return await agent.run(batch_size=batch_size)
+
+
+@task(name="fetch_targets")
+async def fetch_targets(batch_size: int = 50) -> Any:
+    """Legacy function wrapper for backward compatibility."""
+    return await fetch_targets_task(batch_size)
+
+
+@task(name="update_stats")
+async def update_stats(videos: List[Dict[str, Any]]) -> int:
+    """Legacy function wrapper for backward compatibility."""
+    keys = KeyRing("tracking")
+    executor = HydraExecutor(keys, agent_name="tracker")
+    return await update_stats_task(videos, executor)
+
+
 def main() -> None:
     """Entry point for running the Tracker as a standalone service."""
     try:
-        asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
+        agent = TrackerAgent()
+        asyncio.run(agent.run())
     except SystemExit as e:
-        # Resiliency strategy: Exit with specific code for rate limit
         logger.critical(f"Tracker terminated: {e}")
         raise
     except KeyboardInterrupt:
@@ -197,7 +251,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Configure logging for standalone execution
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

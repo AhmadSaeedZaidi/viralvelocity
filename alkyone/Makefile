@@ -11,6 +11,11 @@ help:
 install:
 	poetry install --with dev
 
+lint-local:
+	poetry run black src/alkyone tests
+	poetry run isort src/alkyone tests
+	poetry run mypy src/alkyone --config-file pyproject.toml --no-error-summary
+
 lint:
 	poetry run black --check src/alkyone tests
 	poetry run isort --check-only src/alkyone tests

@@ -255,7 +255,11 @@ async def test_transcript_loader_retry_logic():
         mock_loader_instance = MockLoader.return_value
         # First two calls fail, third succeeds
         mock_loader_instance.fetch = MagicMock(
-            side_effect=[ConnectionError("Network error"), ConnectionError("Network error"), mock_transcript]
+            side_effect=[
+                ConnectionError("Network error"),
+                ConnectionError("Network error"),
+                mock_transcript,
+            ]
         )
 
         mock_vault.store_transcript = MagicMock()

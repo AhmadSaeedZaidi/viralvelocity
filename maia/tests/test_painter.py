@@ -5,10 +5,15 @@ Tests for Maia Painter module.
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import numpy as np
+import pytest
 
-from maia.painter.flow import fetch_painter_targets, process_frames, run_painter_cycle, VideoStreamer
+from maia.painter.flow import (
+    VideoStreamer,
+    fetch_painter_targets,
+    process_frames,
+    run_painter_cycle,
+)
 
 
 @pytest.mark.asyncio
@@ -104,7 +109,9 @@ async def test_process_frames_successful_with_chapters():
 
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
-        mock_cap_instance.get.side_effect = lambda prop: 30.0 if prop == 5 else 4500  # FPS=30, frames=4500
+        mock_cap_instance.get.side_effect = lambda prop: (
+            30.0 if prop == 5 else 4500
+        )  # FPS=30, frames=4500
         mock_cap_instance.read.return_value = (True, mock_frame)
         mock_cap_instance.set.return_value = None
         mock_cap_instance.release.return_value = None
@@ -312,7 +319,9 @@ async def test_process_frames_handles_vault_failure():
         MockCapture.return_value = mock_cap_instance
 
         # Vault fails all retries
-        mock_vault.store_visual_evidence = MagicMock(side_effect=Exception("Vault connection error"))
+        mock_vault.store_visual_evidence = MagicMock(
+            side_effect=Exception("Vault connection error")
+        )
 
         await process_frames(video)
 

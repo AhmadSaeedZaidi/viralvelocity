@@ -14,6 +14,11 @@ install:
 	$(MAKE) -C maia install
 	$(MAKE) -C alkyone install
 
+lint-local:
+	$(MAKE) -C atlas lint-local
+	$(MAKE) -C maia lint-local
+	$(MAKE) -C alkyone lint-local
+
 lint:
 	$(MAKE) -C atlas lint
 	$(MAKE) -C maia lint

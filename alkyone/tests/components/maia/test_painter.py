@@ -9,10 +9,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import numpy as np
-
-from maia.painter.flow import run_painter_cycle, process_frames
+import pytest
+from maia.painter.flow import process_frames, run_painter_cycle
 
 
 @pytest.mark.integration
@@ -446,7 +445,9 @@ async def test_painter_vault_failure_marks_video_failed(dao):
         MockCapture.return_value = mock_cap_instance
 
         # Vault fails all retries
-        mock_vault.store_visual_evidence = MagicMock(side_effect=Exception("Vault connection error"))
+        mock_vault.store_visual_evidence = MagicMock(
+            side_effect=Exception("Vault connection error")
+        )
 
         await run_painter_cycle(batch_size=1)
 

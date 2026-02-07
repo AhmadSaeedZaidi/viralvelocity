@@ -10,7 +10,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from maia.scribe.flow import run_scribe_cycle, process_transcript
+from maia.scribe.flow import process_transcript, run_scribe_cycle
 
 
 @pytest.mark.integration
@@ -305,7 +305,11 @@ async def test_scribe_retry_logic_on_network_errors(dao):
         mock_loader_instance = MockLoader.return_value
         # First two attempts fail, third succeeds
         mock_loader_instance.fetch = MagicMock(
-            side_effect=[ConnectionError("Network error"), ConnectionError("Network error"), mock_transcript]
+            side_effect=[
+                ConnectionError("Network error"),
+                ConnectionError("Network error"),
+                mock_transcript,
+            ]
         )
 
         mock_vault.store_transcript = MagicMock()

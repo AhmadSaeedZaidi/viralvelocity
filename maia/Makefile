@@ -11,6 +11,11 @@ help:
 install:
 	poetry install --with dev
 
+lint-local:
+	poetry run black src/maia tests
+	poetry run isort src/maia tests
+	poetry run mypy src/maia --config-file pyproject.toml --no-error-summary
+
 lint:
 	poetry run black --check src/maia tests
 	poetry run isort --check-only src/maia tests
