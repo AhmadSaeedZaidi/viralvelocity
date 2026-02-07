@@ -3,8 +3,16 @@ Pytest configuration and fixtures for Maia tests.
 """
 
 from typing import Any, Dict
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+@pytest.fixture
+def mock_sleep():
+    """Mock asyncio.sleep to speed up tests."""
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock:
+        yield mock
 
 
 @pytest.fixture

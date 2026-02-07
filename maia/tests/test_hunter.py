@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from maia.hunter.flow import fetch_batch, ingest_results
+from maia.hunter.flow import fetch_batch_task, ingest_results_task
 
 
 @pytest.mark.asyncio
@@ -17,7 +17,7 @@ async def test_fetch_batch_empty_queue():
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(return_value=[])
 
-        result = await fetch_batch(batch_size=10)
+        result = await fetch_batch_task.fn(batch_size=10)
 
         assert result == []
         mock_dao.fetch_hunter_batch.assert_called_once_with(10)
@@ -30,7 +30,7 @@ async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
         mock_dao = MockDAO.return_value
         mock_dao.fetch_hunter_batch = AsyncMock(return_value=[mock_search_queue_item])
 
-        result = await fetch_batch(batch_size=10)
+        result = await fetch_batch_task.fn(batch_size=10)
 
         assert len(result) == 1
         assert result[0]["query_term"] == "artificial intelligence"
@@ -52,19 +52,16 @@ async def test_ingest_results_with_snowball(
         mock_dao.update_search_state = AsyncMock()
         mock_vault.store_metadata = MagicMock()
 
-        await ingest_results(mock_search_queue_item, mock_youtube_search_response)
+        await ingest_results_task.fn(mock_search_queue_item, mock_youtube_search_response)
 
-        # Verify video ingestion
         assert mock_dao.ingest_video_metadata.call_count == 1
 
-        # Verify Snowball effect (tags added to search queue)
         mock_dao.add_to_search_queue.assert_called_once()
         args = mock_dao.add_to_search_queue.call_args[0][0]
         assert "test" in args
         assert "example" in args
         assert "ai" in args
 
-        # Verify state update
         mock_dao.update_search_state.assert_called_once()
 
 
@@ -84,8 +81,6 @@ async def test_ingest_results_handles_vault_failure(
         mock_dao.update_search_state = AsyncMock()
         mock_vault.store_metadata = MagicMock(side_effect=Exception("Vault error"))
 
-        # Should not raise, just log warning
-        await ingest_results(mock_search_queue_item, mock_youtube_search_response)
+        await ingest_results_task.fn(mock_search_queue_item, mock_youtube_search_response)
 
-        # Verify ingestion still happened
         assert mock_dao.ingest_video_metadata.call_count == 1
