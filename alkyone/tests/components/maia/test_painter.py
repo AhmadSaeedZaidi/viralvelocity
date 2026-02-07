@@ -48,7 +48,7 @@ async def test_painter_real_blender_tutorial(dao):
     2. Extract actual keyframes using OpenCV
     3. Generate valid numpy arrays from the video stream
     4. Store frames to real vault (HuggingFace)
-    
+
     Real Integration Test: Makes actual network calls to YouTube and HuggingFace.
     """
     video_data = {
