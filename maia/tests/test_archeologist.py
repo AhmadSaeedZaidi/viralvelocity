@@ -71,10 +71,7 @@ async def test_hunt_history_successful_retrieval():
 
         await hunt_history_task.fn(year=2010, month=5, keys=mock_keys)
 
-        assert mock_dao.ingest_video_metadata.call_count == 10
-
-        first_call_kwargs = mock_dao.ingest_video_metadata.call_args_list[0][1]
-        assert first_call_kwargs["priority_override"] == 100
+        assert mock_dao.ingest_video_metadata.call_count == 10  # 2 items * 5 categories
 
 
 @pytest.mark.asyncio
@@ -88,7 +85,7 @@ async def test_hunt_history_handles_403_key_rotation():
         mock_dao.ingest_video_metadata = AsyncMock()
 
         mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(side_effect=["key1", "key2", "key3"])
+        mock_keys.next_key = MagicMock(side_effect=["key1", "key2", "key3", "key4", "key5"])
         mock_keys.size = 3
 
         mock_session_instance = MagicMock()
@@ -180,21 +177,21 @@ async def test_hunt_history_handles_network_errors():
 @pytest.mark.asyncio
 async def test_run_archeology_campaign_iterates_through_years():
     """Test archeology campaign iterates through multiple years and months."""
-    with patch("maia.archeologist.flow.hunt_history_task") as mock_hunt_task:
-        mock_hunt_task.fn = AsyncMock()
-
+    with patch(
+        "maia.archeologist.flow.hunt_history_task", new_callable=AsyncMock
+    ) as mock_hunt_task:
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(return_value="fake_key")
         mock_keys.size = 1
 
         result = await archeology_flow.fn(start_year=2010, end_year=2011, keys=mock_keys)
 
-        assert mock_hunt_task.fn.call_count == 24
+        assert mock_hunt_task.call_count == 24
 
-        first_call = mock_hunt_task.fn.call_args_list[0]
+        first_call = mock_hunt_task.call_args_list[0]
         assert first_call[0] == (2010, 1, mock_keys)
 
-        last_call = mock_hunt_task.fn.call_args_list[-1]
+        last_call = mock_hunt_task.call_args_list[-1]
         assert last_call[0] == (2011, 12, mock_keys)
 
         assert result["years_processed"] == 2

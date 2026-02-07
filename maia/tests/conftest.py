@@ -1,64 +1,126 @@
+"""
+Pytest configuration and fixtures for Maia tests.
+"""
+
 import logging
-import sys
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from prefect.context import TaskRunContext
+
+
+@pytest.fixture(autouse=True)
+def mock_prefect_context():
+    """
+    Establish a mock Prefect context so get_run_logger() works.
+
+    We use TaskRunContext.construct() to bypass Pydantic validation
+    and provide a lightweight context for all tests.
+    """
+    # Create dummy objects for the context
+    mock_task_run = MagicMock()
+    mock_task = MagicMock()
+    mock_client = MagicMock()
+
+    # Use construct to create the model without validation
+    ctx = TaskRunContext.construct(
+        task_run=mock_task_run,
+        task=mock_task,
+        client=mock_client,
+    )
+
+    # Enter the context manually
+    token = TaskRunContext.__var__.set(ctx)
+    yield
+    # Reset the context
+    TaskRunContext.__var__.reset(token)
+
+
+@pytest.fixture(autouse=True)
+def mock_sleep():
+    """
+    Mock asyncio.sleep to speed up tests.
+    """
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock:
+        yield mock
 
 
 @pytest.fixture(autouse=True)
 def mock_prefect_logger():
     """
-    Globally mock get_run_logger to prevent MissingContextError in unit tests.
-    We must patch it in every module that imports it directly.
+    Mock prefect.get_run_logger to return a standard logger.
     """
-    # 1. The list of modules that use 'from prefect import get_run_logger'
-    targets = [
-        "prefect.get_run_logger",  # The source (just in case)
-        "maia.hunter.flow.get_run_logger",
-        "maia.tracker.flow.get_run_logger",
-        "maia.janitor.flow.get_run_logger",
-        "maia.archeologist.flow.get_run_logger",
-        "maia.scribe.flow.get_run_logger",
-        "maia.painter.flow.get_run_logger",
-    ]
-
-    # 2. Create a standard Python logger to return
-    dummy_logger = logging.getLogger("test_logger")
-    dummy_logger.setLevel(logging.INFO)
-
-    # 3. Apply patches dynamically
-    # We use a try/except block because some modules might not be imported yet,
-    # or might not use the logger.
-    patches = []
-    for target in targets:
-        try:
-            p = patch(target, return_value=dummy_logger)
-            p.start()
-            patches.append(p)
-        except (ImportError, AttributeError):
-            # If the module isn't loaded or doesn't have the attribute, skip it
-            pass
-
-    yield dummy_logger
-
-    # 4. Cleanup
-    for p in patches:
-        p.stop()
-
-
-@pytest.fixture
-def mock_sleep():
-    """Skip sleeps in tests to make them fast."""
-    with patch("asyncio.sleep", new_callable=MagicMock) as mock:
-
-        async def instant_sleep(*args, **kwargs):
-            return None
-
-        mock.side_effect = instant_sleep
+    with patch("prefect.get_run_logger") as mock:
+        mock.return_value = logging.getLogger("test")
         yield mock
 
 
 @pytest.fixture
-def sample_video():
-    """Standard video dict for testing."""
-    return {"id": "VIDEO_001", "title": "Test Video", "channel_id": "CHANNEL_001"}
+def mock_youtube_search_response() -> Dict[str, Any]:
+    """Mock YouTube Search API response."""
+    return {
+        "kind": "youtube#searchListResponse",
+        "etag": "test-etag",
+        "nextPageToken": "NEXT_PAGE_TOKEN",
+        "items": [
+            {
+                "kind": "youtube#searchResult",
+                "etag": "test-video-etag",
+                "id": {"kind": "youtube#video", "videoId": "dQw4w9WgXcQ"},
+                "snippet": {
+                    "publishedAt": "2023-01-01T00:00:00Z",
+                    "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+                    "title": "Test Video",
+                    "channelTitle": "Test Channel",
+                    "tags": ["test", "example", "ai"],
+                    "categoryId": "28",
+                    "defaultLanguage": "en",
+                },
+            }
+        ],
+    }
+
+
+@pytest.fixture
+def mock_youtube_stats_response() -> Dict[str, Any]:
+    """Mock YouTube Videos API statistics response."""
+    return {
+        "kind": "youtube#videoListResponse",
+        "etag": "test-etag",
+        "items": [
+            {
+                "kind": "youtube#video",
+                "etag": "test-etag",
+                "id": "dQw4w9WgXcQ",
+                "statistics": {
+                    "viewCount": "1000000",
+                    "likeCount": "50000",
+                    "commentCount": "1000",
+                },
+            }
+        ],
+    }
+
+
+@pytest.fixture
+def mock_search_queue_item() -> Dict[str, Any]:
+    """Mock search queue item from database."""
+    return {
+        "id": 1,
+        "query_term": "artificial intelligence",
+        "next_page_token": None,
+        "last_searched_at": None,
+        "priority": 5,
+    }
+
+
+@pytest.fixture
+def mock_tracker_target() -> Dict[str, Any]:
+    """Mock tracker target video from database."""
+    return {
+        "id": "dQw4w9WgXcQ",
+        "title": "Test Video",
+        "published_at": "2023-01-01T00:00:00Z",
+        "last_updated_at": None,
+    }
