@@ -1,10 +1,6 @@
-"""
-Pytest configuration and fixtures for Maia tests.
-"""
-
 import logging
-from typing import Any, Dict
-from unittest.mock import AsyncMock, patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,94 +8,57 @@ import pytest
 @pytest.fixture(autouse=True)
 def mock_prefect_logger():
     """
-    Mock prefect.get_run_logger to prevent MissingContextError in unit tests.
-
-    This fixture runs automatically for all tests (autouse=True) to ensure
-    that calls to get_run_logger() return a standard Python logger instead
-    of raising MissingContextError when no Prefect flow run context exists.
+    Globally mock get_run_logger to prevent MissingContextError in unit tests.
+    We must patch it in every module that imports it directly.
     """
-    with patch("prefect.get_run_logger") as mock:
-        mock.return_value = logging.getLogger("test")
-        yield mock
+    # 1. The list of modules that use 'from prefect import get_run_logger'
+    targets = [
+        "prefect.get_run_logger",  # The source (just in case)
+        "maia.hunter.flow.get_run_logger",
+        "maia.tracker.flow.get_run_logger",
+        "maia.janitor.flow.get_run_logger",
+        "maia.archeologist.flow.get_run_logger",
+        "maia.scribe.flow.get_run_logger",
+        "maia.painter.flow.get_run_logger",
+    ]
+
+    # 2. Create a standard Python logger to return
+    dummy_logger = logging.getLogger("test_logger")
+    dummy_logger.setLevel(logging.INFO)
+
+    # 3. Apply patches dynamically
+    # We use a try/except block because some modules might not be imported yet,
+    # or might not use the logger.
+    patches = []
+    for target in targets:
+        try:
+            p = patch(target, return_value=dummy_logger)
+            p.start()
+            patches.append(p)
+        except (ImportError, AttributeError):
+            # If the module isn't loaded or doesn't have the attribute, skip it
+            pass
+
+    yield dummy_logger
+
+    # 4. Cleanup
+    for p in patches:
+        p.stop()
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_sleep():
-    """
-    Mock asyncio.sleep to speed up tests.
+    """Skip sleeps in tests to make them fast."""
+    with patch("asyncio.sleep", new_callable=MagicMock) as mock:
 
-    This fixture runs automatically for all tests (autouse=True) to ensure
-    that tests don't actually sleep and run as fast as possible.
-    """
-    with patch("asyncio.sleep", new_callable=AsyncMock) as mock:
+        async def instant_sleep(*args, **kwargs):
+            return None
+
+        mock.side_effect = instant_sleep
         yield mock
 
 
 @pytest.fixture
-def mock_youtube_search_response() -> Dict[str, Any]:
-    """Mock YouTube Search API response."""
-    return {
-        "kind": "youtube#searchListResponse",
-        "etag": "test-etag",
-        "nextPageToken": "NEXT_PAGE_TOKEN",
-        "items": [
-            {
-                "kind": "youtube#searchResult",
-                "etag": "test-video-etag",
-                "id": {"kind": "youtube#video", "videoId": "dQw4w9WgXcQ"},
-                "snippet": {
-                    "publishedAt": "2023-01-01T00:00:00Z",
-                    "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
-                    "title": "Test Video",
-                    "channelTitle": "Test Channel",
-                    "tags": ["test", "example", "ai"],
-                    "categoryId": "28",
-                    "defaultLanguage": "en",
-                },
-            }
-        ],
-    }
-
-
-@pytest.fixture
-def mock_youtube_stats_response() -> Dict[str, Any]:
-    """Mock YouTube Videos API statistics response."""
-    return {
-        "kind": "youtube#videoListResponse",
-        "etag": "test-etag",
-        "items": [
-            {
-                "kind": "youtube#video",
-                "etag": "test-etag",
-                "id": "dQw4w9WgXcQ",
-                "statistics": {
-                    "viewCount": "1000000",
-                    "likeCount": "50000",
-                    "commentCount": "1000",
-                },
-            }
-        ],
-    }
-
-
-@pytest.fixture
-def mock_search_queue_item() -> Dict[str, Any]:
-    """Mock search queue item from database."""
-    return {
-        "id": 1,
-        "query_term": "artificial intelligence",
-        "next_page_token": None,
-        "last_searched_at": None,
-        "priority": 5,
-    }
-
-
-@pytest.fixture
-def mock_tracker_target() -> Dict[str, Any]:
-    """Mock tracker target video from database."""
-    return {
-        "id": "dQw4w9WgXcQ",
-        "title": "Test Video",
-        "published_at": "2023-01-01T00:00:00Z",
-        "last_updated_at": None,
-    }
+def sample_video():
+    """Standard video dict for testing."""
+    return {"id": "VIDEO_001", "title": "Test Video", "channel_id": "CHANNEL_001"}
