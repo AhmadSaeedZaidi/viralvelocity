@@ -95,19 +95,18 @@ async def test_process_frames_successful_with_chapters():
     ):
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_visuals_safe = AsyncMock()
-        mock_dao.mark_video_failed = AsyncMock()  # Prevent TypeError in error path
+        mock_dao.mark_video_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
 
-        # Setup Mock CV2
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
         mock_cap_instance.get.side_effect = lambda prop: (30.0 if prop == 5 else 4500)
         mock_cap_instance.read.return_value = (True, mock_frame)
 
         mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, b"fake_bytes")
+        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
         mock_cv2.CAP_PROP_FPS = 5
         mock_cv2.CAP_PROP_FRAME_COUNT = 7
         mock_cv2.CAP_PROP_POS_FRAMES = 1
@@ -153,7 +152,7 @@ async def test_process_frames_successful_with_heatmap():
         mock_cap_instance.read.return_value = (True, mock_frame)
 
         mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, b"fake_bytes")
+        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
         mock_cv2.CAP_PROP_FPS = 5
         mock_cv2.CAP_PROP_FRAME_COUNT = 7
         mock_cv2.CAP_PROP_POS_FRAMES = 1
@@ -187,14 +186,13 @@ async def test_process_frames_fallback_strategy():
         mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[])
 
-        # Setup Mock CV2
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
         mock_cap_instance.get.side_effect = lambda prop: 30.0 if prop == 5 else 9000
         mock_cap_instance.read.return_value = (True, mock_frame)
 
         mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, b"fake_bytes")
+        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
         mock_cv2.CAP_PROP_FPS = 5
         mock_cv2.CAP_PROP_FRAME_COUNT = 7
         mock_cv2.CAP_PROP_POS_FRAMES = 1
@@ -279,7 +277,7 @@ async def test_process_frames_handles_vault_failure(mock_sleep):
         mock_cap_instance.read.return_value = (True, mock_frame)
 
         mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, b"fake_bytes")
+        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
         mock_cv2.CAP_PROP_FPS = 5
 
         mock_vault.store_visual_evidence = MagicMock(side_effect=Exception("Vault error"))
