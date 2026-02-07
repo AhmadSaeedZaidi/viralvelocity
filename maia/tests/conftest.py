@@ -2,15 +2,35 @@
 Pytest configuration and fixtures for Maia tests.
 """
 
+import logging
 from typing import Any, Dict
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
+def mock_prefect_logger():
+    """
+    Mock prefect.get_run_logger to prevent MissingContextError in unit tests.
+
+    This fixture runs automatically for all tests (autouse=True) to ensure
+    that calls to get_run_logger() return a standard Python logger instead
+    of raising MissingContextError when no Prefect flow run context exists.
+    """
+    with patch("prefect.get_run_logger") as mock:
+        mock.return_value = logging.getLogger("test")
+        yield mock
+
+
+@pytest.fixture(autouse=True)
 def mock_sleep():
-    """Mock asyncio.sleep to speed up tests."""
+    """
+    Mock asyncio.sleep to speed up tests.
+
+    This fixture runs automatically for all tests (autouse=True) to ensure
+    that tests don't actually sleep and run as fast as possible.
+    """
     with patch("asyncio.sleep", new_callable=AsyncMock) as mock:
         yield mock
 
