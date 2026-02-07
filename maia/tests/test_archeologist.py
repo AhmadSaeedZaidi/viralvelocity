@@ -83,6 +83,7 @@ async def test_hunt_history_handles_403_key_rotation():
     ):
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
+
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])
         mock_keys.size = 3
@@ -91,30 +92,26 @@ async def test_hunt_history_handles_403_key_rotation():
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
 
-        call_count = {"count": 0}
+        resp_403 = AsyncMock()
+        resp_403.status = 403
 
-        async def mock_get_context_enter():
-            call_count["count"] += 1
-            if call_count["count"] <= 2:
-                mock_response_403 = AsyncMock()
-                mock_response_403.status = 403
-                return mock_response_403
-            else:
-                mock_response_200 = AsyncMock()
-                mock_response_200.status = 200
-                mock_response_200.json = AsyncMock(return_value={"items": []})
-                return mock_response_200
+        resp_200 = AsyncMock()
+        resp_200.status = 200
+        resp_200.json = AsyncMock(return_value={"items": []})
 
-        mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = mock_get_context_enter
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        cm_403 = AsyncMock()
+        cm_403.__aenter__.return_value = resp_403
 
-        mock_session_instance.get.return_value = mock_get_context
+        cm_200 = AsyncMock()
+        cm_200.__aenter__.return_value = resp_200
+        side_effect = [cm_403, cm_403, cm_200] + [cm_200] * 10
+        mock_session_instance.get.side_effect = side_effect
+
         MockSession.return_value = mock_session_instance
 
         await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
 
-        assert call_count["count"] > 2
+        assert mock_session_instance.get.call_count >= 3
 
 
 @pytest.mark.asyncio
