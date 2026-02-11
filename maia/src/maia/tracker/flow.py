@@ -118,7 +118,7 @@ async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyEx
 
 
 @flow(name="run_tracker_cycle")
-async def tracker_flow(batch_size: int, executor: HydraExecutor) -> Dict[str, Any]:
+async def tracker_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str, Any]:
     """
     Execute a complete Tracker cycle: fetch stale videos, update stats.
 

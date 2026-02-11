@@ -338,4 +338,4 @@ async def execute_youtube_request_async(
     return await executor.execute_async(request_func)
 
 
-HydraExecutor = ResiliencyExecutor
+ResiliencyExecutor = ResiliencyExecutor

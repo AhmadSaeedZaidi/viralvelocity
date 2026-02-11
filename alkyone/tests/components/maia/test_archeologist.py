@@ -210,7 +210,8 @@ async def test_archeologist_campaign_multi_month(dao):
         for month in range(1, 13):
             # Check that at least one call had this year and month
             calls_with_month = [
-                call for call in mock_hunt.call_args_list
+                call
+                for call in mock_hunt.call_args_list
                 if len(call[0]) >= 2 and call[0][0] == 2010 and call[0][1] == month
             ]
             assert len(calls_with_month) == 1, f"Month {month} should be called exactly once"
