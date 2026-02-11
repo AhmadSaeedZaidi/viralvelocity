@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import functools
 import logging
+import os
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import cv2
@@ -42,25 +43,73 @@ async def _store_visuals_to_vault_with_retry(vid_id: str, frames: List[Tuple[int
 
 
 class VideoStreamer:
-    """Helper class for extracting video information and processing streams."""
+    """
+    Helper class for extracting video information with anti-detection measures.
+    """
 
     def __init__(self, video_id: str):
         self.video_id = video_id
         self.url = f"https://www.youtube.com/watch?v={video_id}"
 
     def get_info(self) -> Dict[str, Any]:
-        """Extract video information including stream URL and metadata."""
-        # Request progressive mp4 or HTTP-compatible streams to avoid complex DASH handling in OpenCV
+        """
+        Extract video information using a rotating client strategy.
+
+        Priority Strategy:
+        1. Cookies (if available) - Most reliable
+        2. Android Client - Often bypasses PO Token requirements
+        3. Web Safari - Looser bot heuristics than Chrome
+        4. Web - Default (most likely to hit blocks)
+
+        Returns:
+            Dictionary with video metadata including stream URL, chapters, heatmap, duration
+        """
+        cookie_path = os.getenv("MAIA_COOKIES_PATH", "cookies.txt")
+        proxy_url = os.getenv("MAIA_PROXY_URL")
+
+        # STRATEGY 1: Client Rotation
+        client_strategy = ["android", "web_safari", "web"]
+
+        # STRATEGY 2: PO Token / Visitor Data
+        extractor_args = {
+            "youtube": {
+                "player_client": client_strategy,
+                "skip": ["hls", "dash"],
+                "player_skip": ["js", "configs", "webpage"],
+            }
+        }
+
         ydl_opts = {
             "format": "best[ext=mp4]/best[protocol^=http]",
             "quiet": True,
             "no_warnings": True,
             "force_ipv4": True,
+            "cookiefile": cookie_path if os.path.exists(cookie_path) else None,
+            "proxy": proxy_url,
+            "extractor_args": extractor_args,
+            "retries": 10,
+            "fragment_retries": 10,
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # yt-dlp extract_info returns Any (untyped), so we must cast it to satisfy mypy
-            info = ydl.extract_info(self.url, download=False)
-            return cast(Dict[str, Any], info) if info else {}
+        ydl_opts = {k: v for k, v in ydl_opts.items() if v is not None}
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(self.url, download=False)
+                return cast(Dict[str, Any], info) if info else {}
+        except yt_dlp.utils.DownloadError as e:
+            # Log stealth failure clearly
+            logger.error(
+                f"Stealth extraction failed for {self.video_id}. "
+                f"Client rotation exhausted. Error: {e}"
+            )
+            # Check if this is a rate limit that should trigger Resiliency Strategy
+            error_str = str(e).lower()
+            if "429" in error_str or "too many requests" in error_str:
+                logger.critical(
+                    f"Rate limit detected for {self.video_id}. "
+                    "Consider enabling MAIA_PROXY_URL or rotating IP."
+                )
+            raise
 
     def extract_heatmap_peaks(
         self, heatmap_data: List[Dict[str, Any]], top_n: int = 5
@@ -69,7 +118,6 @@ class VideoStreamer:
         if not heatmap_data:
             return []
 
-        # Filter valid points and sort by replay intensity (value)
         valid_points = [p for p in heatmap_data if "value" in p and "start_time" in p]
         sorted_points = sorted(valid_points, key=lambda x: x.get("value", 0), reverse=True)
 
@@ -109,7 +157,6 @@ def _extract_frames_blocking(
 
             frame_idx = int(ts * fps)
 
-            # Seeking on remote HTTP streams is network-intensive
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
 
             ret, frame = cap.read()

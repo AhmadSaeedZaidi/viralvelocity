@@ -117,6 +117,9 @@ services:
       PREFECT_API_KEY: ${PREFECT_API_KEY}
       PREFECT_API_URL: ${PREFECT_API_URL}
       VAULT_PATH: ${VAULT_PATH:-/vault}
+      # Stealth Protocol Configuration (Optional)
+      MAIA_COOKIES_PATH: ${MAIA_COOKIES_PATH:-}
+      MAIA_PROXY_URL: ${MAIA_PROXY_URL:-}
     restart: unless-stopped
 
   # Legacy: Collector App (for backward compatibility)

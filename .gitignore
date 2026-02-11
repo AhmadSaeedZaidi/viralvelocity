@@ -107,3 +107,4 @@ temp_downloads/
 # --- Misc ---
 *.sh
 local-doc-slop/
+context/

@@ -104,7 +104,6 @@ async def test_scribe_handles_resiliency_strategy(dao):
         mock_loader_instance.fetch = MagicMock(side_effect=SystemExit("429 Rate Limit"))
         MockLoader.return_value = mock_loader_instance
 
-        # Verify SystemExit is propagated
         with pytest.raises(SystemExit):
             await run_scribe_cycle(batch_size=1)
 

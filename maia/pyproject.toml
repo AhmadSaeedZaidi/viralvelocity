@@ -22,6 +22,7 @@ dependencies = [
     "tenacity>=8.2.0,<9.0.0",
     "opencv-python>=4.9.0,<5.0.0",
     "yt-dlp>=2024.1.0,<2025.0.0",
+    "yt-dlp-get-pot>=0.1.0",
     "numpy>=1.26.0,<2.0.0",
     "youtube-transcript-api>=0.6.1,<1.0.0",
 ]
