@@ -61,7 +61,7 @@ class TestJanitorArchival:
         # Verify stats were removed from hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp < %s",
-            (datetime.now(timezone.utc) - timedelta(days=7),)
+            (datetime.now(timezone.utc) - timedelta(days=7),),
         )
         assert len(remaining) == 0
 
@@ -104,7 +104,7 @@ class TestJanitorArchival:
         # Verify stats were removed from hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp < %s",
-            (datetime.now(timezone.utc) - timedelta(days=7),)
+            (datetime.now(timezone.utc) - timedelta(days=7),),
         )
         assert len(remaining) == 0
 
@@ -148,8 +148,7 @@ class TestJanitorArchival:
 
         # Verify new stats remain in hot tier
         remaining = await dao._fetch_all(
-            "SELECT * FROM video_stats_log WHERE timestamp >= %s",
-            (now - timedelta(days=7),)
+            "SELECT * FROM video_stats_log WHERE timestamp >= %s", (now - timedelta(days=7),)
         )
         assert len(remaining) == 50
 
@@ -179,8 +178,7 @@ class TestJanitorArchival:
 
         # Verify stats were NOT deleted from hot tier (transaction rollback)
         remaining = await dao._fetch_all(
-            "SELECT * FROM video_stats_log WHERE video_id = %s",
-            ("VIDEO_001",)
+            "SELECT * FROM video_stats_log WHERE video_id = %s", ("VIDEO_001",)
         )
         assert len(remaining) == 1, "Stats should remain after vault failure"
 
@@ -215,7 +213,7 @@ class TestJanitorArchival:
         # Verify stats were removed from hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp < %s",
-            (datetime.now(timezone.utc) - timedelta(days=7),)
+            (datetime.now(timezone.utc) - timedelta(days=7),),
         )
         assert len(remaining) == 0
 

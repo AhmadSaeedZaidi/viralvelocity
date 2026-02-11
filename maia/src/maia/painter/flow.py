@@ -2,9 +2,9 @@
 
 import argparse
 import asyncio
-import logging
 import functools
-from typing import Any, Dict, List, Tuple, Optional, Set
+import logging
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, TypeVar, Union, cast
 
 import cv2
 import numpy as np
@@ -14,16 +14,19 @@ from atlas.vault import vault
 from prefect import flow, get_run_logger, task
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
 
-# Configure module-level logger
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
 
-def run_in_executor(func):
+
+def run_in_executor(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
     """Decorator to run blocking functions in the default executor."""
+
     @functools.wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args: Any, **kwargs: Any) -> T:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
     return wrapper
 
 
@@ -47,39 +50,30 @@ class VideoStreamer:
 
     def get_info(self) -> Dict[str, Any]:
         """Extract video information including stream URL and metadata."""
-        # 'best' can return DASH (video-only) streams which OpenCV cannot handle easily.
-        # We explicitly request a progressive mp4 or a stream served via http/https protocol
-        # that includes both audio/video or is compatible with simple players.
+        # Request progressive mp4 or HTTP-compatible streams to avoid complex DASH handling in OpenCV
         ydl_opts = {
             "format": "best[ext=mp4]/best[protocol^=http]",
             "quiet": True,
             "no_warnings": True,
-            "force_ipv4": True,  # Improves stability in some containerized envs
+            "force_ipv4": True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # download=False ensures we just get the metadata/URL
-            result: Dict[str, Any] = ydl.extract_info(self.url, download=False)
-            return result
+            # yt-dlp extract_info returns Any (untyped), so we must cast it to satisfy mypy
+            info = ydl.extract_info(self.url, download=False)
+            return cast(Dict[str, Any], info) if info else {}
 
     def extract_heatmap_peaks(
         self, heatmap_data: List[Dict[str, Any]], top_n: int = 5
     ) -> List[float]:
-        """
-        Extract top N peaks from video heatmap data.
-        
-        Heatmap data from yt-dlp is typically a list of segments with 'value' (0-1).
-        We want the start_time of the segments with the highest replay intensity.
-        """
+        """Extract top N peaks from video heatmap data."""
         if not heatmap_data:
             return []
 
-        # Filter out invalid points and sort by 'value' (replay frequency) descending
+        # Filter valid points and sort by replay intensity (value)
         valid_points = [p for p in heatmap_data if "value" in p and "start_time" in p]
         sorted_points = sorted(valid_points, key=lambda x: x.get("value", 0), reverse=True)
-        
-        # Take the top N viral moments
-        top_points = sorted_points[:top_n]
 
+        top_points = sorted_points[:top_n]
         return [p.get("start_time", 0.0) for p in top_points]
 
 
@@ -91,16 +85,12 @@ async def fetch_painter_targets_task(batch_size: int) -> List[Dict[str, Any]]:
 
 
 def _extract_frames_blocking(
-    stream_url: str,
-    target_timestamps: List[float],
-    duration: float,
-    run_logger: logging.Logger
+    stream_url: str, target_timestamps: List[float], duration: float, run_logger: Any
 ) -> List[Tuple[int, bytes]]:
     """
     Blocking worker function for OpenCV operations.
     Executed in a thread pool to avoid blocking the asyncio event loop.
     """
-    # OpenCV's VideoCapture is blocking and not async-friendly.
     cap = cv2.VideoCapture(stream_url)
     frames_to_vault: List[Tuple[int, bytes]] = []
 
@@ -110,7 +100,6 @@ def _extract_frames_blocking(
             return []
 
         fps = cap.get(cv2.CAP_PROP_FPS)
-        # Fallback if FPS is missing/zero (common in some streams)
         if fps <= 0:
             fps = 30.0
 
@@ -119,14 +108,12 @@ def _extract_frames_blocking(
                 continue
 
             frame_idx = int(ts * fps)
-            
-            # Seeking on remote HTTP streams is slow (O(N) network operation).
-            # This logic is correct for requirements but performant only on fast connections.
+
+            # Seeking on remote HTTP streams is network-intensive
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            
+
             ret, frame = cap.read()
             if ret:
-                # Encode directly to memory buffer (.jpg)
                 encode_ret, buffer = cv2.imencode(".jpg", frame)
                 if encode_ret:
                     image_bytes = buffer.tobytes()
@@ -137,7 +124,6 @@ def _extract_frames_blocking(
     except Exception as e:
         run_logger.error(f"Error during frame extraction: {e}")
     finally:
-        # Crucial: Always release the capture to free sockets/file descriptors
         cap.release()
 
     return frames_to_vault
@@ -145,27 +131,19 @@ def _extract_frames_blocking(
 
 @task(name="process_frames")
 async def process_frames_task(video: Dict[str, Any]) -> None:
-    """
-    Extract and store keyframes for a single video.
-    
-    Logic:
-    1. Fetch metadata (chapters, heatmap, stream URL).
-    2. Identify 'Target Timestamps' based on chapters and viral peaks.
-    3. Extract frames at those timestamps.
-    4. Store to Vault.
-    """
+    """Extract and store keyframes for a single video."""
     dao = MaiaDAO()
     run_logger = get_run_logger()
     vid_id = video["id"]
 
     try:
-        # 1. Get Info (IO Bound - runs in thread to be safe)
+        # 1. Fetch Metadata
         streamer = VideoStreamer(vid_id)
         info = await asyncio.to_thread(streamer.get_info)
 
         stream_url = info.get("url")
         chapters = info.get("chapters", [])
-        heatmap = info.get("heatmap", [])  # 'heatmap' key from yt-dlp
+        heatmap = info.get("heatmap", [])
         duration = info.get("duration", 0)
 
         if not stream_url:
@@ -176,25 +154,25 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
         # 2. Identify Target Timestamps
         target_timestamps: Set[float] = set()
 
-        # Requirement A: Check Chapters
         if chapters:
             run_logger.info(f"Adding {len(chapters)} chapter start points for {vid_id}")
             for chap in chapters:
                 target_timestamps.add(chap.get("start_time", 0.0))
 
-        # Requirement B: Check Histogram (Heatmap)
         if heatmap:
             peaks = streamer.extract_heatmap_peaks(heatmap, top_n=5)
             run_logger.info(f"Adding {len(peaks)} viral peaks for {vid_id}")
             for p in peaks:
                 target_timestamps.add(p)
 
-        # Fallback: If no smart metadata, use linear spacing
+        # Fallback: Linear spacing if no rich metadata exists
         if not target_timestamps:
             run_logger.info(f"No chapters/heatmap for {vid_id}. Using fallback linear scaling.")
             num_frames = 5
-            if duration > 600: num_frames = 10
-            if duration > 1800: num_frames = 20
+            if duration > 600:
+                num_frames = 10
+            if duration > 1800:
+                num_frames = 20
 
             if duration > 0:
                 steps = np.linspace(0, duration - 1, num_frames)
@@ -203,13 +181,9 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
         sorted_timestamps = sorted(list(target_timestamps))
         run_logger.info(f"Targeting {len(sorted_timestamps)} frames at: {sorted_timestamps}")
 
-        # 3. Extract Frames (CPU/IO Blocking - OFF THE MAIN THREAD)
+        # 3. Extract Frames (Off-thread)
         frames_to_vault = await asyncio.to_thread(
-            _extract_frames_blocking, 
-            stream_url, 
-            sorted_timestamps, 
-            duration, 
-            run_logger
+            _extract_frames_blocking, stream_url, sorted_timestamps, duration, run_logger
         )
 
         if not frames_to_vault:
@@ -254,10 +228,21 @@ async def painter_flow(batch_size: int) -> Dict[str, Any]:
 
 class PainterAgent:
     """Painter Agent: Video keyframe extraction."""
+
     name = "painter"
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(self.name)
+
+    @staticmethod
+    def add_cli_args(parser: argparse.ArgumentParser) -> None:
+        """Register command-line arguments for the Painter agent."""
+        parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=5,
+            help="Number of videos to process per cycle (default: 5)",
+        )
 
     async def run(self, batch_size: int = 5, **kwargs: Any) -> Dict[str, Any]:
         return await painter_flow(batch_size=batch_size)
@@ -271,3 +256,30 @@ async def fetch_painter_targets(batch_size: int = 5) -> Any:
 @task(name="process_frames")
 async def process_frames(video: Dict[str, Any]) -> None:
     await process_frames_task(video)
+
+
+@flow(name="run_painter_cycle")
+async def run_painter_cycle(batch_size: int = 5) -> None:
+    """Legacy wrapper for backward compatibility."""
+    agent = PainterAgent()
+    await agent.run(batch_size=batch_size)
+
+
+def main() -> None:
+    """Entry point for running the Painter as a standalone service."""
+    try:
+        agent = PainterAgent()
+        asyncio.run(agent.run())
+    except KeyboardInterrupt:
+        logger.info("Painter stopped by user (SIGINT)")
+    except Exception as e:
+        logger.exception(f"Painter failed with error: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    main()
