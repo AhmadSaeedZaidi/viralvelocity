@@ -58,6 +58,15 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
 
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
+        # Try to create TimescaleDB, but ignore if already loaded with different version
+        try:
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+        except Exception as e:
+            # TimescaleDB already loaded - that's OK for tests
+            if "already been loaded" not in str(e):
+                raise
+            logger.debug(f"TimescaleDB already loaded: {e}")
+
         import atlas
 
         schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
@@ -67,7 +76,16 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
 
         with open(schema_path, "r") as f:
             sql_script = f.read()
-            await conn.execute(sql_script)
+
+            # Filter out CREATE EXTENSION commands (we already created them above)
+            # This prevents duplicate extension errors with TimescaleDB
+            filtered_lines = []
+            for line in sql_script.split("\n"):
+                if not line.strip().startswith("CREATE EXTENSION"):
+                    filtered_lines.append(line)
+
+            filtered_script = "\n".join(filtered_lines)
+            await conn.execute(filtered_script)
 
     yield
 

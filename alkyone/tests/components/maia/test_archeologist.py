@@ -10,6 +10,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from maia.archeologist import hunt_history, run_archeology_campaign
 
 
@@ -295,7 +296,7 @@ async def test_archeologist_time_window_calculation(dao):
         assert params["publishedBefore"].startswith("2011-01-01")
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dao(fresh_db):
     """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO

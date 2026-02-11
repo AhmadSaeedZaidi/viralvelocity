@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 import pytest
+import pytest_asyncio
 
 
 @pytest.mark.integration
@@ -170,7 +171,7 @@ class TestAdaptiveScheduling:
         assert len(files) > 0, "Metrics should be uploaded to vault"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dao(fresh_db):
     """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO

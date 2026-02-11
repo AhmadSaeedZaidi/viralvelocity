@@ -14,6 +14,7 @@ import logging
 import socket
 
 import pytest
+import pytest_asyncio
 import yt_dlp
 from maia.painter.flow import run_painter_cycle
 
@@ -30,7 +31,7 @@ def is_network_available() -> bool:
         return False
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dao(fresh_db):
     """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO

@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from unittest.mock import patch
 
 import pytest
+import pytest_asyncio
 
 
 @pytest.mark.integration
@@ -316,7 +317,7 @@ class TestJanitorArchival:
         assert elapsed < 60, f"Archival took {elapsed}s, expected < 60s"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dao(fresh_db):
     """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO

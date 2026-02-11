@@ -12,6 +12,7 @@ from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from maia.scribe.flow import process_transcript, run_scribe_cycle
 
 
@@ -269,7 +270,7 @@ async def test_scribe_retry_logic_on_network_errors(dao):
         assert video["has_transcript"] is True
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def dao(fresh_db):
     """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO
