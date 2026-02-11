@@ -297,15 +297,15 @@ async def on_video_discovered(data: dict):
     logger.info(f"New video: {data['video_id']}")
 ```
 
-### 4. Hydra Protocol
+### 4. Resiliency Strategy
 
-Use HydraExecutor for all external API calls:
+Use ResiliencyExecutor for all external API calls:
 
 ```python
-from atlas.utils import KeyRing, HydraExecutor
+from atlas.utils import KeyRing, ResiliencyExecutor
 
 keys = KeyRing("hunting")
-executor = HydraExecutor(keys, agent_name="hunter")
+executor = ResiliencyExecutor(keys, agent_name="hunter")
 
 async def make_request(api_key: str):
     # API call logic
@@ -369,8 +369,8 @@ pytest --cov=atlas --cov=maia --cov-report=term
 Use conventional commit format:
 
 ```
-feat: add Ghost Tracking for infinite video monitoring
-fix: resolve Hydra Protocol exit code handling
+feat: add Adaptive Scheduling for infinite video monitoring
+fix: resolve Resiliency Strategy exit code handling
 docs: update quickstart guide
 ```
 

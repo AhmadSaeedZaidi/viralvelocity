@@ -208,11 +208,11 @@ pleiades/
 │   │   ├── vault.py         # HF/GCS storage
 │   │   ├── events.py        # Event bus
 │   │   ├── notifier.py      # Alerts
-│   │   ├── utils.py         # KeyRing, HydraExecutor
+│   │   ├── utils.py         # KeyRing, ResiliencyExecutor
 │   │   ├── schema.sql       # Database schema
 │   │   └── adapters/
 │   │       ├── maia.py      # MaiaDAO
-│   │       └── maia_adaptive_scheduling.py # Ghost Tracking
+│   │       └── maia_adaptive_scheduling.py # Adaptive Scheduling
 │   ├── docs/                # Atlas-specific docs
 │   └── tests/               # Unit tests
 │
@@ -243,7 +243,7 @@ from maia.hunter import run_hunter_cycle
 
 # Run discovery cycle
 stats = await run_hunter_cycle(batch_size=10)
-# Discovers videos, adds to watchlist (Ghost Tracking)
+# Discovers videos, adds to watchlist (Adaptive Scheduling)
 ```
 
 ### Monitoring (Tracker)
@@ -280,8 +280,8 @@ vault.append_metrics(metrics_data)
 
 - **Throughput**: 100k+ videos/day
 - **SQL Footprint**: <0.5 GB (constant)
-- **Tracking Duration**: Infinite (Ghost Tracking)
-- **API Efficiency**: Multi-key rotation (Hydra Protocol)
+- **Tracking Duration**: Infinite (Adaptive Scheduling)
+- **API Efficiency**: Multi-key rotation (Resiliency Strategy)
 - **Storage**: Unlimited (compressed Parquet in Vault)
 
 ---

@@ -212,7 +212,7 @@ class KeyRing:
         return len(self.keys)
 
 
-class HydraExecutor:
+class ResiliencyExecutor:
     """
     Unified executor for Google API requests with Resiliency Strategy termination.
 
@@ -334,5 +334,10 @@ async def execute_youtube_request_async(
     Raises:
         SystemExit: On key exhaustion (Resiliency Strategy)
     """
-    executor = HydraExecutor(key_ring, agent_name)
+    executor = ResiliencyExecutor(key_ring, agent_name)
     return await executor.execute_async(request_func)
+
+
+# Backward compatibility alias - HydraExecutor is now ResiliencyExecutor
+# This alias ensures existing code continues to work during migration
+HydraExecutor = ResiliencyExecutor

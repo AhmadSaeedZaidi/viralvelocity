@@ -18,14 +18,14 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
-from atlas.utils import HydraExecutor, KeyRing
+from atlas.utils import ResiliencyExecutor, KeyRing
 from atlas.vault import vault
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
 tracker_keys = KeyRing("tracking")
-tracker_executor = HydraExecutor(tracker_keys, agent_name="tracker")  # Resiliency strategy
+tracker_executor = ResiliencyExecutor(tracker_keys, agent_name="tracker")  # Resiliency strategy
 
 
 @task(name="fetch_targets")  # type: ignore[misc]
@@ -87,7 +87,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         "id": id_str,
     }
 
-    # Define request function for HydraExecutor
+    # Define request function for ResiliencyExecutor
     async def make_request(api_key: str) -> Dict[str, Any]:
         params["key"] = api_key
 

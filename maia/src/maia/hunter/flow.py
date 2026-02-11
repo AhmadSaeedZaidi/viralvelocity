@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
-from atlas.utils import HydraExecutor, KeyRing
+from atlas.utils import ResiliencyExecutor, KeyRing
 from atlas.vault import vault
 from prefect import flow, get_run_logger, task
 
@@ -32,7 +32,7 @@ async def fetch_batch_task(batch_size: int) -> List[Dict[str, Any]]:
 
 @task(name="search_youtube")
 async def search_youtube_task(
-    topic: Dict[str, Any], executor: HydraExecutor
+    topic: Dict[str, Any], executor: ResiliencyExecutor
 ) -> Dict[str, Any] | None:
     """Search YouTube API for videos matching the topic query."""
     run_logger = get_run_logger()
@@ -156,13 +156,13 @@ async def ingest_results_task(topic: Dict[str, Any], response: Dict[str, Any]) -
 
 
 @flow(name="run_hunter_cycle")
-async def hunter_flow(batch_size: int, executor: HydraExecutor) -> Dict[str, Any]:
+async def hunter_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str, Any]:
     """
     Execute a complete Hunter cycle: fetch queries, search YouTube, ingest results.
 
     Args:
         batch_size: Number of queries to process in this cycle
-        executor: HydraExecutor for API key rotation
+        executor: ResiliencyExecutor for API key rotation
 
     Returns:
         Dictionary with cycle statistics
@@ -233,7 +233,7 @@ class HunterAgent:
         """Initialize the Hunter agent with its KeyRing and executor."""
         self.logger = logging.getLogger(self.name)
         self.keys = KeyRing("hunting")
-        self.executor = HydraExecutor(self.keys, agent_name="hunter")
+        self.executor = ResiliencyExecutor(self.keys, agent_name="hunter")
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -280,7 +280,7 @@ async def fetch_batch(batch_size: int = 10) -> Any:
 async def search_youtube(topic: Dict[str, Any]) -> Any:
     """Legacy function wrapper for backward compatibility."""
     keys = KeyRing("hunting")
-    executor = HydraExecutor(keys, agent_name="hunter")
+    executor = ResiliencyExecutor(keys, agent_name="hunter")
     return await search_youtube_task(topic, executor)
 
 

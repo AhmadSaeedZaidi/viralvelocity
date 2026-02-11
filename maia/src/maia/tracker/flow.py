@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
-from atlas.utils import HydraExecutor, KeyRing
+from atlas.utils import ResiliencyExecutor, KeyRing
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -30,13 +30,13 @@ async def fetch_targets_task(batch_size: int) -> List[Dict[str, Any]]:
 
 
 @task(name="update_stats")
-async def update_stats_task(videos: List[Dict[str, Any]], executor: HydraExecutor) -> int:
+async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyExecutor) -> int:
     """
     Fetch and update statistics for a batch of videos.
 
     Args:
         videos: List of video records from fetch_targets
-        executor: HydraExecutor for API key rotation
+        executor: ResiliencyExecutor for API key rotation
 
     Returns:
         Number of videos successfully updated
@@ -124,7 +124,7 @@ async def tracker_flow(batch_size: int, executor: HydraExecutor) -> Dict[str, An
 
     Args:
         batch_size: Number of videos to process (max 50 for YouTube API)
-        executor: HydraExecutor for API key rotation
+        executor: ResiliencyExecutor for API key rotation
 
     Returns:
         Dictionary with cycle statistics
@@ -184,7 +184,7 @@ class TrackerAgent:
         """Initialize the Tracker agent with its KeyRing and executor."""
         self.logger = logging.getLogger(self.name)
         self.keys = KeyRing("tracking")
-        self.executor = HydraExecutor(self.keys, agent_name="tracker")
+        self.executor = ResiliencyExecutor(self.keys, agent_name="tracker")
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -231,7 +231,7 @@ async def fetch_targets(batch_size: int = 50) -> Any:
 async def update_stats(videos: List[Dict[str, Any]]) -> int:
     """Legacy function wrapper for backward compatibility."""
     keys = KeyRing("tracking")
-    executor = HydraExecutor(keys, agent_name="tracker")
+    executor = ResiliencyExecutor(keys, agent_name="tracker")
     return await update_stats_task(videos, executor)
 
 
