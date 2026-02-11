@@ -338,6 +338,4 @@ async def execute_youtube_request_async(
     return await executor.execute_async(request_func)
 
 
-# Backward compatibility alias - HydraExecutor is now ResiliencyExecutor
-# This alias ensures existing code continues to work during migration
 HydraExecutor = ResiliencyExecutor

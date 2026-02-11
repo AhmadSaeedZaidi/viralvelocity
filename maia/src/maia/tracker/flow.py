@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
-from atlas.utils import ResiliencyExecutor, KeyRing
+from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)

@@ -197,14 +197,23 @@ async def test_archeologist_key_rotation_on_403(dao):
 @pytest.mark.asyncio
 async def test_archeologist_campaign_multi_month(dao):
     """Test Archeologist campaign iterates through multiple months."""
-    with (patch("maia.archeologist.flow.hunt_history") as mock_hunt,):
+    with patch("maia.archeologist.flow.hunt_history_task") as mock_hunt:
         mock_hunt.return_value = AsyncMock()
+
+        # Run campaign for 2010 (12 months)
         await run_archeology_campaign(start_year=2010, end_year=2010)
 
+        # Verify hunt_history_task was called for all 12 months of 2010
         assert mock_hunt.call_count == 12
 
+        # Verify correct month sequence (should be called with year, month, keys)
         for month in range(1, 13):
-            mock_hunt.assert_any_call(2010, month)
+            # Check that at least one call had this year and month
+            calls_with_month = [
+                call for call in mock_hunt.call_args_list
+                if len(call[0]) >= 2 and call[0][0] == 2010 and call[0][1] == month
+            ]
+            assert len(calls_with_month) == 1, f"Month {month} should be called exactly once"
 
 
 @pytest.mark.integration

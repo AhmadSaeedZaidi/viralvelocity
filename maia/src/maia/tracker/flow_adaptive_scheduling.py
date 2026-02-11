@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
-from atlas.utils import ResiliencyExecutor, KeyRing
+from atlas.utils import KeyRing, ResiliencyExecutor
 from atlas.vault import vault
 from prefect import flow, get_run_logger, task
 
