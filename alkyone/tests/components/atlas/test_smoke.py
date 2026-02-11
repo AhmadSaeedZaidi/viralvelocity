@@ -34,37 +34,35 @@ async def test_database_connectivity(reset_db_singleton):
 def test_vault_configuration():
     """
     Verify vault provider is properly configured with REAL credentials.
-    
+
     This test ensures that HF_TOKEN and HF_DATASET_ID are real values,
     not mock placeholders.
     """
     import os
-    
+
     provider = settings.VAULT_PROVIDER
 
     if provider == "huggingface":
         # Validate environment variables
         hf_token = os.getenv("HF_TOKEN")
         hf_dataset_id = os.getenv("HF_DATASET_ID")
-        
-        assert hf_token is not None, (
-            "HF_TOKEN not set! Set it with: export HF_TOKEN='hf_xxxxxxxxxxxxx'"
-        )
-        assert hf_token != "mock_token", (
-            "HF_TOKEN is 'mock_token'! Use a real token."
-        )
-        
-        assert hf_dataset_id is not None, (
-            "HF_DATASET_ID not set! Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
-        )
-        assert hf_dataset_id != "mock/dataset", (
-            "HF_DATASET_ID is 'mock/dataset'! Use a real dataset."
-        )
-        
+
+        assert (
+            hf_token is not None
+        ), "HF_TOKEN not set! Set it with: export HF_TOKEN='hf_xxxxxxxxxxxxx'"
+        assert hf_token != "mock_token", "HF_TOKEN is 'mock_token'! Use a real token."
+
+        assert (
+            hf_dataset_id is not None
+        ), "HF_DATASET_ID not set! Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
+        assert (
+            hf_dataset_id != "mock/dataset"
+        ), "HF_DATASET_ID is 'mock/dataset'! Use a real dataset."
+
         # Validate settings
         assert settings.HF_DATASET_ID is not None, "HF_DATASET_ID not configured in settings"
         assert settings.HF_TOKEN is not None, "HF_TOKEN not configured in settings"
-        
+
     elif provider == "gcs":
         assert settings.GCS_BUCKET_NAME is not None, "GCS_BUCKET_NAME not configured"
 

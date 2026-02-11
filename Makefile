@@ -15,6 +15,7 @@ install:
 	$(MAKE) -C alkyone install
 
 lint-local:
+	source .venv/bin/activate
 	$(MAKE) -C atlas lint-local
 	$(MAKE) -C maia lint-local
 	$(MAKE) -C alkyone lint-local

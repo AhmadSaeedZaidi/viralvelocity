@@ -24,8 +24,7 @@ class TestAdaptiveScheduling:
 
         # Verify they were added by querying watchlist table
         watchlist = await dao._fetch_all(
-            "SELECT video_id FROM watchlist WHERE video_id IN %s",
-            (tuple(video_ids),)
+            "SELECT video_id FROM watchlist WHERE video_id IN %s", (tuple(video_ids),)
         )
         assert len(watchlist) == 3
 
@@ -130,13 +129,12 @@ class TestAdaptiveScheduling:
         await dao.add_to_watchlist(video_id, tier="HOURLY")
 
         await dao.mark_video_done(video_id)
-        
+
         # Verify watchlist entry exists
         watchlist_entry = await dao._fetch_one(
-            "SELECT * FROM watchlist WHERE video_id = %s",
-            (video_id,)
+            "SELECT * FROM watchlist WHERE video_id = %s", (video_id,)
         )
-        
+
         # Adaptive Scheduling means video stays in watchlist
         assert watchlist_entry is not None
         assert watchlist_entry["video_id"] == video_id

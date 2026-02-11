@@ -29,26 +29,26 @@ async def system_init() -> AsyncGenerator[None, None]:
     Validates that HuggingFace credentials are configured for integration tests.
     """
     logger.info("Alkyone: Initializing System for Testing...")
-    
+
     # Validate HuggingFace credentials for real integration tests
     if not os.getenv("HF_TOKEN"):
         logger.warning(
             "⚠️  HF_TOKEN not set! Integration tests requiring vault will fail. "
             "Set it with: export HF_TOKEN='hf_xxxxx'"
         )
-    
+
     if not os.getenv("HF_DATASET_ID"):
         logger.warning(
             "⚠️  HF_DATASET_ID not set! Using fallback or tests will fail. "
             "Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
         )
-    
+
     await db.initialize()
     yield
-    
+
     # Cleanup uploaded files from HuggingFace after session
     await _cleanup_hf_uploads()
-    
+
     await db.close()
     logger.info("Alkyone: System Teardown Complete.")
 
@@ -96,25 +96,25 @@ def track_hf_upload(path: str) -> None:
 async def _cleanup_hf_uploads() -> None:
     """Clean up all files uploaded to HuggingFace during tests."""
     global _uploaded_files
-    
+
     if not _uploaded_files:
         logger.info("No HuggingFace uploads to clean up.")
         return
-    
+
     logger.info(f"Cleaning up {len(_uploaded_files)} files from HuggingFace...")
-    
+
     try:
         from huggingface_hub import HfApi
-        
+
         token = os.getenv("HF_TOKEN")
         repo_id = os.getenv("HF_DATASET_ID")
-        
+
         if not token or not repo_id:
             logger.warning("Cannot cleanup HF uploads: HF_TOKEN or HF_DATASET_ID not set")
             return
-        
+
         api = HfApi(token=token)
-        
+
         for file_path in _uploaded_files:
             try:
                 api.delete_file(
@@ -126,10 +126,10 @@ async def _cleanup_hf_uploads() -> None:
                 logger.debug(f"Deleted HF file: {file_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete {file_path}: {e}")
-        
+
         logger.info("HuggingFace cleanup complete.")
         _uploaded_files.clear()
-        
+
     except ImportError:
         logger.warning("huggingface_hub not installed, skipping cleanup")
     except Exception as e:
