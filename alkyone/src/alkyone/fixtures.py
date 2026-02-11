@@ -6,7 +6,6 @@ from typing import Any, AsyncGenerator, Dict, List
 import pytest
 import pytest_asyncio
 from atlas.config import settings
-
 from atlas.db import db
 
 # --- ENVIRONMENT OVERRIDES ---
