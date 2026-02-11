@@ -1,4 +1,7 @@
-"""Integration tests for Adaptive Scheduling functionality."""
+"""Integration tests for Adaptive Scheduling functionality.
+
+Real Integration Testing: Uses real HuggingFace vault for metrics storage.
+"""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -11,17 +14,20 @@ class TestAdaptiveScheduling:
     """Test Adaptive Scheduling watchlist operations and Vault integration."""
 
     @pytest.mark.asyncio
-    async def test_add_to_watchlist(self, dao, mock_vault):
-        """Test adding videos to watchlist."""
+    async def test_add_to_watchlist(self, dao):
+        """Test adding videos to watchlist with real database."""
         video_ids = ["VIDEO_001", "VIDEO_002", "VIDEO_003"]
 
         # Add videos to watchlist
         for vid in video_ids:
             await dao.add_to_watchlist(vid, tier="HOURLY")
 
-        # Verify they were added (would query watchlist table in real test)
-        # In integration test, we'd verify with actual DB query
-        assert True  # Placeholder for real DB verification
+        # Verify they were added by querying watchlist table
+        watchlist = await dao._fetch_all(
+            "SELECT video_id FROM watchlist WHERE video_id IN %s",
+            (tuple(video_ids),)
+        )
+        assert len(watchlist) == 3
 
     @pytest.mark.asyncio
     async def test_fetch_tracking_batch(self, dao):
@@ -104,9 +110,9 @@ class TestAdaptiveScheduling:
         assert next_time <= now + timedelta(days=7, hours=1)
 
     @pytest.mark.asyncio
-    async def test_adaptive_scheduling_survives_janitor(self, dao, mock_vault):
+    async def test_adaptive_scheduling_survives_janitor(self, dao):
         """Test that watchlist persists after video cleanup (Adaptive Scheduling)."""
-        video_id = "VIDEO_GHOST"
+        video_id = "VIDEO_PERSISTENT"
 
         video_data = {
             "id": {"videoId": video_id},
@@ -124,26 +130,32 @@ class TestAdaptiveScheduling:
         await dao.add_to_watchlist(video_id, tier="HOURLY")
 
         await dao.mark_video_done(video_id)
-        batch = await dao.fetch_tracking_batch(batch_size=10)
-        video_ids = [v["video_id"] for v in batch]
-
-        assert video_id in video_ids or True
+        
+        # Verify watchlist entry exists
+        watchlist_entry = await dao._fetch_one(
+            "SELECT * FROM watchlist WHERE video_id = %s",
+            (video_id,)
+        )
+        
+        # Adaptive Scheduling means video stays in watchlist
+        assert watchlist_entry is not None
+        assert watchlist_entry["video_id"] == video_id
 
     @pytest.mark.asyncio
-    async def test_vault_metrics_storage(self, dao, mock_vault):
-        """Test metrics are properly stored in Vault via Adaptive Scheduling."""
+    async def test_vault_metrics_storage(self, dao):
+        """Test metrics are properly stored in real HuggingFace Vault via Adaptive Scheduling."""
         from atlas.vault import vault
 
         metrics_data = [
             {
-                "video_id": "VIDEO_001",
+                "video_id": "VIDEO_METRICS_001",
                 "views": 10000,
                 "likes": 500,
                 "comment_count": 50,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
             {
-                "video_id": "VIDEO_002",
+                "video_id": "VIDEO_METRICS_002",
                 "views": 5000,
                 "likes": 250,
                 "comment_count": 25,
@@ -151,32 +163,19 @@ class TestAdaptiveScheduling:
             },
         ]
 
-        vault.append_metrics(metrics_data, date="2026-01-15")
+        # Append to real Vault (HuggingFace)
+        test_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        vault.append_metrics(metrics_data, date=test_date)
 
-        assert "metrics/2026-01-15" in str(mock_vault) or True  # Placeholder
+        # Verify by attempting to list files (validates upload succeeded)
+        files = vault.list_files(f"metrics/date={test_date}")
+        assert len(files) > 0, "Metrics should be uploaded to vault"
 
 
 @pytest.fixture
-async def dao():
-    """Provide MaiaDAO instance for testing."""
+async def dao(fresh_db):
+    """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO
 
     dao_instance = MaiaDAO()
-
     yield dao_instance
-
-
-@pytest.fixture
-def mock_vault(monkeypatch):
-    """Mock vault for testing."""
-    storage = {}
-
-    def mock_append(data, date=None, hour=None):
-        key = f"metrics/{date}/{hour or '00'}/stats.parquet"
-        storage[key] = data
-
-    from atlas import vault
-
-    monkeypatch.setattr(vault, "append_metrics", mock_append)
-
-    return storage

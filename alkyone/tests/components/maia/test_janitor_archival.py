@@ -317,7 +317,7 @@ class TestJanitorArchival:
 
 
 @pytest.fixture
-async def dao():
+async def dao(fresh_db):
     """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO
 

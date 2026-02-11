@@ -2,12 +2,21 @@
 
 **Alkyone** is the dedicated integration and system testing module for Project Pleiades. It contains all integration tests, smoke tests, and system-level validation for Atlas, Maia, and other Pleiades components.
 
+## IMPORTANT: Real Integration Testing
+
+Alkyone implements **Real Integration Testing** - tests interact with actual external services:
+- **Real YouTube API** calls (video metadata, statistics, transcripts)
+- **Real HuggingFace Hub** storage (vault uploads)
+- **Real PostgreSQL** database (Neon)
+
+**No mocks** are used for external services. This ensures tests validate actual integration behavior.
+
 ## Purpose
 
 Alkyone separates integration/system tests from unit tests to maintain clean separation of concerns:
 
 - **Unit Tests** remain in component directories (`atlas/tests/`, `maia/tests/`)
-- **Integration Tests** live here in Alkyone
+- **Integration Tests** live here in Alkyone (use real services)
 - **Smoke Tests** for verifying live service connectivity
 - **System Tests** for end-to-end validation
 
@@ -60,21 +69,63 @@ Tests for edge cases, error handling, and data validation.
 - Partial failure handling
 - Boundary conditions
 
+## Prerequisites: Environment Setup
+
+Integration tests require **REAL credentials** for external services:
+
+### Required Environment Variables
+
+```bash
+# HuggingFace Vault (for storing test artifacts)
+export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+export HF_DATASET_ID="your-username/pleiades-test-vault"
+
+# YouTube Data API (for real API calls)
+export YOUTUBE_API_KEY_POOL_JSON='["AIzaSy..."]'
+
+# PostgreSQL Database (Neon or local)
+export DATABASE_URL="postgresql://user:pass@host/dbname"
+```
+
+### Setting Up Your Test HuggingFace Repo
+
+1. Create a new **Dataset** repository on HuggingFace:
+   - Go to https://huggingface.co/new-dataset
+   - Name: `pleiades-test-vault` (or any name you prefer)
+   - Visibility: **Private** (recommended)
+
+2. Generate a **Write token**:
+   - Go to https://huggingface.co/settings/tokens
+   - Create token with **Write** permissions
+   - Copy the token (starts with `hf_`)
+
+3. Set environment variables:
+   ```bash
+   export HF_TOKEN="hf_your_token_here"
+   export HF_DATASET_ID="your-username/pleiades-test-vault"
+   ```
+
+### Test Data Cleanup
+
+Alkyone automatically cleans up files uploaded to HuggingFace during tests via the `system_init` fixture teardown. Files are tracked and deleted at the end of the test session to keep your test repository clean.
+
 ## Running Tests
 
 ### All Integration Tests
 ```bash
 cd alkyone
-pytest tests/
+make test-int
+# or
+pytest tests/ -m integration
 ```
 
 ### Component-Specific Tests
 ```bash
 # Atlas integration tests
-pytest tests/components/atlas/
+pytest tests/components/atlas/ -m integration
 
 # Maia integration tests
-pytest tests/components/maia/
+pytest tests/components/maia/ -m integration
 ```
 
 ### Specific Test Categories
@@ -82,8 +133,8 @@ pytest tests/components/maia/
 # Integration tests only
 pytest -m integration
 
-# Smoke tests only
-pytest -m smoke
+# Smoke tests (validate credentials)
+pytest tests/components/atlas/test_smoke.py
 
 # Validation tests
 pytest tests/components/maia/test_validation.py

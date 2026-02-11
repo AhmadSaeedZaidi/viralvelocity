@@ -296,8 +296,8 @@ async def test_archeologist_time_window_calculation(dao):
 
 
 @pytest.fixture
-async def dao():
-    """Provide MaiaDAO instance for testing."""
+async def dao(fresh_db):
+    """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO
 
     dao_instance = MaiaDAO()
