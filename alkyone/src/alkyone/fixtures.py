@@ -21,8 +21,8 @@ _uploaded_files: List[str] = []
 async def system_init() -> AsyncGenerator[None, None]:
     """
     Session-level setup.
-    Initializes the DB connection pool once for the whole test suite.
     Validates that HuggingFace credentials are configured for integration tests.
+    Note: DB pool is now managed per-test by fresh_db fixture.
     """
     logger.info("Alkyone: Initializing System for Testing...")
 
@@ -38,11 +38,8 @@ async def system_init() -> AsyncGenerator[None, None]:
             "Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
         )
 
-    await db.initialize()
     yield
     await _cleanup_hf_uploads()
-
-    await db.close()
     logger.info("Alkyone: System Teardown Complete.")
 
 
@@ -52,42 +49,50 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
     Function-level fixture.
     Wipes and Re-Provisions the DB schema before EVERY test function.
     This ensures total test isolation.
+    
+    Manages connection pool lifecycle per-test to prevent pool exhaustion.
     """
-    async with db.get_connection() as conn:
-        await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    if db._pool is not None:
+        await db.close()
+        db._pool = None
+    
+    await db.initialize()
+    
+    try:
+        async with db.get_connection() as conn:
+            await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
 
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            try:
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+            except Exception as e:
+                if "already been loaded" not in str(e):
+                    raise
+                logger.debug(f"TimescaleDB already loaded: {e}")
 
-        # Try to create TimescaleDB, but ignore if already loaded with different version
-        try:
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
-        except Exception as e:
-            # TimescaleDB already loaded - that's OK for tests
-            if "already been loaded" not in str(e):
-                raise
-            logger.debug(f"TimescaleDB already loaded: {e}")
+            import atlas
 
-        import atlas
+            schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
 
-        schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
+            if not os.path.exists(schema_path):
+                raise FileNotFoundError(f"Could not find schema.sql at {schema_path}")
 
-        if not os.path.exists(schema_path):
-            raise FileNotFoundError(f"Could not find schema.sql at {schema_path}")
+            with open(schema_path, "r") as f:
+                sql_script = f.read()
+                
+                filtered_lines = []
+                for line in sql_script.split("\n"):
+                    if not line.strip().startswith("CREATE EXTENSION"):
+                        filtered_lines.append(line)
 
-        with open(schema_path, "r") as f:
-            sql_script = f.read()
+                filtered_script = "\n".join(filtered_lines)
+                await conn.execute(filtered_script)
 
-            # Filter out CREATE EXTENSION commands (we already created them above)
-            # This prevents duplicate extension errors with TimescaleDB
-            filtered_lines = []
-            for line in sql_script.split("\n"):
-                if not line.strip().startswith("CREATE EXTENSION"):
-                    filtered_lines.append(line)
-
-            filtered_script = "\n".join(filtered_lines)
-            await conn.execute(filtered_script)
-
-    yield
+        yield
+    
+    finally:
+        await db.close()
+        db._pool = None
 
 
 def track_hf_upload(path: str) -> None:
