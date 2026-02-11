@@ -172,10 +172,10 @@ async def test_process_frames_fallback_strategy():
     """Test process_frames uses fallback strategy when no chapters/heatmap."""
     video = {"id": "VIDEO_003", "title": "Video without chapters or heatmap"}
     mock_video_info = {
-        "url": "https://example.com/video.mp4", 
+        "url": "https://example.com/video.mp4",
         "duration": 600.0,
-        "chapters": [], 
-        "heatmap": []
+        "chapters": [],
+        "heatmap": [],
     }
     mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
