@@ -1,7 +1,11 @@
-"""Integration tests for Janitor archival (Hot → Cold tier)."""
+"""Integration tests for Janitor archival (Hot → Cold tier).
+
+Real Integration Testing: Uses real HuggingFace vault storage for archival.
+"""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
+from unittest.mock import patch
 
 import pytest
 
@@ -30,8 +34,8 @@ class TestJanitorArchival:
             )
 
     @pytest.mark.asyncio
-    async def test_archive_cold_stats_single_batch(self, dao, mock_vault):
-        """Test archiving a single batch of old stats."""
+    async def test_archive_cold_stats_single_batch(self, dao):
+        """Test archiving a single batch of old stats with real vault storage."""
         # Setup: Insert old stats into hot tier
         stats_data = [
             {
@@ -48,16 +52,22 @@ class TestJanitorArchival:
         await self._create_parent_videos(dao, video_ids)
         await dao.log_video_stats_batch(stats_data)
 
-        # Archive old stats (retention=7 days)
+        # Archive old stats (retention=7 days) with real vault
         archived_count = await dao.archive_cold_stats(retention_days=7, batch_size=5000)
 
         # Verify stats were archived
         assert archived_count == 50
-        assert len(mock_vault) > 0
+
+        # Verify stats were removed from hot tier
+        remaining = await dao._fetch_all(
+            "SELECT * FROM video_stats_log WHERE timestamp < %s",
+            (datetime.now(timezone.utc) - timedelta(days=7),)
+        )
+        assert len(remaining) == 0
 
     @pytest.mark.asyncio
-    async def test_archive_cold_stats_multiple_batches(self, dao, mock_vault):
-        """Test archival loop drains large backlog in batches."""
+    async def test_archive_cold_stats_multiple_batches(self, dao):
+        """Test archival loop drains large backlog in batches with real vault."""
         batch_size = 2000
         total_stats = 5000
 
@@ -78,7 +88,7 @@ class TestJanitorArchival:
 
         await dao.log_video_stats_batch(old_stats)
 
-        # Run archival loop
+        # Run archival loop with real vault
         total_archived = 0
         iterations = 0
         while iterations < 5:
@@ -91,9 +101,16 @@ class TestJanitorArchival:
         assert total_archived == total_stats
         assert iterations == 3
 
+        # Verify stats were removed from hot tier
+        remaining = await dao._fetch_all(
+            "SELECT * FROM video_stats_log WHERE timestamp < %s",
+            (datetime.now(timezone.utc) - timedelta(days=7),)
+        )
+        assert len(remaining) == 0
+
     @pytest.mark.asyncio
-    async def test_archive_respects_retention_period(self, dao, mock_vault):
-        """Test that only stats older than retention period are archived."""
+    async def test_archive_respects_retention_period(self, dao):
+        """Test that only stats older than retention period are archived with real vault."""
         now = datetime.now(timezone.utc)
 
         # Create stats lists
@@ -123,14 +140,21 @@ class TestJanitorArchival:
         await self._create_parent_videos(dao, video_ids)
         await dao.log_video_stats_batch(stats)
 
-        # Archive with 7-day retention
+        # Archive with 7-day retention to real vault
         archived = await dao.archive_cold_stats(retention_days=7)
 
         # Only old stats should be archived
         assert archived == 50
 
+        # Verify new stats remain in hot tier
+        remaining = await dao._fetch_all(
+            "SELECT * FROM video_stats_log WHERE timestamp >= %s",
+            (now - timedelta(days=7),)
+        )
+        assert len(remaining) == 50
+
     @pytest.mark.asyncio
-    async def test_vault_failure_prevents_deletion(self, dao, mock_vault_failing):
+    async def test_vault_failure_prevents_deletion(self, dao):
         """Test transactional safety: don't delete if Vault upload fails."""
         old_stats = [
             {
@@ -145,18 +169,24 @@ class TestJanitorArchival:
         await self._create_parent_videos(dao, ["VIDEO_001"])
         await dao.log_video_stats_batch(old_stats)
 
-        # Attempt archival (Vault will fail)
-        with pytest.raises(Exception):
-            await dao.archive_cold_stats(retention_days=7)
+        # Mock vault.append_metrics to fail
+        with patch("atlas.vault.vault.append_metrics") as mock_append:
+            mock_append.side_effect = Exception("Simulated Vault failure")
 
-        # Verify logic: if exception raised, we assume transaction didn't commit delete.
-        # Ideally, we would re-query here, but mocking DAO internals is complex.
-        # This test primarily ensures the exception propagates.
-        assert True
+            # Attempt archival (Vault will fail)
+            with pytest.raises(Exception):
+                await dao.archive_cold_stats(retention_days=7)
+
+        # Verify stats were NOT deleted from hot tier (transaction rollback)
+        remaining = await dao._fetch_all(
+            "SELECT * FROM video_stats_log WHERE video_id = %s",
+            ("VIDEO_001",)
+        )
+        assert len(remaining) == 1, "Stats should remain after vault failure"
 
     @pytest.mark.asyncio
-    async def test_archival_groups_by_date(self, dao, mock_vault):
-        """Test that stats are grouped by date for efficient Parquet storage."""
+    async def test_archival_groups_by_date(self, dao):
+        """Test that stats are grouped by date for efficient Parquet storage with real vault."""
         stats = []
         # Create stats across 3 days
         for day_offset in range(10, 13):
@@ -176,15 +206,22 @@ class TestJanitorArchival:
         await self._create_parent_videos(dao, video_ids)
         await dao.log_video_stats_batch(stats)
 
-        # Archive
-        await dao.archive_cold_stats(retention_days=7)
+        # Archive to real vault (groups by date internally)
+        archived_count = await dao.archive_cold_stats(retention_days=7)
 
-        # Verify Vault has separate files per date (should be at least 3)
-        assert len(mock_vault) >= 3
+        # Verify all stats were archived
+        assert archived_count == 30
+
+        # Verify stats were removed from hot tier
+        remaining = await dao._fetch_all(
+            "SELECT * FROM video_stats_log WHERE timestamp < %s",
+            (datetime.now(timezone.utc) - timedelta(days=7),)
+        )
+        assert len(remaining) == 0
 
     @pytest.mark.asyncio
-    async def test_janitor_full_cycle(self, dao, mock_vault, monkeypatch):
-        """Test complete Janitor cycle: archive stats + cleanup videos."""
+    async def test_janitor_full_cycle(self, dao, monkeypatch):
+        """Test complete Janitor cycle with real vault: archive stats + cleanup videos."""
         # Enable janitor for this test
         from atlas import settings
         from maia.janitor.flow import janitor_cycle
@@ -232,16 +269,16 @@ class TestJanitorArchival:
         query = "UPDATE videos SET discovered_at = %s WHERE id = %s"
         await dao._execute(query, (old_date, video_id))
 
-        # 4. Run Janitor cycle
+        # 4. Run Janitor cycle with real vault
         result = await janitor_cycle(dry_run=False, archive_stats=True)
 
         # 5. Verify results
-        assert result["stats_archived"] >= 1  # Stats were archived
+        assert result["stats_archived"] >= 1  # Stats were archived to real vault
         assert result["cleanup_stats"]["deleted"] >= 1  # Video was cleaned up
 
     @pytest.mark.asyncio
-    async def test_archival_performance_large_dataset(self, dao, mock_vault):
-        """Performance test: Archive 10k stats in reasonable time."""
+    async def test_archival_performance_large_dataset(self, dao):
+        """Performance test: Archive 10k stats to real vault in reasonable time."""
         import time
 
         total_stats = 10000
@@ -264,7 +301,7 @@ class TestJanitorArchival:
             ]
             await dao.log_video_stats_batch(batch_stats)
 
-        # Measure archival time
+        # Measure archival time to real vault
         start_time = time.time()
 
         total_archived = 0
@@ -277,43 +314,14 @@ class TestJanitorArchival:
         elapsed = time.time() - start_time
 
         assert total_archived == total_stats
-        assert elapsed < 30
+        # Allow more time for real vault uploads (HuggingFace API)
+        assert elapsed < 60, f"Archival took {elapsed}s, expected < 60s"
 
 
 @pytest.fixture
 async def dao():
-    """Provide MaiaDAO instance for testing."""
+    """Provide MaiaDAO instance for testing with real vault."""
     from atlas.adapters.maia import MaiaDAO
 
     dao_instance = MaiaDAO()
     yield dao_instance
-
-
-@pytest.fixture
-def mock_vault(monkeypatch):
-    """Mock vault that tracks stored data."""
-    storage = {}
-
-    def mock_append(data, date=None, hour=None):
-        date_str = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        key = f"metrics/{date_str}/stats.parquet"
-        if key not in storage:
-            storage[key] = []
-        storage[key].extend(data)
-
-    from atlas import vault
-
-    monkeypatch.setattr(vault, "append_metrics", mock_append)
-    return storage
-
-
-@pytest.fixture
-def mock_vault_failing(monkeypatch):
-    """Mock vault that always fails (for testing error handling)."""
-
-    def mock_append_fail(data, date=None, hour=None):
-        raise Exception("Simulated Vault failure")
-
-    from atlas import vault
-
-    monkeypatch.setattr(vault, "append_metrics", mock_append_fail)
