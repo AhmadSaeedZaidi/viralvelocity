@@ -7,17 +7,14 @@ import pytest
 import pytest_asyncio
 from atlas.config import settings
 
-# We import the infrastructure directly from Atlas
 from atlas.db import db
 
 # --- ENVIRONMENT OVERRIDES ---
-# Crucial: Ensure we never accidentally nuke Production
-os.environ["ENV"] = "test"
+os.environ["ENV"] = "dev"
 os.environ["COMPLIANCE_MODE"] = "False"
 
 logger = logging.getLogger("alkyone.fixtures")
 
-# Track files uploaded to HuggingFace during tests for cleanup
 _uploaded_files: List[str] = []
 
 
@@ -30,23 +27,20 @@ async def system_init() -> AsyncGenerator[None, None]:
     """
     logger.info("Alkyone: Initializing System for Testing...")
 
-    # Validate HuggingFace credentials for real integration tests
     if not os.getenv("HF_TOKEN"):
         logger.warning(
-            "⚠️  HF_TOKEN not set! Integration tests requiring vault will fail. "
+            "HF_TOKEN not set! Integration tests requiring vault will fail. "
             "Set it with: export HF_TOKEN='hf_xxxxx'"
         )
 
     if not os.getenv("HF_DATASET_ID"):
         logger.warning(
-            "⚠️  HF_DATASET_ID not set! Using fallback or tests will fail. "
+            "HF_DATASET_ID not set! Using fallback or tests will fail. "
             "Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
         )
 
     await db.initialize()
     yield
-
-    # Cleanup uploaded files from HuggingFace after session
     await _cleanup_hf_uploads()
 
     await db.close()
@@ -61,18 +55,13 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
     This ensures total test isolation.
     """
     async with db.get_connection() as conn:
-        # 1. Nuke the world (DROP SCHEMA public)
-        # We use CASCADE to kill all tables, views, and extensions in one go.
         await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
 
-        # 2. Re-enable extensions (pgvector gets dropped with schema)
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
-        # 3. Provision Schema using Atlas's own SQL definition
-        # We look up the file location dynamically from the installed package
-        import atlas.schema  # type: ignore[import-not-found]
+        import atlas
 
-        schema_path = os.path.join(os.path.dirname(atlas.schema.__file__), "schema.sql")
+        schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
 
         if not os.path.exists(schema_path):
             raise FileNotFoundError(f"Could not find schema.sql at {schema_path}")
@@ -82,7 +71,6 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
             await conn.execute(sql_script)
 
     yield
-    # No teardown needed; the next test will nuke it anyway.
 
 
 def track_hf_upload(path: str) -> None:
