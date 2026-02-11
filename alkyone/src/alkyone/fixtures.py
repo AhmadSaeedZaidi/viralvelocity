@@ -60,14 +60,24 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
 
     try:
         async with db.get_connection() as conn:
-            await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            try:
-                async with conn.transaction():
-                    await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
-            except Exception as e:
-                logger.warning(f"TimescaleDB extension skipped (safe to ignore if pre-loaded): {e}")
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
+
+            await conn.execute(
+                """
+                DO $$ 
+                DECLARE 
+                    r RECORD;
+                BEGIN 
+                    SET session_replication_role = 'replica';
+
+                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP 
+                        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' CASCADE'; 
+                    END LOOP;
+                    SET session_replication_role = 'origin';
+                END $$;
+            """
+            )
 
             import atlas
 
