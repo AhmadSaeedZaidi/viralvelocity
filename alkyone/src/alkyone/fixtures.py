@@ -64,11 +64,10 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
 
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             try:
-                await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+                async with conn.transaction():
+                    await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
             except Exception as e:
-                if "already been loaded" not in str(e):
-                    raise
-                logger.debug(f"TimescaleDB already loaded: {e}")
+                logger.warning(f"TimescaleDB extension skipped (safe to ignore if pre-loaded): {e}")
 
             import atlas
 
