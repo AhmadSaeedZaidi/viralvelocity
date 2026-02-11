@@ -4483,7 +4483,19 @@ secretstorage = ["cffi", "secretstorage"]
 static-analysis = ["autopep8 (>=2.0,<3.0)", "ruff (>=0.8.0,<0.9.0)"]
 test = ["pytest (>=8.1,<9.0)", "pytest-rerunfailures (>=14.0,<15.0)"]
 
+[[package]]
+name = "yt-dlp-get-pot"
+version = "0.3.0"
+description = ""
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "yt_dlp_get_pot-0.3.0-py3-none-any.whl", hash = "sha256:a49a596a3e3c02cd9ce051192ea3fe8168cf24ece8954bed6aa331a87d86954f"},
+    {file = "yt_dlp_get_pot-0.3.0.tar.gz", hash = "sha256:ac9530b9e7b3d667235b9119da475f595d2dc7e6f6bbf98b965011be454e8833"},
+]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11, <3.12"
-content-hash = "0101098e8c4e7a709723dcb0b8ae8ffe8eca045212a1f0b2f8122ba60d1893b2"
+content-hash = "6a962083de668b594ad943edde400f867eb180af3ff7415b79803f56d6ce16fc"
