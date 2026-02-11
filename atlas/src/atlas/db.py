@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
@@ -56,6 +57,57 @@ class DatabaseManager:
         assert self._pool is not None, "Pool initialization failed"
         async with self._pool.connection() as conn:
             yield conn
+
+    async def setup_test_schema(self) -> None:
+        """
+        Initialize database schema for testing.
+        """
+        async with self.get_connection() as conn:
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
+
+            import atlas
+
+            schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
+
+            if not os.path.exists(schema_path):
+                raise FileNotFoundError(f"Could not find schema.sql at {schema_path}")
+
+            with open(schema_path, "r") as f:
+                sql_script = f.read()
+
+                filtered_lines = []
+                for line in sql_script.split("\n"):
+                    if not line.strip().upper().startswith("CREATE EXTENSION"):
+                        filtered_lines.append(line)
+
+                filtered_script = "\n".join(filtered_lines)
+                await conn.execute(filtered_script)
+
+            logger.info("Test schema initialized successfully")
+
+    async def reset_for_test(self) -> None:
+        """
+        Reset database state for testing.
+        """
+        async with self.get_connection() as conn:
+            await conn.execute(
+                """
+                DO $$ 
+                DECLARE 
+                    r RECORD; 
+                BEGIN 
+                    -- Iterate over all tables in public schema
+                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP 
+                        -- TRUNCATE is faster than DELETE
+                        -- RESTART IDENTITY resets serials (id=1)
+                        -- CASCADE handles foreign keys
+                        EXECUTE 'TRUNCATE TABLE public.' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE'; 
+                    END LOOP; 
+                END $$;
+            """
+            )
+            logger.debug("Database reset for test")
 
 
 db = DatabaseManager()

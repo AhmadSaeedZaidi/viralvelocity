@@ -46,11 +46,7 @@ async def system_init() -> AsyncGenerator[None, None]:
 @pytest_asyncio.fixture(scope="function")
 async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
     """
-    Function-level fixture.
-    Wipes and Re-Provisions the DB schema before EVERY test function.
-    This ensures total test isolation.
-
-    Manages connection pool lifecycle per-test to prevent pool exhaustion.
+    Function-level fixture that provides a clean database for each test.
     """
     if db._pool is not None:
         await db.close()
@@ -59,47 +55,13 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
     await db.initialize()
 
     try:
-        async with db.get_connection() as conn:
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
-
-            await conn.execute(
-                """
-                DO $$ 
-                DECLARE 
-                    r RECORD;
-                BEGIN 
-                    SET session_replication_role = 'replica';
-
-                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP 
-                        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' CASCADE'; 
-                    END LOOP;
-                    SET session_replication_role = 'origin';
-                END $$;
-            """
-            )
-
-            import atlas
-
-            schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
-
-            if not os.path.exists(schema_path):
-                raise FileNotFoundError(f"Could not find schema.sql at {schema_path}")
-
-            with open(schema_path, "r") as f:
-                sql_script = f.read()
-
-                filtered_lines = []
-                for line in sql_script.split("\n"):
-                    if not line.strip().startswith("CREATE EXTENSION"):
-                        filtered_lines.append(line)
-
-                filtered_script = "\n".join(filtered_lines)
-                await conn.execute(filtered_script)
+        await db.setup_test_schema()
+        await db.reset_for_test()
 
         yield
 
     finally:
+        # Always close pool after test completes
         await db.close()
         db._pool = None
 
