@@ -2526,6 +2526,7 @@ prefect = ">=2.16.0,<3.0.0"
 tenacity = ">=8.2.0,<9.0.0"
 youtube-transcript-api = ">=0.6.1,<1.0.0"
 yt-dlp = ">=2024.1.0,<2025.0.0"
+yt-dlp-get-pot = ">=0.1.0"
 
 [package.source]
 type = "directory"
@@ -4521,6 +4522,18 @@ pyinstaller = ["pyinstaller (>=6.11.1)"]
 secretstorage = ["cffi", "secretstorage"]
 static-analysis = ["autopep8 (>=2.0,<3.0)", "ruff (>=0.8.0,<0.9.0)"]
 test = ["pytest (>=8.1,<9.0)", "pytest-rerunfailures (>=14.0,<15.0)"]
+
+[[package]]
+name = "yt-dlp-get-pot"
+version = "0.3.0"
+description = ""
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "yt_dlp_get_pot-0.3.0-py3-none-any.whl", hash = "sha256:a49a596a3e3c02cd9ce051192ea3fe8168cf24ece8954bed6aa331a87d86954f"},
+    {file = "yt_dlp_get_pot-0.3.0.tar.gz", hash = "sha256:ac9530b9e7b3d667235b9119da475f595d2dc7e6f6bbf98b965011be454e8833"},
+]
 
 [metadata]
 lock-version = "2.1"
