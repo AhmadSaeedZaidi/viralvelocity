@@ -49,15 +49,15 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
     Function-level fixture.
     Wipes and Re-Provisions the DB schema before EVERY test function.
     This ensures total test isolation.
-    
+
     Manages connection pool lifecycle per-test to prevent pool exhaustion.
     """
     if db._pool is not None:
         await db.close()
         db._pool = None
-    
+
     await db.initialize()
-    
+
     try:
         async with db.get_connection() as conn:
             await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -79,7 +79,7 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
 
             with open(schema_path, "r") as f:
                 sql_script = f.read()
-                
+
                 filtered_lines = []
                 for line in sql_script.split("\n"):
                     if not line.strip().startswith("CREATE EXTENSION"):
@@ -89,7 +89,7 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
                 await conn.execute(filtered_script)
 
         yield
-    
+
     finally:
         await db.close()
         db._pool = None
