@@ -78,6 +78,7 @@ async def test_process_frames_successful_with_chapters():
     video = {"id": "VIDEO_001", "title": "Test Video with Chapters"}
     mock_video_info = {
         "url": "https://example.com/video.mp4",
+        "duration": 200.0,
         "chapters": [
             {"start_time": 0.0, "title": "Intro"},
             {"start_time": 60.0, "title": "Main Content"},
@@ -125,6 +126,7 @@ async def test_process_frames_successful_with_heatmap():
     video = {"id": "VIDEO_002", "title": "Test Video with Heatmap"}
     mock_video_info = {
         "url": "https://example.com/video.mp4",
+        "duration": 200.0,
         "chapters": [],
         "heatmap": [
             {"start_time": 10.0, "value": 0.9},
@@ -169,7 +171,12 @@ async def test_process_frames_successful_with_heatmap():
 async def test_process_frames_fallback_strategy():
     """Test process_frames uses fallback strategy when no chapters/heatmap."""
     video = {"id": "VIDEO_003", "title": "Video without chapters or heatmap"}
-    mock_video_info = {"url": "https://example.com/video.mp4", "chapters": [], "heatmap": []}
+    mock_video_info = {
+        "url": "https://example.com/video.mp4", 
+        "duration": 600.0,
+        "chapters": [], 
+        "heatmap": []
+    }
     mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
     with (
@@ -251,11 +258,12 @@ async def test_process_frames_handles_video_capture_failure():
 
 
 @pytest.mark.asyncio
-async def test_process_frames_handles_vault_failure(mock_sleep):
+async def test_process_frames_handles_vault_failure():
     """Test process_frames handles vault storage failures after retries."""
     video = {"id": "VIDEO_001", "title": "Test Video"}
     mock_video_info = {
         "url": "https://example.com/video.mp4",
+        "duration": 100.0,
         "chapters": [{"start_time": 0.0}],
         "heatmap": [],
     }
@@ -275,6 +283,7 @@ async def test_process_frames_handles_vault_failure(mock_sleep):
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
         mock_cap_instance.read.return_value = (True, mock_frame)
+        mock_cap_instance.get.side_effect = lambda prop: 30.0 if prop == 5 else 4500
 
         mock_cv2.VideoCapture.return_value = mock_cap_instance
         mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
