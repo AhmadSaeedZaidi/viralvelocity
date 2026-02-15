@@ -49,33 +49,39 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
     Test the complete Painter cycle on a real video (B0J27sf9N1Y).
 
     Verifies:
-    1. Pre-flight: Video actually has chapters/heatmap (via yt-dlp).
+    1. Pre-flight: Video actually has chapters/heatmap (via StealthVideoStreamer).
     2. Execution: Painter agent runs successfully.
     3. Outcome: Video is marked as 'has_visuals' in the DB.
     """
     video_id = "B0J27sf9N1Y"
 
-    # 1. Pre-flight Check
-    # Ensure the target video currently meets test requirements (has chapters/heatmap).
+    # 1. Pre-flight Check using StealthVideoStreamer
     print(f"\n[Test] Verifying metadata for {video_id}...")
-    ydl_opts = {"quiet": True, "no_warnings": True}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    try:
+        from maia.painter.streamer import StealthVideoStreamer
 
-            has_chapters = len(info.get("chapters", []) or []) > 0
-            has_heatmap = len(info.get("heatmap", []) or []) > 0
+        streamer = StealthVideoStreamer()
+        info = streamer.extract_info(video_id)
 
-            print(
-                f"[Test] Video '{info.get('title')}' - Chapters: {has_chapters}, Heatmap: {has_heatmap}"
-            )
+        has_chapters = len(info.get("chapters", []) or []) > 0
+        has_heatmap = len(info.get("heatmap", []) or []) > 0
 
-            if not has_chapters and not has_heatmap:
-                pytest.skip("Real video B0J27sf9N1Y no longer has required metadata. Skipping.")
-        except Exception as e:
-            if "HTTP Error 429" in str(e):
-                pytest.skip("YouTube Rate Limit (429) active.")
-            raise e
+        print(
+            f"[Test] Video '{info.get('title')}' - Chapters: {has_chapters}, Heatmap: {has_heatmap}"
+        )
+
+        if not has_chapters and not has_heatmap:
+            pytest.skip("Real video B0J27sf9N1Y no longer has required metadata. Skipping.")
+
+    except yt_dlp.utils.DownloadError as e:
+        error_str = str(e)
+        if "429" in error_str:
+            pytest.skip("YouTube Rate Limit (429) active. Skipping live test.")
+        elif "Sign in" in error_str or "bot" in error_str:
+            pytest.skip("YouTube anti-bot active. Requires cookies.txt for this test.")
+        raise e
+    except Exception as e:
+        pytest.fail(f"Pre-flight check failed: {e}")
 
     # 2. Setup DB State
     video_data = {

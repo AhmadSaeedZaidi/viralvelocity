@@ -15,6 +15,8 @@ from atlas.vault import vault
 from prefect import flow, get_run_logger, task
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
 
+from maia.painter.streamer import StealthVideoStreamer
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -40,89 +42,6 @@ async def _store_visuals_to_vault_with_retry(vid_id: str, frames: List[Tuple[int
     """Store visual evidence to vault with retry logic for network failures."""
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, lambda: vault.store_visual_evidence(vid_id, frames))
-
-
-class VideoStreamer:
-    """
-    Helper class for extracting video information with anti-detection measures.
-    """
-
-    def __init__(self, video_id: str):
-        self.video_id = video_id
-        self.url = f"https://www.youtube.com/watch?v={video_id}"
-
-    def get_info(self) -> Dict[str, Any]:
-        """
-        Extract video information using a rotating client strategy.
-
-        Priority Strategy:
-        1. Cookies (if available) - Most reliable
-        2. Android Client - Often bypasses PO Token requirements
-        3. Web Safari - Looser bot heuristics than Chrome
-        4. Web - Default (most likely to hit blocks)
-
-        Returns:
-            Dictionary with video metadata including stream URL, chapters, heatmap, duration
-        """
-        cookie_path = os.getenv("MAIA_COOKIES_PATH", "cookies.txt")
-        proxy_url = os.getenv("MAIA_PROXY_URL")
-
-        # STRATEGY 1: Client Rotation
-        client_strategy = ["android", "web_safari", "web"]
-
-        # STRATEGY 2: PO Token / Visitor Data
-        extractor_args = {
-            "youtube": {
-                "player_client": client_strategy,
-                "skip": ["hls", "dash"],
-                "player_skip": ["js", "configs", "webpage"],
-            }
-        }
-
-        ydl_opts = {
-            "format": "best[ext=mp4]/best[protocol^=http]",
-            "quiet": True,
-            "no_warnings": True,
-            "force_ipv4": True,
-            "cookiefile": cookie_path if os.path.exists(cookie_path) else None,
-            "proxy": proxy_url,
-            "extractor_args": extractor_args,
-            "retries": 10,
-            "fragment_retries": 10,
-        }
-        ydl_opts = {k: v for k, v in ydl_opts.items() if v is not None}
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(self.url, download=False)
-                return cast(Dict[str, Any], info) if info else {}
-        except yt_dlp.utils.DownloadError as e:
-            # Log stealth failure clearly
-            logger.error(
-                f"Stealth extraction failed for {self.video_id}. "
-                f"Client rotation exhausted. Error: {e}"
-            )
-            # Check if this is a rate limit that should trigger Resiliency Strategy
-            error_str = str(e).lower()
-            if "429" in error_str or "too many requests" in error_str:
-                logger.critical(
-                    f"Rate limit detected for {self.video_id}. "
-                    "Consider enabling MAIA_PROXY_URL or rotating IP."
-                )
-            raise
-
-    def extract_heatmap_peaks(
-        self, heatmap_data: List[Dict[str, Any]], top_n: int = 5
-    ) -> List[float]:
-        """Extract top N peaks from video heatmap data."""
-        if not heatmap_data:
-            return []
-
-        valid_points = [p for p in heatmap_data if "value" in p and "start_time" in p]
-        sorted_points = sorted(valid_points, key=lambda x: x.get("value", 0), reverse=True)
-
-        top_points = sorted_points[:top_n]
-        return [p.get("start_time", 0.0) for p in top_points]
 
 
 @task(name="fetch_painter_targets")
@@ -184,9 +103,10 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
     vid_id = video["id"]
 
     try:
-        # 1. Fetch Metadata
-        streamer = VideoStreamer(vid_id)
-        info = await asyncio.to_thread(streamer.get_info)
+        # 1. Fetch Metadata using StealthVideoStreamer
+        cookie_path = os.getenv("MAIA_COOKIES_PATH")
+        streamer = StealthVideoStreamer(cookies_path=cookie_path)
+        info = await asyncio.to_thread(streamer.extract_info, vid_id)
 
         stream_url = info.get("url")
         chapters = info.get("chapters", [])

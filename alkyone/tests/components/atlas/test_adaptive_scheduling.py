@@ -25,7 +25,7 @@ class TestAdaptiveScheduling:
 
         # Verify they were added by querying watchlist table
         watchlist = await dao._fetch_all(
-            "SELECT video_id FROM watchlist WHERE video_id IN %s", (tuple(video_ids),)
+            "SELECT video_id FROM watchlist WHERE video_id = ANY(%s)", (video_ids,)
         )
         assert len(watchlist) == 3
 

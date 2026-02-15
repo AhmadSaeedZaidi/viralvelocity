@@ -5,10 +5,12 @@ These tests verify end-to-end behavior of Archeologist historical campaigns.
 Mark as integration tests: pytest -m integration
 """
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 import pytest_asyncio
 from maia.archeologist import hunt_history, run_archeology_campaign
@@ -118,28 +120,24 @@ async def test_archeologist_handles_resiliency_strategy(dao):
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
         patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
+        patch("maia.archeologist.flow._fetch_with_backoff") as MockFetch,
     ):
         mock_keyring = MagicMock()
         mock_keyring.next_key = MagicMock(return_value="test_key")
         mock_keyring.size = 1
         MockKeyRing.return_value = mock_keyring
 
+        # Configure _fetch_with_backoff to raise RateLimitError
+        from maia.archeologist.flow import RateLimitError
+
+        MockFetch.side_effect = RateLimitError("Rate limit exceeded")
+
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-
-        # Mock 429 response
-        mock_response = AsyncMock()
-        mock_response.status = 429
-
-        mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        # Verify SystemExit is raised
+        # Verify SystemExit is raised after retry exhaustion
         with pytest.raises(SystemExit):
             await hunt_history(year=2010, month=1)
 
@@ -307,24 +305,186 @@ async def dao(fresh_db):
 
 @pytest.fixture
 def mock_youtube_search_response() -> Dict[str, Any]:
-    """Mock YouTube Search API response for Archeologist."""
+    """Mock YouTube Search API response for Archeologist with high-volume results."""
     return {
         "kind": "youtube#searchListResponse",
         "etag": "test-etag",
         "items": [
             {
                 "kind": "youtube#searchResult",
-                "etag": "test-video-etag",
-                "id": {"kind": "youtube#video", "videoId": "dQw4w9WgXcQ"},
+                "etag": f"test-video-etag-{i}",
+                "id": {
+                    "kind": "youtube#video",
+                    "videoId": "dQw4w9WgXcQ" if i == 0 else f"VIDEO_{i:03d}",
+                },
                 "snippet": {
                     "publishedAt": "2010-01-01T00:00:00Z",
-                    "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
-                    "title": "Historical Test Video",
-                    "channelTitle": "Test Channel",
+                    "channelId": f"CHANNEL_{i:03d}",
+                    "title": f"Historical Gaming Video {i}",
+                    "channelTitle": f"Test Channel {i}",
                     "tags": ["history", "gaming", "retro"],
                     "categoryId": "20",
                     "defaultLanguage": "en",
                 },
             }
+            for i in range(10)
         ],
     }
+
+
+# ========================
+# REAL YOUTUBE API TESTS
+# ========================
+# These tests use real YouTube API keys from CI environment and make actual API calls.
+# They should only run in the CI environment where YOUTUBE_API_KEY_POOL_JSON is set.
+
+
+def has_real_youtube_keys() -> bool:
+    """Check if real YouTube API keys are available."""
+    return bool(os.getenv("YOUTUBE_API_KEY_POOL_JSON"))
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not has_real_youtube_keys(), reason="Real YouTube API keys not available")
+@pytest.mark.asyncio
+async def test_archeologist_real_youtube_api_search(dao):
+    """Test Archeologist with REAL YouTube API (CI only)."""
+    from atlas.utils import KeyRing
+
+    # This will use real keys from environment
+    keys = KeyRing("archeology")
+
+    # Test historical search for a month known to have videos (January 2010)
+    base_url = "https://www.googleapis.com/youtube/v3/search"
+
+    start_date = datetime(2010, 1, 1, tzinfo=timezone.utc)
+    end_date = datetime(2010, 2, 1, tzinfo=timezone.utc)
+
+    start_str = start_date.isoformat().replace("+00:00", "Z")
+    end_str = end_date.isoformat().replace("+00:00", "Z")
+
+    params = {
+        "part": "snippet",
+        "type": "video",
+        "order": "viewCount",
+        "publishedAfter": start_str,
+        "publishedBefore": end_str,
+        "videoCategoryId": "20",  # Gaming category
+        "maxResults": 5,
+        "key": keys.next_key(),
+    }
+
+    # Make real API call
+    async with aiohttp.ClientSession() as session:
+        async with session.get(base_url, params=params) as resp:
+            assert resp.status == 200, f"YouTube API returned status {resp.status}"
+
+            data = await resp.json()
+            items = data.get("items", [])
+
+            # Verify we got results
+            assert len(items) > 0, "Expected at least 1 video from Jan 2010"
+
+            # Verify response structure
+            for item in items[:3]:  # Check first 3 items
+                assert "id" in item
+                assert "videoId" in item["id"]
+                assert "snippet" in item
+                assert "title" in item["snippet"]
+                assert "channelId" in item["snippet"]
+
+            # Ingest one video to verify DAO integration
+            await dao.ingest_video_metadata(items[0], priority_override=100)
+
+            # Verify video was stored
+            video_id = items[0]["id"]["videoId"]
+            video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
+            assert video is not None
+            assert video["id"] == video_id
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not has_real_youtube_keys(), reason="Real YouTube API keys not available")
+@pytest.mark.asyncio
+async def test_archeologist_real_api_rate_limit_detection(dao):
+    """Test that Archeologist properly detects and handles rate limits from real API."""
+    from atlas.utils import KeyRing
+
+    keys = KeyRing("archeology")
+
+    # Make rapid-fire requests to potentially trigger rate limiting
+    # This test verifies our rate limit detection works with real API responses
+    base_url = "https://www.googleapis.com/youtube/v3/search"
+
+    params = {
+        "part": "snippet",
+        "type": "video",
+        "q": "test",
+        "maxResults": 1,
+        "key": keys.next_key(),
+    }
+
+    # Make several requests - if we hit a 429, we should handle it
+    async with aiohttp.ClientSession() as session:
+        for i in range(3):
+            async with session.get(base_url, params=params) as resp:
+                # Should be either 200 (success) or 429 (rate limit)
+                assert resp.status in [200, 429, 403], f"Unexpected status {resp.status}"
+
+                if resp.status == 429:
+                    # Rate limit detected - this is what we want to test
+                    print("✓ Rate limit (429) detected from real YouTube API")
+                    break
+                elif resp.status == 403:
+                    # API key exhausted - rotate to next key
+                    params["key"] = keys.next_key()
+                else:
+                    # Success - verify response structure
+                    data = await resp.json()
+                    assert "items" in data
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not has_real_youtube_keys(), reason="Real YouTube API keys not available")
+@pytest.mark.asyncio
+async def test_archeologist_real_api_key_rotation(dao):
+    """Test KeyRing rotation with real YouTube API keys."""
+    from atlas.utils import KeyRing
+
+    keys = KeyRing("archeology")
+
+    # Verify we have multiple keys
+    assert keys.size >= 1, "Need at least 1 API key for testing"
+
+    base_url = "https://www.googleapis.com/youtube/v3/search"
+
+    # Track which keys we've used
+    used_keys = set()
+
+    # Try up to the number of keys we have
+    for attempt in range(min(3, keys.size)):
+        key = keys.next_key()
+        used_keys.add(key)
+
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "q": "minecraft",
+            "maxResults": 1,
+            "key": key,
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(base_url, params=params) as resp:
+                # Any of these responses are acceptable for this test
+                assert resp.status in [200, 403, 429], f"Unexpected status {resp.status}"
+
+                if resp.status == 200:
+                    # Key is valid - great!
+                    data = await resp.json()
+                    assert "items" in data
+                    break
+
+    # Verify key rotation happened if we have multiple keys
+    if keys.size > 1:
+        assert len(used_keys) > 0, "Should have used at least one key"

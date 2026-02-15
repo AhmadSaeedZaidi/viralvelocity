@@ -4,16 +4,53 @@ import argparse
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Union
+from typing import Any, Dict, Union, cast
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing
 from prefect import flow, get_run_logger, task
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logger = logging.getLogger(__name__)
 
 TARGET_CATEGORIES = ["10", "20", "24", "28", "27"]
+
+
+class RateLimitError(Exception):
+    """Custom exception for 429 rate limiting."""
+
+    pass
+
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=4, max=60),
+    retry=retry_if_exception_type(RateLimitError),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+async def _fetch_with_backoff(
+    session: aiohttp.ClientSession, url: str, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Make HTTP request with automatic retry on rate limits."""
+    async with session.get(url, params=params) as resp:
+        if resp.status == 200:
+            return cast(Dict[str, Any], await resp.json())
+        elif resp.status == 429:
+            logger.warning(f"Rate limit hit (429). Retrying with exponential backoff...")
+            raise RateLimitError("YouTube API rate limit exceeded")
+        elif resp.status == 403:
+            logger.warning(f"API key burned (403). Key rotation required.")
+            raise Exception("API key exhausted")
+        else:
+            logger.error(f"HTTP {resp.status} for historical search")
+            raise Exception(f"HTTP error {resp.status}")
 
 
 @task(name="hunt_history")
@@ -47,38 +84,35 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
         }
 
         max_retries = keys.size
-        for _ in range(max_retries):
+        for attempt in range(max_retries):
             key = keys.next_key()
             params["key"] = key
 
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(base_url, params=params) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            items = data.get("items", [])
+                    data = await _fetch_with_backoff(session, base_url, params)
+                    items = data.get("items", [])
 
-                            for item in items:
-                                await dao.ingest_video_metadata(item, priority_override=100)
+                    for item in items:
+                        await dao.ingest_video_metadata(item, priority_override=100)
 
-                            run_logger.info(
-                                f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
-                            )
-                            break
+                    run_logger.info(
+                        f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
+                    )
+                    break  # Success - exit retry loop
 
-                        elif resp.status == 403:
-                            run_logger.warning(f"Archeologist Key {key[-6:]} burned. Rotating.")
-                            continue
-                        elif resp.status == 429:
-                            run_logger.critical("Archeologist hit 429. Aborting to Resiliency.")
-                            raise SystemExit("429 Rate Limit - Archeologist")
-                        else:
-                            run_logger.error(f"HTTP {resp.status} for historical search")
-                            break
+            except RateLimitError:
+                if attempt == max_retries - 1:
+                    run_logger.critical("All retry attempts exhausted. Aborting Archeologist.")
+                    raise SystemExit("429 Rate Limit - Archeologist")
+                continue  # tenacity decorator will handle backoff
+
             except Exception as e:
                 if isinstance(e, SystemExit):
                     raise
                 run_logger.error(f"Network error in Archeologist: {e}")
+                if attempt == max_retries - 1:
+                    break  # Skip this category after exhausting retries
 
 
 @flow(name="run_archeology_campaign")
