@@ -103,8 +103,9 @@ filterwarnings = [
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
 ]
 env = [
-    "YOUTUBE_API_KEY_POOL_JSON=[\"test_key_1_longer_value\"]",
-    "COMPLIANCE_MODE=true",
+    # NOTE: YOUTUBE_API_KEY_POOL_JSON should come from .env for integration tests
+    # Unit tests mock the KeyRing, so they don't need real keys
+    "COMPLIANCE_MODE=false",
     "VAULT_PROVIDER=huggingface",
     "ENV=dev",
     "JANITOR_ENABLED=false",

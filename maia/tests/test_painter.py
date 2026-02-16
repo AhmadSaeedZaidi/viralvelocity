@@ -82,12 +82,12 @@ async def test_process_frames_successful_with_chapters():
         ],
         "heatmap": [],
     }
-    mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # Minimal JPEG header + data
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.cv2") as mock_cv2,
+        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
         mock_dao = MockDAO.return_value
@@ -97,16 +97,11 @@ async def test_process_frames_successful_with_chapters():
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        mock_cap_instance = MagicMock()
-        mock_cap_instance.isOpened.return_value = True
-        mock_cap_instance.get.side_effect = lambda prop: (30.0 if prop == 5 else 4500)
-        mock_cap_instance.read.return_value = (True, mock_frame)
-
-        mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
-        mock_cv2.CAP_PROP_FPS = 5
-        mock_cv2.CAP_PROP_FRAME_COUNT = 7
-        mock_cv2.CAP_PROP_POS_FRAMES = 1
+        # Mock FFmpeg subprocess to return fake JPEG bytes
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = (fake_jpeg, b"")
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
 
         mock_vault.store_visual_evidence = MagicMock()
 
@@ -128,12 +123,12 @@ async def test_process_frames_successful_with_heatmap():
             {"start_time": 10.0, "value": 0.9},
         ],
     }
-    mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # Minimal JPEG header + data
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.cv2") as mock_cv2,
+        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
         mock_dao = MockDAO.return_value
@@ -144,16 +139,11 @@ async def test_process_frames_successful_with_heatmap():
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[10.0])
 
-        mock_cap_instance = MagicMock()
-        mock_cap_instance.isOpened.return_value = True
-        mock_cap_instance.get.side_effect = lambda prop: 30.0 if prop == 5 else 6000
-        mock_cap_instance.read.return_value = (True, mock_frame)
-
-        mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
-        mock_cv2.CAP_PROP_FPS = 5
-        mock_cv2.CAP_PROP_FRAME_COUNT = 7
-        mock_cv2.CAP_PROP_POS_FRAMES = 1
+        # Mock FFmpeg subprocess to return fake JPEG bytes
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = (fake_jpeg, b"")
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
 
         mock_vault.store_visual_evidence = MagicMock()
 
@@ -173,12 +163,12 @@ async def test_process_frames_fallback_strategy():
         "chapters": [],
         "heatmap": [],
     }
-    mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # Minimal JPEG header + data
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.cv2") as mock_cv2,
+        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
         mock_dao = MockDAO.return_value
@@ -189,16 +179,11 @@ async def test_process_frames_fallback_strategy():
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[])
 
-        mock_cap_instance = MagicMock()
-        mock_cap_instance.isOpened.return_value = True
-        mock_cap_instance.get.side_effect = lambda prop: 30.0 if prop == 5 else 9000
-        mock_cap_instance.read.return_value = (True, mock_frame)
-
-        mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
-        mock_cv2.CAP_PROP_FPS = 5
-        mock_cv2.CAP_PROP_FRAME_COUNT = 7
-        mock_cv2.CAP_PROP_POS_FRAMES = 1
+        # Mock FFmpeg subprocess to return fake JPEG bytes
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = (fake_jpeg, b"")
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
 
         mock_vault.store_visual_evidence = MagicMock()
 
@@ -230,23 +215,30 @@ async def test_process_frames_handles_no_stream_url():
 
 @pytest.mark.asyncio
 async def test_process_frames_handles_video_capture_failure():
-    """Test process_frames handles VideoCapture open failures."""
+    """Test process_frames handles FFmpeg extraction failures."""
     video = {"id": "VIDEO_001", "title": "Test Video"}
-    mock_video_info = {"url": "https://example.com/video.mp4", "chapters": [], "heatmap": []}
+    mock_video_info = {
+        "url": "https://example.com/video.mp4",
+        "duration": 100.0,
+        "chapters": [{"start_time": 0.0}],
+        "heatmap": [],
+    }
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.cv2") as mock_cv2,
+        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        mock_cap_instance = MagicMock()
-        mock_cap_instance.isOpened.return_value = False
-        mock_cv2.VideoCapture.return_value = mock_cap_instance
+        # Mock FFmpeg to fail (non-zero exit code)
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = (b"", b"FFmpeg error")
+        mock_process.returncode = 1
+        mock_popen.return_value = mock_process
 
         await process_frames_task.fn(video)
 
@@ -263,12 +255,12 @@ async def test_process_frames_handles_vault_failure():
         "chapters": [{"start_time": 0.0}],
         "heatmap": [],
     }
-    mock_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.cv2") as mock_cv2,
+        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
         mock_dao = MockDAO.return_value
@@ -276,15 +268,13 @@ async def test_process_frames_handles_vault_failure():
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        mock_cap_instance = MagicMock()
-        mock_cap_instance.isOpened.return_value = True
-        mock_cap_instance.read.return_value = (True, mock_frame)
-        mock_cap_instance.get.side_effect = lambda prop: 30.0 if prop == 5 else 4500
+        # Mock FFmpeg to succeed
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = (fake_jpeg, b"")
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
 
-        mock_cv2.VideoCapture.return_value = mock_cap_instance
-        mock_cv2.imencode.return_value = (True, np.frombuffer(b"fake_bytes", dtype=np.uint8))
-        mock_cv2.CAP_PROP_FPS = 5
-
+        # Mock vault to fail after retries
         mock_vault.store_visual_evidence = MagicMock(side_effect=Exception("Vault error"))
 
         await process_frames_task.fn(video)

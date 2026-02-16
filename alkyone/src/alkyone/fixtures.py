@@ -5,12 +5,29 @@ from typing import Any, AsyncGenerator, Dict, List
 
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
+
+# Load .env BEFORE importing settings to ensure real API keys are available
+load_dotenv(override=False)  # Don't override existing env vars (e.g., from CI)
+
 from atlas.config import settings
 from atlas.db import db
 
 # --- ENVIRONMENT OVERRIDES ---
 os.environ["ENV"] = "dev"
 os.environ["COMPLIANCE_MODE"] = "False"
+
+# Ensure YOUTUBE_API_KEY_POOL_JSON is set (required by Settings to initialize)
+# - In CI: GitHub Secrets inject real keys as environment variables
+# - Locally: load_dotenv() above loads from .env if present
+# - Fallback: Use dummy key for unit tests that mock KeyRing anyway
+if not os.getenv("YOUTUBE_API_KEY_POOL_JSON"):
+    logger_setup = logging.getLogger("alkyone.fixtures")
+    logger_setup.warning(
+        "YOUTUBE_API_KEY_POOL_JSON not set! Using fallback dummy key. "
+        "Integration tests requiring real YouTube API will be skipped."
+    )
+    os.environ["YOUTUBE_API_KEY_POOL_JSON"] = '["DUMMY_KEY_FOR_UNIT_TESTS_ONLY"]'
 
 logger = logging.getLogger("alkyone.fixtures")
 

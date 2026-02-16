@@ -1,15 +1,15 @@
-"""Maia Painter: Video keyframe extraction agent."""
+"""Maia Painter: Video keyframe extraction agent (Turbo Mode: FFmpeg + Concurrency)."""
 
 import argparse
 import asyncio
 import functools
 import logging
 import os
+import random
+import subprocess
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, TypeVar, Union, cast
 
-import cv2
 import numpy as np
-import yt_dlp
 from atlas.adapters.maia import MaiaDAO
 from atlas.vault import vault
 from prefect import flow, get_run_logger, task
@@ -20,6 +20,10 @@ from maia.painter.streamer import StealthVideoStreamer
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+# CONCURRENCY CONTROL
+# 5-8 is optimal to saturate network without triggering 429s on Invidious instances
+MAX_CONCURRENT_VIDEOS = 5
 
 
 def run_in_executor(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
@@ -51,59 +55,110 @@ async def fetch_painter_targets_task(batch_size: int) -> List[Dict[str, Any]]:
     return await dao.fetch_painter_batch(batch_size)
 
 
-def _extract_frames_blocking(
+def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
+    """
+    SURGICAL EXTRACTION: Uses FFmpeg to seek and grab a single frame.
+
+    Much faster than OpenCV for remote streams because FFmpeg handles HTTP Range
+    requests and network seeking optimally. Only downloads the bytes needed for
+    a single frame instead of buffering the entire video.
+
+    Args:
+        stream_url: Direct stream URL (mp4 preferred for seeking)
+        timestamp: Target timestamp in seconds
+
+    Returns:
+        JPEG-encoded image bytes or None if extraction failed
+    """
+    try:
+        # FFmpeg command breakdown:
+        # -ss: Seek to timestamp (BEFORE -i for fast seek via HTTP Range)
+        # -i: Input URL
+        # -frames:v 1: Grab exactly 1 video frame
+        # -f image2: Force image output format
+        # -c:v mjpeg: Encode as JPEG
+        # -: Output to stdout (pipe)
+        # -y: Overwrite without confirmation
+        # -hide_banner -loglevel error: Suppress noise
+        cmd = [
+            "ffmpeg",
+            "-ss",
+            str(timestamp),
+            "-i",
+            stream_url,
+            "-frames:v",
+            "1",
+            "-f",
+            "image2",
+            "-c:v",
+            "mjpeg",
+            "-",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+        ]
+
+        # Run with timeout to prevent hanging on dead streams
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = process.communicate(timeout=10)  # 10s max per frame
+
+        if process.returncode == 0 and out:
+            return out
+        else:
+            if err:
+                logger.debug(f"FFmpeg stderr at {timestamp}s: {err.decode()}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        process.kill()
+        logger.warning(f"FFmpeg timeout at {timestamp}s")
+        return None
+    except Exception as e:
+        logger.warning(f"FFmpeg failed at {timestamp}s: {e}")
+        return None
+
+
+def _extract_frames_surgical(
     stream_url: str, target_timestamps: List[float], duration: float, run_logger: Any
 ) -> List[Tuple[int, bytes]]:
     """
-    Blocking worker function for OpenCV operations.
+    Worker function using FFmpeg for surgical frame extraction.
+
     Executed in a thread pool to avoid blocking the asyncio event loop.
+    Each frame is extracted independently via HTTP Range requests.
     """
-    cap = cv2.VideoCapture(stream_url)
     frames_to_vault: List[Tuple[int, bytes]] = []
 
-    try:
-        if not cap.isOpened():
-            run_logger.error("Failed to open video stream. URL might be expired or 403 Forbidden.")
-            return []
+    # Estimate FPS (default to 30 for frame index calculation)
+    fps = 30.0
 
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            fps = 30.0
+    for ts in target_timestamps:
+        if ts > duration:
+            continue
 
-        for ts in target_timestamps:
-            if ts > duration:
-                continue
+        frame_idx = int(ts * fps)
 
-            frame_idx = int(ts * fps)
+        # Use FFmpeg to grab the frame
+        image_bytes = _ffmpeg_extract_frame(stream_url, ts)
 
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-
-            ret, frame = cap.read()
-            if ret:
-                encode_ret, buffer = cv2.imencode(".jpg", frame)
-                if encode_ret:
-                    image_bytes = buffer.tobytes()
-                    frames_to_vault.append((frame_idx, image_bytes))
-            else:
-                run_logger.warning(f"Failed to read frame at timestamp {ts}s (frame {frame_idx})")
-
-    except Exception as e:
-        run_logger.error(f"Error during frame extraction: {e}")
-    finally:
-        cap.release()
+        if image_bytes:
+            frames_to_vault.append((frame_idx, image_bytes))
+        else:
+            run_logger.warning(f"FFmpeg failed to grab frame at {ts}s")
 
     return frames_to_vault
 
 
 @task(name="process_frames")
 async def process_frames_task(video: Dict[str, Any]) -> None:
-    """Extract and store keyframes for a single video."""
+    """Extract and store keyframes for a single video using FFmpeg surgical extraction."""
     dao = MaiaDAO()
     run_logger = get_run_logger()
     vid_id = video["id"]
 
     try:
-        # 1. Fetch Metadata using StealthVideoStreamer
+        # 1. Fetch Metadata using StealthVideoStreamer (Invidious-first cascade)
         cookie_path = os.getenv("MAIA_COOKIES_PATH")
         streamer = StealthVideoStreamer(cookies_path=cookie_path)
         info = await asyncio.to_thread(streamer.extract_info, vid_id)
@@ -135,9 +190,7 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
         # Fallback: Linear spacing if no rich metadata exists
         if not target_timestamps:
             run_logger.info(f"No chapters/heatmap for {vid_id}. Using fallback linear scaling.")
-            num_frames = 5
-            if duration > 600:
-                num_frames = 10
+            num_frames = 5 if duration < 600 else 10
             if duration > 1800:
                 num_frames = 20
 
@@ -146,11 +199,11 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
                 target_timestamps.update(steps.tolist())
 
         sorted_timestamps = sorted(list(target_timestamps))
-        run_logger.info(f"Targeting {len(sorted_timestamps)} frames at: {sorted_timestamps}")
+        run_logger.info(f"Targeting {len(sorted_timestamps)} frames for {vid_id}")
 
-        # 3. Extract Frames (Off-thread)
+        # 3. SURGICAL EXTRACTION: FFmpeg (Off-thread)
         frames_to_vault = await asyncio.to_thread(
-            _extract_frames_blocking, stream_url, sorted_timestamps, duration, run_logger
+            _extract_frames_surgical, stream_url, sorted_timestamps, duration, run_logger
         )
 
         if not frames_to_vault:
@@ -159,11 +212,10 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
             return
 
         # 4. Store to Vault
-        run_logger.info(f"Uploading {len(frames_to_vault)} frames to Vault for {vid_id}")
         await _store_visuals_to_vault_with_retry(vid_id, frames_to_vault)
 
         await dao.mark_video_visuals_safe(vid_id)
-        run_logger.info(f"Painted {len(frames_to_vault)} keyframes for {vid_id}")
+        run_logger.info(f"✅ Painted {len(frames_to_vault)} keyframes for {vid_id}")
 
     except SystemExit:
         raise
@@ -174,9 +226,16 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
 
 @flow(name="run_painter_cycle")
 async def painter_flow(batch_size: int) -> Dict[str, Any]:
-    """Execute a complete Painter cycle."""
+    """
+    Execute a complete Painter cycle with PARALLEL processing.
+
+    Uses a semaphore to control concurrency (default: 5 concurrent videos).
+    Each video is processed independently with FFmpeg surgical extraction.
+    """
     run_logger = get_run_logger()
-    run_logger.info("=== Starting Painter Cycle ===")
+    run_logger.info(
+        f"=== Starting Painter Cycle (Turbo Mode: {MAX_CONCURRENT_VIDEOS} concurrent) ==="
+    )
 
     targets = await fetch_painter_targets_task(batch_size)
 
@@ -184,10 +243,20 @@ async def painter_flow(batch_size: int) -> Dict[str, Any]:
         run_logger.info("No videos need visual processing. Painter cycle complete (idle).")
         return {"videos_processed": 0}
 
-    run_logger.info(f"Processing {len(targets)} videos...")
+    run_logger.info(f"Processing {len(targets)} videos in parallel...")
 
-    for video in targets:
-        await process_frames_task(video)
+    # CONCURRENCY CONTROL: Semaphore to limit simultaneous FFmpeg processes
+    sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
+
+    async def protected_process(vid: Dict[str, Any]) -> None:
+        """Process a single video with semaphore protection and jitter."""
+        async with sem:
+            # Add random jitter to stagger requests and avoid thundering herd
+            await asyncio.sleep(random.uniform(0.5, 2.0))
+            await process_frames_task(vid)
+
+    # THE SWARM: Launch all tasks concurrently
+    await asyncio.gather(*[protected_process(v) for v in targets], return_exceptions=True)
 
     run_logger.info(f"=== Painter Cycle Complete === Processed {len(targets)} videos")
     return {"videos_processed": len(targets)}
