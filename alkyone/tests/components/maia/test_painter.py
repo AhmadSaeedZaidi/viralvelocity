@@ -3,7 +3,7 @@ Integration tests for Maia Painter.
 
 Verifies end-to-end behavior using REAL external services:
 1. Real YouTube Video (Blender 4.0 Tutorial - B0J27sf9N1Y)
-2. Real Network Calls (yt-dlp)
+2. Real Network Calls (Invidious federation → yt-dlp fallback)
 3. Real Vault Storage
 
 Usage: pytest -m integration tests/integration/test_painter.py
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def is_network_available() -> bool:
     """Check if network is available for real integration tests."""
     try:
-        socket.create_connection(("www.youtube.com", 80), timeout=3)
+        socket.create_connection(("8.8.8.8", 53), timeout=3)
         return True
     except OSError:
         return False
@@ -52,6 +52,9 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
     1. Pre-flight: Video actually has chapters/heatmap (via StealthVideoStreamer).
     2. Execution: Painter agent runs successfully.
     3. Outcome: Video is marked as 'has_visuals' in the DB.
+
+    The StealthVideoStreamer tries Invidious federation first, then falls back
+    to direct yt-dlp strategies automatically.
     """
     video_id = "B0J27sf9N1Y"
 
@@ -61,6 +64,7 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         from maia.painter.streamer import StealthVideoStreamer
 
         streamer = StealthVideoStreamer()
+        # extract_info now tries Invidious first, then direct yt-dlp
         info = streamer.extract_info(video_id)
 
         has_chapters = len(info.get("chapters", []) or []) > 0
@@ -78,7 +82,10 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         if "429" in error_str:
             pytest.skip("YouTube Rate Limit (429) active. Skipping live test.")
         elif "Sign in" in error_str or "bot" in error_str:
-            pytest.skip("YouTube anti-bot active. Requires cookies.txt for this test.")
+            pytest.skip(
+                "All extraction strategies blocked (Invidious + direct). "
+                "YouTube anti-bot is active across all federated instances."
+            )
         raise e
     except Exception as e:
         pytest.fail(f"Pre-flight check failed: {e}")

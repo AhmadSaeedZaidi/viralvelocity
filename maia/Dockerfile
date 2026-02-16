@@ -18,9 +18,11 @@ WORKDIR /app
 # Install system dependencies
 # - libpq-dev: Required for psycopg3 (PostgreSQL adapter)
 # - gcc: Required for building Python extensions
+# - ffmpeg: Required for Invidious stream merging (video+audio DASH)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     gcc \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build tools
