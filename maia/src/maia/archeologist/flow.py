@@ -11,6 +11,7 @@ from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing
 from prefect import flow, get_run_logger, task
 from tenacity import (
+    RetryError,
     before_sleep_log,
     retry,
     retry_if_exception_type,
@@ -101,11 +102,12 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
                     )
                     break  # Success - exit retry loop
 
-            except RateLimitError:
+            except RetryError:
+                # Tenacity exhausted all retries (likely due to persistent 429 errors)
                 if attempt == max_retries - 1:
                     run_logger.critical("All retry attempts exhausted. Aborting Archeologist.")
                     raise SystemExit("429 Rate Limit - Archeologist")
-                continue  # tenacity decorator will handle backoff
+                continue  # Try next API key
 
             except Exception as e:
                 if isinstance(e, SystemExit):

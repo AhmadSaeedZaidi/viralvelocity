@@ -8,12 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-from maia.painter.flow import (
-    VideoStreamer,
-    fetch_painter_targets_task,
-    painter_flow,
-    process_frames_task,
-)
+from maia.painter.flow import fetch_painter_targets_task, painter_flow, process_frames_task
+from maia.painter.streamer import StealthVideoStreamer
 
 
 @pytest.mark.asyncio
@@ -49,8 +45,8 @@ async def test_fetch_painter_targets_with_videos():
 
 
 def test_video_streamer_extract_heatmap_peaks():
-    """Test VideoStreamer extracts top N peaks from heatmap data."""
-    streamer = VideoStreamer("VIDEO_001")
+    """Test StealthVideoStreamer extracts top N peaks from heatmap data."""
+    streamer = StealthVideoStreamer()
     heatmap_data = [
         {"start_time": 10.0, "end_time": 11.0, "value": 0.5},
         {"start_time": 25.0, "end_time": 26.0, "value": 0.9},
@@ -66,8 +62,8 @@ def test_video_streamer_extract_heatmap_peaks():
 
 
 def test_video_streamer_extract_heatmap_peaks_empty():
-    """Test VideoStreamer handles empty heatmap data."""
-    streamer = VideoStreamer("VIDEO_001")
+    """Test StealthVideoStreamer handles empty heatmap data."""
+    streamer = StealthVideoStreamer()
     peaks = streamer.extract_heatmap_peaks([], top_n=5)
     assert peaks == []
 
@@ -90,7 +86,7 @@ async def test_process_frames_successful_with_chapters():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2") as mock_cv2,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
@@ -99,7 +95,7 @@ async def test_process_frames_successful_with_chapters():
         mock_dao.mark_video_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
+        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
@@ -136,7 +132,7 @@ async def test_process_frames_successful_with_heatmap():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2") as mock_cv2,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
@@ -145,7 +141,7 @@ async def test_process_frames_successful_with_heatmap():
         mock_dao.mark_video_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
+        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[10.0])
 
         mock_cap_instance = MagicMock()
@@ -181,7 +177,7 @@ async def test_process_frames_fallback_strategy():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2") as mock_cv2,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
@@ -190,7 +186,7 @@ async def test_process_frames_fallback_strategy():
         mock_dao.mark_video_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
+        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[])
 
         mock_cap_instance = MagicMock()
@@ -220,12 +216,12 @@ async def test_process_frames_handles_no_stream_url():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
+        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
         await process_frames_task.fn(video)
 
@@ -240,13 +236,13 @@ async def test_process_frames_handles_video_capture_failure():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2") as mock_cv2,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
+        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = False
@@ -271,14 +267,14 @@ async def test_process_frames_handles_vault_failure():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.cv2") as mock_cv2,
         patch("maia.painter.flow.vault") as mock_vault,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(return_value=mock_video_info)
+        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
         mock_cap_instance = MagicMock()
         mock_cap_instance.isOpened.return_value = True
@@ -303,10 +299,10 @@ async def test_process_frames_propagates_resiliency_strategy():
 
     with (
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
-        patch("maia.painter.flow.VideoStreamer") as MockStreamer,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
     ):
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.get_info = MagicMock(side_effect=SystemExit("429 Rate Limit"))
+        mock_streamer_instance.extract_info = MagicMock(side_effect=SystemExit("429 Rate Limit"))
 
         with pytest.raises(SystemExit):
             await process_frames_task.fn(video)
