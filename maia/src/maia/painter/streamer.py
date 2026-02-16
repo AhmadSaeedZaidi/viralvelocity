@@ -213,7 +213,7 @@ class StealthVideoStreamer:
             "no_warnings": True,
             "nocheckcertificate": True,
             "geo_bypass": True,
-            "socket_timeout": 30,
+            "socket_timeout": 5,
             # Format Trap: Force mp4 for OpenCV compatibility
             "format": "best[ext=mp4]/best",
             "force_ipv4": True,

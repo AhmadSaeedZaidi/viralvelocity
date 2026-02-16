@@ -116,7 +116,7 @@ async def test_archeologist_high_priority_override(dao):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_archeologist_handles_resiliency_strategy(dao):
-    """Test Archeologist raises SystemExit on 429 rate limit (Resiliency Strategy)."""
+    """Test Archeologist handles 429 rate limit gracefully with retry logic."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
         patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
@@ -124,20 +124,27 @@ async def test_archeologist_handles_resiliency_strategy(dao):
     ):
         mock_keyring = MagicMock()
         mock_keyring.next_key = MagicMock(return_value="test_key")
-        mock_keyring.size = 1
+        mock_keyring.size = 3  # Give it keys to rotate through
         MockKeyRing.return_value = mock_keyring
 
-        # Configure _fetch_with_backoff to raise RateLimitError
-        from maia.archeologist.flow import RateLimitError
+        # Configure _fetch_with_backoff to raise RetryError (tenacity exhausted retries)
+        from tenacity import RetryError
 
-        MockFetch.side_effect = RateLimitError("Rate limit exceeded")
+        # Create a proper RetryError with a failed future
+        import concurrent.futures
+
+        failed_future = concurrent.futures.Future()
+        failed_future.set_exception(Exception("Rate limit"))
+        retry_error = RetryError(failed_future)
+
+        MockFetch.side_effect = retry_error
 
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
         MockSession.return_value = mock_session_instance
 
-        # Verify SystemExit is raised after retry exhaustion
+        # System should raise SystemExit only after exhausting ALL keys
         with pytest.raises(SystemExit):
             await hunt_history(year=2010, month=1)
 
@@ -196,8 +203,19 @@ async def test_archeologist_key_rotation_on_403(dao):
 @pytest.mark.asyncio
 async def test_archeologist_campaign_multi_month(dao):
     """Test Archeologist campaign iterates through multiple months."""
-    with patch("maia.archeologist.flow.hunt_history_task") as mock_hunt:
-        mock_hunt.return_value = AsyncMock()
+    with (
+        patch("maia.archeologist.flow.hunt_history_task") as mock_hunt,
+        patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
+    ):
+        # Configure hunt_history_task as an async mock that returns None
+        mock_hunt_coro = AsyncMock(return_value=None)
+        mock_hunt.return_value = mock_hunt_coro
+
+        # Setup KeyRing mock
+        mock_keyring = MagicMock()
+        mock_keyring.next_key = MagicMock(return_value="test_key")
+        mock_keyring.size = 3
+        MockKeyRing.return_value = mock_keyring
 
         # Run campaign for 2010 (12 months)
         await run_archeology_campaign(start_year=2010, end_year=2010)

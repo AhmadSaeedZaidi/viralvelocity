@@ -224,6 +224,7 @@ class TestStealthVideoStreamer:
         opts = streamer._get_base_options()
         assert opts["format"] == "best[ext=mp4]/best"
         assert opts["force_ipv4"] is True
+        assert opts["socket_timeout"] == 5  # Aggressive timeout for Invidious rotation
 
     def test_resolve_stream_url_from_url_field(self) -> None:
         """Test stream URL is resolved from top-level 'url' field."""
