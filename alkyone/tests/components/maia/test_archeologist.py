@@ -128,10 +128,10 @@ async def test_archeologist_handles_resiliency_strategy(dao):
         MockKeyRing.return_value = mock_keyring
 
         # Configure _fetch_with_backoff to raise RetryError (tenacity exhausted retries)
-        from tenacity import RetryError
-
         # Create a proper RetryError with a failed future
         import concurrent.futures
+
+        from tenacity import RetryError
 
         failed_future = concurrent.futures.Future()
         failed_future.set_exception(Exception("Rate limit"))
