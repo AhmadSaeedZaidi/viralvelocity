@@ -165,12 +165,44 @@ jobs:
 
       - name: Run Integration Tests
         env:
+          # Database (from ephemeral Neon branch)
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+          
+          # YouTube API Keys
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
-          VAULT_PROVIDER: "huggingface"
+          KEY_POOL_ARCHEOLOGY_SIZE: ${{ secrets.KEY_POOL_ARCHEOLOGY_SIZE }}
+          KEY_POOL_TRACKING_SIZE: ${{ secrets.KEY_POOL_TRACKING_SIZE }}
+          
+          # Vault Configuration
+          VAULT_PROVIDER: ${{ vars.VAULT_PROVIDER || 'huggingface' }}
           HF_DATASET_ID: ${{ secrets.HF_DATASET_ID }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          ENV: "dev"
+          
+          # Prefect (optional)
+          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
+          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
+          
+          # Discord Webhooks (optional)
+          DISCORD_WEBHOOK_ALERTS: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
+          
+          # Configuration Variables
+          ENV: ${{ vars.ENV || 'development' }}
+          COMPLIANCE_MODE: ${{ vars.COMPLIANCE_MODE || 'false' }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'DEBUG' }}
+          
+          # Agent Batch Sizes
+          HUNTER_BATCH_SIZE: ${{ vars.HUNTER_BATCH_SIZE || '10' }}
+          PAINTER_BATCH_SIZE: ${{ vars.PAINTER_BATCH_SIZE || '3' }}
+          SCRIBE_BATCH_SIZE: ${{ vars.SCRIBE_BATCH_SIZE || '5' }}
+          TRACKER_BATCH_SIZE: ${{ vars.TRACKER_BATCH_SIZE || '50' }}
+          
+          # Janitor Configuration
+          JANITOR_ENABLED: ${{ vars.JANITOR_ENABLED || 'true' }}
+          JANITOR_RETENTION_DAYS: ${{ vars.JANITOR_RETENTION_DAYS || '7' }}
+          JANITOR_SAFETY_CHECK: ${{ vars.JANITOR_SAFETY_CHECK || 'true' }}
+          
+          # Alerts
+          ALERT_ON_HYDRA_PROTOCOL: ${{ vars.ALERT_ON_HYDRA_PROTOCOL || 'true' }}
         run: make test-int
 
       - name: Cleanup (Delete Neon Branch)

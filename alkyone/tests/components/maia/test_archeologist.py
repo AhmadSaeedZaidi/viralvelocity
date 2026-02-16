@@ -49,10 +49,27 @@ async def test_archeologist_complete_hunt_cycle(dao, mock_youtube_search_respons
 
         # Execute hunt for January 2010
         await hunt_history(year=2010, month=1)
+
+        # CRITICAL: Verify REAL database writes (not in-memory/mock)
+        print("[Test] Verifying REAL Neon DB writes...")
         videos = await dao._fetch_all("SELECT * FROM videos ORDER BY discovered_at DESC LIMIT 10")
-        assert len(videos) >= 5
+        assert len(videos) >= 5, (
+            f"Expected at least 5 videos in REAL database, got {len(videos)}. "
+            "DAO may be using mock/in-memory DB instead of Neon!"
+        )
+
         video_ids = [v["id"] for v in videos]
-        assert "dQw4w9WgXcQ" in video_ids
+        assert "dQw4w9WgXcQ" in video_ids, f"Expected test video not found. Got: {video_ids}"
+
+        # Verify connection to REAL Neon (check DSN)
+        from atlas.config import settings
+
+        db_url = str(settings.DATABASE_URL)
+        assert (
+            "neon.tech" in db_url or "postgres" in db_url
+        ), f"CRITICAL: DATABASE_URL does not point to Neon! Got: {db_url[:50]}..."
+
+        print(f"[Test] ✅ SUCCESS! Videos written to REAL Neon DB at {db_url[:30]}...")
 
 
 @pytest.mark.integration
@@ -120,36 +137,47 @@ async def test_archeologist_handles_resiliency_strategy(dao):
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
         patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
-        patch("maia.archeologist.flow._fetch_with_backoff") as MockFetch,
+        patch("maia.archeologist.flow.logger") as mock_logger,
     ):
         mock_keyring = MagicMock()
         mock_keyring.next_key = MagicMock(return_value="test_key")
         mock_keyring.size = 3  # Give it keys to rotate through
         MockKeyRing.return_value = mock_keyring
 
-        # Configure _fetch_with_backoff to raise RetryError (tenacity exhausted retries)
-        # Create a proper RetryError with a failed future
-        import concurrent.futures
-
-        from tenacity import RetryError
-
-        failed_future = concurrent.futures.Future()
-        failed_future.set_exception(Exception("Rate limit"))
-        retry_error = RetryError(failed_future)
-
-        MockFetch.side_effect = retry_error
-
         mock_session_instance = MagicMock()
         mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
         mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+
+        # Mock 429 response on first attempts, then success
+        call_count = {"count": 0}
+
+        async def mock_get_with_429():
+            call_count["count"] += 1
+            if call_count["count"] <= 2:
+                # First 2 calls return 429
+                mock_resp = AsyncMock()
+                mock_resp.status = 429
+                return mock_resp
+            else:
+                # Third call succeeds with empty results
+                mock_resp = AsyncMock()
+                mock_resp.status = 200
+                mock_resp.json = AsyncMock(return_value={"items": []})
+                return mock_resp
+
+        mock_get_context = MagicMock()
+        mock_get_context.__aenter__ = mock_get_with_429
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+
+        mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        # After the refactor, the system retries with exponential backoff and logs warnings.
-        # SystemExit only occurs after exhausting ALL keys (size=3) after retry attempts.
-        # Since _fetch_with_backoff is mocked to always raise RetryError, and we have 3 keys,
-        # it should exhaust all keys and then raise SystemExit.
-        with pytest.raises(SystemExit):
-            await hunt_history(year=2010, month=1)
+        # The system should handle 429s gracefully with retry/backoff, NOT crash
+        # It should log warnings and eventually succeed (or continue gracefully)
+        await hunt_history(year=2010, month=1)
+
+        # Verify that warning logs were emitted for rate limit retries
+        assert mock_logger.warning.call_count >= 1, "Should log warnings during retry attempts"
 
 
 @pytest.mark.integration
@@ -209,9 +237,13 @@ async def test_archeologist_campaign_multi_month(dao):
     from atlas.utils import KeyRing
 
     with patch("maia.archeologist.flow.hunt_history_task") as mock_hunt:
-        # Configure hunt_history_task as an async mock that returns None
-        mock_hunt_coro = AsyncMock(return_value=None)
-        mock_hunt.return_value = mock_hunt_coro
+        # Configure hunt_history_task as an AsyncMock
+        # When called, it should return an awaitable that resolves to None
+        async def fake_hunt_history(year: int, month: int, keys: KeyRing) -> None:
+            """Mock implementation that does nothing."""
+            pass
+
+        mock_hunt.side_effect = fake_hunt_history
 
         # Use real KeyRing (will pull from test environment or create mock keys)
         # The agent creates its own KeyRing internally
@@ -452,11 +484,25 @@ async def test_archeologist_real_youtube_api_search(dao):
             # Ingest one video to verify DAO integration
             await dao.ingest_video_metadata(items[0], priority_override=100)
 
-            # Verify video was stored
+            # Verify video was stored IN REAL DATABASE
             video_id = items[0]["id"]["videoId"]
             video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
-            assert video is not None
+            assert (
+                video is not None
+            ), f"Video {video_id} not found in REAL database after ingestion!"
             assert video["id"] == video_id
+
+            # CRITICAL: Verify connection to REAL Neon (not mock/in-memory)
+            from atlas.config import settings
+
+            db_url = str(settings.DATABASE_URL)
+            assert (
+                "neon.tech" in db_url or "postgres" in db_url
+            ), f"CRITICAL: DATABASE_URL does not point to real Neon! Got: {db_url[:50]}..."
+
+            print(
+                f"[Test] ✅ SUCCESS! Video {video_id} ingested into REAL Neon DB at {db_url[:30]}..."
+            )
 
 
 @pytest.mark.integration

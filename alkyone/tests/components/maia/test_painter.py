@@ -121,14 +121,54 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
     except Exception as e:
         pytest.fail(f"Painter Agent crashed during execution: {e}")
 
-    # 4. Assertions
+    # 4. Assertions - Database State
     print("[Test] Verifying Database State...")
     video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
 
     assert video["status"] != "FAILED", f"Video processing failed. Status: {video.get('status')}"
     assert video["has_visuals"] is True, "Painter finished but 'has_visuals' is not True."
 
-    print("[Test] Success! Real video processed and marked safe.")
+    # 5. CRITICAL: Verify REAL HuggingFace Upload
+    print("[Test] Verifying REAL HuggingFace Upload...")
+    from atlas.config import settings
+    from huggingface_hub import HfApi
+
+    if settings.VAULT_PROVIDER == "huggingface":
+        hf_token = os.getenv("HF_TOKEN")
+        hf_dataset = os.getenv("HF_DATASET_ID")
+
+        assert hf_token, "HF_TOKEN must be set for integration tests"
+        assert hf_dataset, "HF_DATASET_ID must be set for integration tests"
+
+        api = HfApi(token=hf_token)
+
+        # Check if visual evidence files exist in the REAL HuggingFace dataset
+        try:
+            files_in_repo = api.list_repo_files(repo_id=hf_dataset, repo_type="dataset")
+            visual_files = [f for f in files_in_repo if f.startswith(f"frames/{video_id}/")]
+
+            assert len(visual_files) > 0, (
+                f"CRITICAL FAILURE: No files found in HuggingFace for video {video_id}! "
+                f"Vault is NOT writing to real infrastructure. "
+                f"Found files: {visual_files}"
+            )
+
+            print(
+                f"[Test] ✅ SUCCESS! Found {len(visual_files)} frames in REAL HuggingFace dataset:"
+            )
+            for f in visual_files[:3]:  # Show first 3
+                print(f"  - {f}")
+
+            # Track for cleanup
+            from alkyone.fixtures import track_hf_upload
+
+            for f in visual_files:
+                track_hf_upload(f)
+
+        except Exception as e:
+            pytest.fail(f"Failed to verify HuggingFace upload: {e}")
+
+    print("[Test] Success! Real video processed and verified in REAL infrastructure.")
 
 
 @pytest.mark.integration
