@@ -66,23 +66,8 @@ class DatabaseManager:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
 
-            import atlas
-
-            schema_path = os.path.join(os.path.dirname(atlas.__file__), "schema.sql")
-
-            if not os.path.exists(schema_path):
-                raise FileNotFoundError(f"Could not find schema.sql at {schema_path}")
-
-            with open(schema_path, "r") as f:
-                sql_script = f.read()
-
-                filtered_lines = []
-                for line in sql_script.split("\n"):
-                    if not line.strip().upper().startswith("CREATE EXTENSION"):
-                        filtered_lines.append(line)
-
-                filtered_script = "\n".join(filtered_lines)
-                await conn.execute(filtered_script)
+            sql = load_schema_sql(include_extensions=False)
+            await conn.execute(sql)
 
             logger.info("Test schema initialized successfully")
 
@@ -108,6 +93,34 @@ class DatabaseManager:
             """
             )
             logger.debug("Database reset for test")
+
+
+def load_schema_sql(*, include_extensions: bool = True) -> str:
+    """Load schema.sql content, optionally excluding CREATE EXTENSION statements.
+
+    Args:
+        include_extensions: If False, filter out ``CREATE EXTENSION`` lines.
+            Useful for test environments where extensions are created separately.
+
+    Returns:
+        The SQL script as a string.
+    """
+    schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+    if not os.path.exists(schema_path):
+        raise FileNotFoundError(f"Schema file not found: {schema_path}")
+
+    with open(schema_path, "r") as f:
+        sql = f.read()
+
+    if not include_extensions:
+        filtered_lines = [
+            line
+            for line in sql.split("\n")
+            if not line.strip().upper().startswith("CREATE EXTENSION")
+        ]
+        sql = "\n".join(filtered_lines)
+
+    return sql
 
 
 db = DatabaseManager()

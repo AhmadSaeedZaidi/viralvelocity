@@ -4,23 +4,38 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-if TYPE_CHECKING:
-    from atlas.adapters import DatabaseAdapter
-
 logger = logging.getLogger("atlas.adapters.maia.adaptive_scheduling")
 
 
 class AdaptiveSchedulingMixin:
     """Persistent video tracking beyond Janitor cleanup.
 
-    This mixin requires the class to have _execute, _fetch_all, and _execute_many methods
-    (typically provided by DatabaseAdapter).
+    This mixin must be composed with a class that provides
+    :class:`~atlas.adapters.DatabaseAdapterProtocol` methods
+    (``_execute``, ``_fetch_all``, ``_execute_many``).
+
+    The constraint is validated at class-creation time via
+    ``__init_subclass__``.
     """
+
+    _REQUIRED_ADAPTER_METHODS: tuple[str, ...] = ("_execute", "_fetch_all", "_execute_many")
 
     if TYPE_CHECKING:
         _execute: Any
         _fetch_all: Any
         _execute_many: Any
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        missing = [
+            m for m in AdaptiveSchedulingMixin._REQUIRED_ADAPTER_METHODS if not hasattr(cls, m)
+        ]
+        if missing:
+            raise TypeError(
+                f"{cls.__name__} uses AdaptiveSchedulingMixin but is missing "
+                f"required methods: {', '.join(missing)}. "
+                f"Ensure it also extends DatabaseAdapter."
+            )
 
     async def add_to_watchlist(self, video_id: str, tier: str = "HOURLY") -> None:
         query = """

@@ -6,7 +6,7 @@ import logging
 from typing import Any, Dict, List
 
 from atlas.adapters.maia import MaiaDAO
-from atlas.vault import vault
+from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 from tenacity import (
     before_sleep_log,
@@ -16,9 +16,14 @@ from tenacity import (
     wait_exponential,
 )
 
+from maia.utils import vault_op_with_retry
+
 from .loader import TranscriptLoader
 
-logger = logging.getLogger("maia.scribe")
+logger = logging.getLogger(__name__)
+
+# Concurrent transcripts — bounded by semaphore to avoid overwhelming external APIs
+MAX_CONCURRENT_TRANSCRIPTS = 5
 
 
 @retry(
@@ -28,19 +33,8 @@ logger = logging.getLogger("maia.scribe")
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) -> Any:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, loader.fetch, vid_id)
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-async def _store_to_vault_with_retry(vid_id: str, transcript_data: Any) -> None:
-    """Store transcript to vault with retry logic for network failures."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: vault.store_transcript(vid_id, transcript_data))
 
 
 @task(name="fetch_scribe_targets")
@@ -65,7 +59,8 @@ async def process_transcript_task(video: Dict[str, Any]) -> None:
         transcript_data = await _fetch_transcript_with_retry(loader, vid_id)
 
         if transcript_data:
-            await _store_to_vault_with_retry(vid_id, transcript_data)
+            v = get_vault()
+            await vault_op_with_retry(lambda: v.store_transcript(vid_id, transcript_data))
             await dao.mark_video_transcript_safe(vid_id)
             run_logger.info(f"Scribed transcript for {vid_id}")
         else:
@@ -99,10 +94,15 @@ async def scribe_flow(batch_size: int) -> Dict[str, Any]:
         run_logger.info("No videos need transcripts. Scribe cycle complete (idle).")
         return {"videos_processed": 0}
 
-    run_logger.info(f"Processing {len(targets)} videos...")
+    run_logger.info(f"Processing {len(targets)} videos concurrently...")
 
-    for video in targets:
-        await process_transcript_task(video)
+    sem = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTS)
+
+    async def _bounded(video: Dict[str, Any]) -> None:
+        async with sem:
+            await process_transcript_task(video)
+
+    await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
 
     run_logger.info(f"=== Scribe Cycle Complete === Processed {len(targets)} videos")
     return {"videos_processed": len(targets)}

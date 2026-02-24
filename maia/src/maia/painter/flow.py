@@ -2,50 +2,25 @@
 
 import argparse
 import asyncio
-import functools
 import logging
 import os
 import random
 import subprocess
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Tuple, TypeVar, Union, cast
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 from atlas.adapters.maia import MaiaDAO
-from atlas.vault import vault
+from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
-from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
 
 from maia.painter.streamer import StealthVideoStreamer
+from maia.utils import vault_op_with_retry
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 # CONCURRENCY CONTROL
 # 5-8 is optimal to saturate network without triggering 429s on Invidious instances
 MAX_CONCURRENT_VIDEOS = 5
-
-
-def run_in_executor(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
-    """Decorator to run blocking functions in the default executor."""
-
-    @functools.wraps(func)
-    async def wrapper(*args: Any, **kwargs: Any) -> T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
-
-    return wrapper
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-async def _store_visuals_to_vault_with_retry(vid_id: str, frames: List[Tuple[int, bytes]]) -> None:
-    """Store visual evidence to vault with retry logic for network failures."""
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, lambda: vault.store_visual_evidence(vid_id, frames))
 
 
 @task(name="fetch_painter_targets")
@@ -212,7 +187,8 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
             return
 
         # 4. Store to Vault
-        await _store_visuals_to_vault_with_retry(vid_id, frames_to_vault)
+        v = get_vault()
+        await vault_op_with_retry(lambda: v.store_visual_evidence(vid_id, frames_to_vault))
 
         await dao.mark_video_visuals_safe(vid_id)
         run_logger.info(f"✅ Painted {len(frames_to_vault)} keyframes for {vid_id}")

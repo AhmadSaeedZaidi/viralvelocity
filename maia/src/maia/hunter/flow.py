@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing, ResiliencyExecutor
-from atlas.vault import vault
+from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -92,8 +92,8 @@ async def ingest_results_task(topic: Dict[str, Any], response: Dict[str, Any]) -
     Ingest video metadata and implement the Snowball Effect.
 
     Steps:
-    1. Store raw metadata to vault (cold archive)
-    2. Ingest structured metadata to database (hot index)
+    1. Store raw metadata to vault (cold archive) — concurrent, best-effort
+    2. Ingest structured metadata to database (hot index) — concurrent
     3. Extract tags from all videos (Snowball)
     4. Add unique tags to search queue
     5. Update topic state with pagination token
@@ -107,22 +107,38 @@ async def ingest_results_task(topic: Dict[str, Any], response: Dict[str, Any]) -
     items = response.get("items", [])
     next_token = response.get("nextPageToken")
 
-    snowball_tags: List[str] = []
+    # 1. Store raw metadata to vault concurrently (best-effort, off event-loop)
+    v = get_vault()
 
+    async def _vault_store(vid_id: str, data: Dict[str, Any]) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: v.store_metadata(vid_id, data))
+        except Exception as e:
+            run_logger.warning(f"Failed to store metadata for {vid_id} to vault: {e}")
+
+    vault_tasks = []
     for item in items:
         vid_id = item.get("id", {}).get("videoId")
         if vid_id:
-            try:
-                vault.store_metadata(vid_id, item)
-            except Exception as e:
-                run_logger.warning(f"Failed to store metadata for {vid_id} to vault: {e}")
+            vault_tasks.append(_vault_store(vid_id, item))
 
+    # 2. Ingest structured metadata to database concurrently
+    async def _db_ingest(item: Dict[str, Any]) -> None:
+        vid_id = item.get("id", {}).get("videoId") or item.get("id")
         try:
             await dao.ingest_video_metadata(item)
         except Exception as e:
             run_logger.error(f"Failed to ingest video {vid_id} to database: {e}")
-            continue
 
+    db_tasks = [_db_ingest(item) for item in items]
+
+    # Fire vault stores and DB inserts concurrently
+    await asyncio.gather(*vault_tasks, *db_tasks)
+
+    # 3. Extract snowball tags (pure computation — no I/O)
+    snowball_tags: List[str] = []
+    for item in items:
         snippet = item.get("snippet", {})
         tags = snippet.get("tags", [])
         if tags and isinstance(tags, list):

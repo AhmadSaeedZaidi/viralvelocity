@@ -33,11 +33,11 @@ class TranscriptLoader:
             # Priority 1: Manual English
             try:
                 transcript = transcript_list.find_manually_created_transcript(["en"])
-            except:
+            except Exception:
                 # Priority 2: Generated English (Better than nothing)
                 try:
                     transcript = transcript_list.find_generated_transcript(["en"])
-                except:
+                except Exception:
                     # Priority 3: Any Manual (Foreign language is better than no text)
                     # We look for common languages.
                     transcript = transcript_list.find_manually_created_transcript(

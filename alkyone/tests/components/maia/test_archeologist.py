@@ -123,16 +123,18 @@ async def test_archeologist_high_priority_override(dao):
         # Verify video exists with high priority
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("HISTORICAL_001",))
 
-        assert video is not None
-        assert video["id"] == "HISTORICAL_001"
+        assert video is not None, "Historical video HISTORICAL_001 not found in database"
+        assert video["id"] == "HISTORICAL_001", f"Video ID mismatch: {video['id']}"
         # Note: Priority is stored in search_queue, not videos table
         # The video itself should exist with PENDING status
-        assert video["status"] == "PENDING"
+        assert (
+            video["status"] == "PENDING"
+        ), f"Expected PENDING status for historical video, got {video['status']}"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_archeologist_handles_resiliency_strategy(dao):
+async def test_archeologist_handles_resiliency_strategy(dao, mock_sleep):
     """Test Archeologist handles 429 rate limit gracefully with retry logic and exponential backoff."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
@@ -182,7 +184,7 @@ async def test_archeologist_handles_resiliency_strategy(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_archeologist_key_rotation_on_403(dao):
+async def test_archeologist_key_rotation_on_403(dao, mock_sleep):
     """Test Archeologist rotates keys on 403 Forbidden errors."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
@@ -227,7 +229,9 @@ async def test_archeologist_key_rotation_on_403(dao):
 
         await hunt_history(year=2010, month=1)
 
-        assert len(keys_used) > 1
+        assert (
+            len(keys_used) > 1
+        ), f"Key rotation should use >1 key on 403 errors, used {len(keys_used)}"
 
 
 @pytest.mark.integration
@@ -251,7 +255,9 @@ async def test_archeologist_campaign_multi_month(dao):
         await run_archeology_campaign(start_year=2010, end_year=2010)
 
         # Verify hunt_history_task was called for all 12 months of 2010
-        assert mock_hunt.call_count == 12
+        assert (
+            mock_hunt.call_count == 12
+        ), f"Campaign should invoke hunt_history for all 12 months, got {mock_hunt.call_count}"
 
         # Verify correct month sequence (should be called with year, month, keys)
         for month in range(1, 13):
@@ -300,7 +306,7 @@ async def test_archeologist_handles_empty_results(dao):
             "SELECT * FROM videos WHERE published_at BETWEEN %s AND %s",
             ("2005-01-01", "2005-02-01"),
         )
-        assert len(videos) == 0
+        assert len(videos) == 0, f"Expected 0 videos for empty result month, got {len(videos)}"
 
 
 @pytest.mark.integration
@@ -336,10 +342,14 @@ async def test_archeologist_time_window_calculation(dao):
         last_call = mock_session_instance.get.call_args_list[-1]
         params = last_call[1]["params"]
 
-        assert "publishedAfter" in params
-        assert "publishedBefore" in params
-        assert params["publishedAfter"].startswith("2010-12-01")
-        assert params["publishedBefore"].startswith("2011-01-01")
+        assert "publishedAfter" in params, "publishedAfter missing from API request params"
+        assert "publishedBefore" in params, "publishedBefore missing from API request params"
+        assert params["publishedAfter"].startswith(
+            "2010-12-01"
+        ), f"Expected Dec 2010 start window, got {params['publishedAfter']}"
+        assert params["publishedBefore"].startswith(
+            "2011-01-01"
+        ), f"Expected Jan 2011 end window, got {params['publishedBefore']}"
 
 
 @pytest_asyncio.fixture
@@ -475,11 +485,11 @@ async def test_archeologist_real_youtube_api_search(dao):
 
             # Verify response structure
             for item in items[:3]:  # Check first 3 items
-                assert "id" in item
-                assert "videoId" in item["id"]
-                assert "snippet" in item
-                assert "title" in item["snippet"]
-                assert "channelId" in item["snippet"]
+                assert "id" in item, f"Missing 'id' in API response item: {item}"
+                assert "videoId" in item["id"], f"Missing 'videoId' in item.id: {item['id']}"
+                assert "snippet" in item, f"Missing 'snippet' in API response item"
+                assert "title" in item["snippet"], "Missing 'title' in snippet"
+                assert "channelId" in item["snippet"], "Missing 'channelId' in snippet"
 
             # Ingest one video to verify DAO integration
             await dao.ingest_video_metadata(items[0], priority_override=100)
@@ -543,7 +553,7 @@ async def test_archeologist_real_api_rate_limit_detection(dao):
                 else:
                     # Success - verify response structure
                     data = await resp.json()
-                    assert "items" in data
+                    assert "items" in data, f"Missing 'items' in API response: {list(data.keys())}"
 
 
 @pytest.mark.integration
@@ -584,7 +594,7 @@ async def test_archeologist_real_api_key_rotation(dao):
                 if resp.status == 200:
                     # Key is valid - great!
                     data = await resp.json()
-                    assert "items" in data
+                    assert "items" in data, f"Missing 'items' in API response: {list(data.keys())}"
                     break
 
     # Verify key rotation happened if we have multiple keys

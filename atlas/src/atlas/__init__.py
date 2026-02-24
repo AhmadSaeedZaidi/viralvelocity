@@ -3,12 +3,12 @@ from atlas.config import settings
 from atlas.db import db
 from atlas.events import events
 from atlas.notifications import AlertChannel, AlertLevel, notifier
-from atlas.vault import vault
+from atlas.vault import get_vault
 
 __all__ = [
     "settings",
     "db",
-    "vault",
+    "get_vault",
     "events",
     "notifier",
     "AlertChannel",

@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing, ResiliencyExecutor
-from atlas.vault import vault
+from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     # Store metrics to Vault (Parquet)
     if metrics_data:
         try:
-            vault.append_metrics(metrics_data)
+            get_vault().append_metrics(metrics_data)
             run_logger.info(f"✓ Stored {len(metrics_data)} metrics to Vault")
         except Exception as e:
             run_logger.error(f"Failed to store metrics to Vault: {e}")

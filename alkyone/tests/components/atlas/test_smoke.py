@@ -4,7 +4,8 @@ Run with: pytest tests/test_smoke.py or make smoke-test
 """
 
 import pytest
-from atlas import db, settings, vault
+from atlas import db, settings
+from atlas.vault import get_vault
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +67,7 @@ def test_vault_configuration():
     elif provider == "gcs":
         assert settings.GCS_BUCKET_NAME is not None, "GCS_BUCKET_NAME not configured"
 
-    assert vault is not None, "Vault instance not initialized"
+    assert get_vault() is not None, "Vault instance not initialized"
 
 
 @pytest.mark.integration

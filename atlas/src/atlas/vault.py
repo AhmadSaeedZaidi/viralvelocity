@@ -414,10 +414,37 @@ class GCSVault(VaultStrategy):
             raise
 
 
+_vault_instance: Optional[VaultStrategy] = None
+
+
 def get_vault() -> VaultStrategy:
-    if settings.VAULT_PROVIDER == "gcs":
-        return GCSVault()
-    return HuggingFaceVault()
+    """Get or create the vault singleton.
+
+    Instantiation is deferred until the first call so that importing
+    ``atlas.vault`` does not trigger environment-variable validation or
+    network calls (useful for testing).
+    """
+    global _vault_instance
+    if _vault_instance is None:
+        if settings.VAULT_PROVIDER == "gcs":
+            _vault_instance = GCSVault()
+        else:
+            _vault_instance = HuggingFaceVault()
+    return _vault_instance
 
 
-vault = get_vault()
+def reset_vault() -> None:
+    """Reset the vault singleton.  Useful for testing."""
+    global _vault_instance
+    _vault_instance = None
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy module attribute for backward-compatible ``from atlas.vault import vault``."""
+    if name == "vault":
+        return get_vault()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+if TYPE_CHECKING:
+    vault: VaultStrategy

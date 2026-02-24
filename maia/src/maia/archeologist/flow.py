@@ -19,15 +19,11 @@ from tenacity import (
     wait_exponential,
 )
 
+from maia.utils import RateLimitError
+
 logger = logging.getLogger(__name__)
 
 TARGET_CATEGORIES = ["10", "20", "24", "28", "27"]
-
-
-class RateLimitError(Exception):
-    """Custom exception for 429 rate limiting."""
-
-    pass
 
 
 @retry(
@@ -44,10 +40,10 @@ async def _fetch_with_backoff(
         if resp.status == 200:
             return cast(Dict[str, Any], await resp.json())
         elif resp.status == 429:
-            logger.warning(f"Rate limit hit (429). Retrying with exponential backoff...")
+            logger.warning("Rate limit hit (429). Retrying with exponential backoff...")
             raise RateLimitError("YouTube API rate limit exceeded")
         elif resp.status == 403:
-            logger.warning(f"API key burned (403). Key rotation required.")
+            logger.warning("API key burned (403). Key rotation required.")
             raise Exception("API key exhausted")
         else:
             logger.error(f"HTTP {resp.status} for historical search")
@@ -94,8 +90,10 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
                     data = await _fetch_with_backoff(session, base_url, params)
                     items = data.get("items", [])
 
-                    for item in items:
-                        await dao.ingest_video_metadata(item, priority_override=100)
+                    ingest_tasks = [
+                        dao.ingest_video_metadata(item, priority_override=100) for item in items
+                    ]
+                    await asyncio.gather(*ingest_tasks)
 
                     run_logger.info(
                         f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"

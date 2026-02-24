@@ -27,7 +27,7 @@ class TestAdaptiveScheduling:
         watchlist = await dao._fetch_all(
             "SELECT video_id FROM watchlist WHERE video_id = ANY(%s)", (video_ids,)
         )
-        assert len(watchlist) == 3
+        assert len(watchlist) == 3, f"Expected 3 videos in watchlist, got {len(watchlist)}"
 
     @pytest.mark.asyncio
     async def test_fetch_tracking_batch(self, dao):
@@ -50,12 +50,15 @@ class TestAdaptiveScheduling:
         batch = await dao.fetch_tracking_batch(batch_size=3)
 
         # Verify batch size respects limit
-        assert len(batch) <= 3
+        assert len(batch) <= 3, f"Batch should respect limit of 3, got {len(batch)}"
 
         # Verify FIFO order (oldest first)
         if len(batch) > 1:
             for i in range(len(batch) - 1):
-                assert batch[i]["next_track_at"] <= batch[i + 1]["next_track_at"]
+                assert batch[i]["next_track_at"] <= batch[i + 1]["next_track_at"], (
+                    f"Batch not in FIFO order at index {i}: "
+                    f"{batch[i]['next_track_at']} > {batch[i + 1]['next_track_at']}"
+                )
 
     @pytest.mark.asyncio
     async def test_update_watchlist_schedule(self, dao):
@@ -91,23 +94,29 @@ class TestAdaptiveScheduling:
         # Test HOURLY tier (< 24h old)
         published_recent = now - timedelta(hours=12)
         tier, next_time = dao.calculate_next_track_time(published_recent)
-        assert tier == "HOURLY"
-        assert next_time > now
-        assert next_time <= now + timedelta(hours=1, minutes=1)
+        assert tier == "HOURLY", f"Expected HOURLY tier for 12h-old video, got {tier}"
+        assert next_time > now, "next_track_at should be in the future"
+        assert next_time <= now + timedelta(
+            hours=1, minutes=1
+        ), f"HOURLY next_track_at too far: {next_time}"
 
         # Test DAILY tier (1-7 days old)
         published_medium = now - timedelta(days=3)
         tier, next_time = dao.calculate_next_track_time(published_medium)
-        assert tier == "DAILY"
-        assert next_time > now
-        assert next_time <= now + timedelta(days=1, hours=1)
+        assert tier == "DAILY", f"Expected DAILY tier for 3-day-old video, got {tier}"
+        assert next_time > now, "next_track_at should be in the future"
+        assert next_time <= now + timedelta(
+            days=1, hours=1
+        ), f"DAILY next_track_at too far: {next_time}"
 
         # Test WEEKLY tier (> 7 days old)
         published_old = now - timedelta(days=30)
         tier, next_time = dao.calculate_next_track_time(published_old)
-        assert tier == "WEEKLY"
-        assert next_time > now
-        assert next_time <= now + timedelta(days=7, hours=1)
+        assert tier == "WEEKLY", f"Expected WEEKLY tier for 30-day-old video, got {tier}"
+        assert next_time > now, "next_track_at should be in the future"
+        assert next_time <= now + timedelta(
+            days=7, hours=1
+        ), f"WEEKLY next_track_at too far: {next_time}"
 
     @pytest.mark.asyncio
     async def test_adaptive_scheduling_survives_janitor(self, dao):
@@ -137,13 +146,19 @@ class TestAdaptiveScheduling:
         )
 
         # Adaptive Scheduling means video stays in watchlist
-        assert watchlist_entry is not None
-        assert watchlist_entry["video_id"] == video_id
+        assert (
+            watchlist_entry is not None
+        ), f"Watchlist entry for {video_id} missing after video cleanup"
+        assert (
+            watchlist_entry["video_id"] == video_id
+        ), f"Watchlist video_id mismatch: {watchlist_entry['video_id']}"
 
     @pytest.mark.asyncio
     async def test_vault_metrics_storage(self, dao):
         """Test metrics are properly stored in real HuggingFace Vault via Adaptive Scheduling."""
-        from atlas.vault import vault
+        from atlas.vault import get_vault
+
+        vault = get_vault()
 
         metrics_data = [
             {

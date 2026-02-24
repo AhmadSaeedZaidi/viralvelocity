@@ -31,14 +31,16 @@ async def test_ingest_results_handles_missing_video_id():
 
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.flow.vault") as mock_vault,
+        patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
+        mock_vault = MagicMock()
+        mock_vault.store_metadata = MagicMock()
+        mock_get_vault.return_value = mock_vault
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
         mock_dao.add_to_search_queue = AsyncMock(return_value=1)
         mock_dao.update_search_state = AsyncMock()
-        mock_vault.store_metadata = MagicMock()
 
         # Should not raise
         await ingest_results(topic, response)
@@ -66,21 +68,25 @@ async def test_ingest_results_handles_empty_tags():
 
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.flow.vault") as mock_vault,
+        patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
+        mock_vault = MagicMock()
+        mock_vault.store_metadata = MagicMock()
+        mock_get_vault.return_value = mock_vault
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
         mock_dao.add_to_search_queue = AsyncMock(return_value=1)
         mock_dao.update_search_state = AsyncMock()
-        mock_vault.store_metadata = MagicMock()
 
         await ingest_results(topic, response)
 
         # Verify only valid tag was added
         args = mock_dao.add_to_search_queue.call_args[0][0]
-        assert "valid_tag" in args
-        assert len(args) == 1  # Only one valid tag
+        assert "valid_tag" in args, f"Expected 'valid_tag' in filtered tags, got {args}"
+        assert (
+            len(args) == 1
+        ), f"Expected exactly 1 valid tag after filtering, got {len(args)}: {args}"
 
 
 @pytest.mark.asyncio
@@ -102,14 +108,16 @@ async def test_ingest_results_handles_missing_tags():
 
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.flow.vault") as mock_vault,
+        patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
+        mock_vault = MagicMock()
+        mock_vault.store_metadata = MagicMock()
+        mock_get_vault.return_value = mock_vault
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
         mock_dao.add_to_search_queue = AsyncMock(return_value=0)
         mock_dao.update_search_state = AsyncMock()
-        mock_vault.store_metadata = MagicMock()
 
         # Should not raise
         await ingest_results(topic, response)
@@ -157,7 +165,7 @@ async def test_update_stats_handles_deleted_videos():
         result = await update_stats(videos)
 
         # Should return 0 updates (no videos found)
-        assert result == 0
+        assert result == 0, f"Expected 0 updates for deleted/private videos, got {result}"
         mock_dao.update_video_stats_batch.assert_not_called()
 
 
@@ -180,7 +188,7 @@ async def test_update_stats_handles_network_errors():
         result = await update_stats(videos)
 
         # Should return 0 updates (graceful failure)
-        assert result == 0
+        assert result == 0, f"Expected 0 updates after network error, got {result}"
 
 
 @pytest.mark.asyncio
@@ -220,5 +228,5 @@ async def test_update_stats_partial_success():
         result = await update_stats(videos)
 
         # Should return 1 (partial success)
-        assert result == 1
+        assert result == 1, f"Expected 1 update in partial success scenario, got {result}"
         mock_dao.log_video_stats_batch.assert_called_once()

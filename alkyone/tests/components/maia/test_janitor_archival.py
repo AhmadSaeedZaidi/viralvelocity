@@ -5,7 +5,7 @@ Real Integration Testing: Uses real HuggingFace vault storage for archival.
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -57,14 +57,14 @@ class TestJanitorArchival:
         archived_count = await dao.archive_cold_stats(retention_days=7, batch_size=5000)
 
         # Verify stats were archived
-        assert archived_count == 50
+        assert archived_count == 50, f"Expected 50 stats archived, got {archived_count}"
 
         # Verify stats were removed from hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp < %s",
             (datetime.now(timezone.utc) - timedelta(days=7),),
         )
-        assert len(remaining) == 0
+        assert len(remaining) == 0, f"Expected 0 stats remaining in hot tier, got {len(remaining)}"
 
     @pytest.mark.asyncio
     async def test_archive_cold_stats_multiple_batches(self, dao):
@@ -99,15 +99,21 @@ class TestJanitorArchival:
             total_archived += archived
             iterations += 1
 
-        assert total_archived == total_stats
-        assert iterations == 3
+        assert (
+            total_archived == total_stats
+        ), f"Expected {total_stats} total archived, got {total_archived}"
+        assert (
+            iterations == 3
+        ), f"Expected 3 archival iterations for {total_stats} stats at batch_size={batch_size}, got {iterations}"
 
         # Verify stats were removed from hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp < %s",
             (datetime.now(timezone.utc) - timedelta(days=7),),
         )
-        assert len(remaining) == 0
+        assert (
+            len(remaining) == 0
+        ), f"Expected 0 stats remaining in hot tier after full archival, got {len(remaining)}"
 
     @pytest.mark.asyncio
     async def test_archive_respects_retention_period(self, dao):
@@ -145,13 +151,15 @@ class TestJanitorArchival:
         archived = await dao.archive_cold_stats(retention_days=7)
 
         # Only old stats should be archived
-        assert archived == 50
+        assert archived == 50, f"Expected 50 old stats archived (retention=7d), got {archived}"
 
         # Verify new stats remain in hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp >= %s", (now - timedelta(days=7),)
         )
-        assert len(remaining) == 50
+        assert (
+            len(remaining) == 50
+        ), f"Expected 50 new stats to remain in hot tier, got {len(remaining)}"
 
     @pytest.mark.asyncio
     async def test_vault_failure_prevents_deletion(self, dao):
@@ -169,9 +177,11 @@ class TestJanitorArchival:
         await self._create_parent_videos(dao, ["VIDEO_001"])
         await dao.log_video_stats_batch(old_stats)
 
-        # Mock vault.append_metrics to fail
-        with patch("atlas.vault.vault.append_metrics") as mock_append:
-            mock_append.side_effect = Exception("Simulated Vault failure")
+        # Mock get_vault() to return a vault whose append_metrics always fails
+        with patch("atlas.vault.get_vault") as mock_get_vault:
+            mock_vault = MagicMock()
+            mock_vault.append_metrics = MagicMock(side_effect=Exception("Simulated Vault failure"))
+            mock_get_vault.return_value = mock_vault
 
             # Attempt archival (Vault will fail)
             with pytest.raises(Exception):
@@ -209,14 +219,18 @@ class TestJanitorArchival:
         archived_count = await dao.archive_cold_stats(retention_days=7)
 
         # Verify all stats were archived
-        assert archived_count == 30
+        assert (
+            archived_count == 30
+        ), f"Expected 30 stats archived across 3 days, got {archived_count}"
 
         # Verify stats were removed from hot tier
         remaining = await dao._fetch_all(
             "SELECT * FROM video_stats_log WHERE timestamp < %s",
             (datetime.now(timezone.utc) - timedelta(days=7),),
         )
-        assert len(remaining) == 0
+        assert (
+            len(remaining) == 0
+        ), f"Expected 0 stats remaining after date-grouped archival, got {len(remaining)}"
 
     @pytest.mark.asyncio
     async def test_janitor_full_cycle(self, dao, monkeypatch):
@@ -272,8 +286,12 @@ class TestJanitorArchival:
         result = await janitor_cycle(dry_run=False, archive_stats=True)
 
         # 5. Verify results
-        assert result["stats_archived"] >= 1  # Stats were archived to real vault
-        assert result["cleanup_stats"]["deleted"] >= 1  # Video was cleaned up
+        assert (
+            result["stats_archived"] >= 1
+        ), f"Expected >=1 stats archived to vault, got {result['stats_archived']}"
+        assert (
+            result["cleanup_stats"]["deleted"] >= 1
+        ), f"Expected >=1 video cleaned up, got {result['cleanup_stats']['deleted']}"
 
     @pytest.mark.asyncio
     async def test_archival_performance_large_dataset(self, dao):
@@ -312,7 +330,9 @@ class TestJanitorArchival:
 
         elapsed = time.time() - start_time
 
-        assert total_archived == total_stats
+        assert (
+            total_archived == total_stats
+        ), f"Expected {total_stats} stats archived in perf test, got {total_archived}"
         # Allow more time for real vault uploads (HuggingFace API)
         assert elapsed < 60, f"Archival took {elapsed}s, expected < 60s"
 

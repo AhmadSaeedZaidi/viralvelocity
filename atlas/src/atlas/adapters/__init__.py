@@ -1,10 +1,26 @@
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, Tuple
 
 from atlas.db import db
 
 logger = logging.getLogger("atlas.adapters")
+
+
+class DatabaseAdapterProtocol(Protocol):
+    """Protocol defining the database methods required by adapter mixins.
+
+    Any class composing an adapter mixin (e.g. ``AdaptiveSchedulingMixin``) must
+    satisfy this protocol — typically by extending :class:`DatabaseAdapter`.
+    """
+
+    async def _execute(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> None: ...
+
+    async def _fetch_all(
+        self, query: str, params: Optional[Tuple[Any, ...]] = None
+    ) -> List[Dict[str, Any]]: ...
+
+    async def _execute_many(self, query: str, params_list: List[Tuple[Any, ...]]) -> None: ...
 
 
 class DatabaseAdapter:

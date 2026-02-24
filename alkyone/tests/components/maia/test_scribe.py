@@ -39,7 +39,9 @@ async def test_scribe_complete_cycle(dao):
         await run_scribe_cycle(batch_size=1)
 
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("B0J27sf9N1Y",))
-        assert video["has_transcript"] is True
+        assert (
+            video["has_transcript"] is True
+        ), f"Video should have transcript after scribe cycle, got {video['has_transcript']}"
 
     except Exception as e:
         if "429" in str(e) or "HTTP Error 429" in str(e):
@@ -77,7 +79,9 @@ async def test_scribe_handles_unavailable_transcripts(dao):
         await run_scribe_cycle(batch_size=1)
 
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("NO_TRANSCRIPT_001",))
-        assert video["has_transcript"] is True
+        assert (
+            video["has_transcript"] is True
+        ), "Video should be marked as transcribed even with unavailable transcripts"
 
 
 @pytest.mark.integration
@@ -148,12 +152,14 @@ async def test_scribe_batch_size_enforcement(dao):
         processed = await dao._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'BATCH_TEST_%%'"
         )
-        assert len(processed) == 5
+        assert (
+            len(processed) == 5
+        ), f"Expected 5 videos processed with batch_size=5, got {len(processed)}"
 
         remaining = await dao._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = FALSE AND id LIKE 'BATCH_TEST_%%'"
         )
-        assert len(remaining) == 5
+        assert len(remaining) == 5, f"Expected 5 unprocessed videos remaining, got {len(remaining)}"
 
 
 @pytest.mark.integration
@@ -189,12 +195,14 @@ async def test_scribe_sequential_processing(dao):
         processed = await dao._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'SEQ_TEST_%%'"
         )
-        assert len(processed) == 3
+        assert (
+            len(processed) == 3
+        ), f"All 3 sequential videos should be processed, got {len(processed)}"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_vault_failure_marks_video_failed(dao):
+async def test_scribe_vault_failure_marks_video_failed(dao, mock_sleep):
     """Test Scribe marks video as failed when vault storage fails after retries."""
     video_data = {
         "id": {"videoId": "VAULT_FAIL_001"},
@@ -215,23 +223,27 @@ async def test_scribe_vault_failure_marks_video_failed(dao):
 
     with (
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault.store_transcript") as mock_store,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
     ):
         mock_loader_instance = MagicMock()
         mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
         MockLoader.return_value = mock_loader_instance
 
-        mock_store.side_effect = Exception("Vault connection error")
+        mock_vault = MagicMock()
+        mock_vault.store_transcript = MagicMock(side_effect=Exception("Vault connection error"))
+        mock_get_vault.return_value = mock_vault
 
         await run_scribe_cycle(batch_size=1)
 
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("VAULT_FAIL_001",))
-        assert video["status"] == "FAILED"
+        assert (
+            video["status"] == "FAILED"
+        ), f"Expected video status FAILED after vault error, got {video['status']}"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_retry_logic_on_network_errors(dao):
+async def test_scribe_retry_logic_on_network_errors(dao, mock_sleep):
     """Test Scribe retries transcript fetching on transient network errors."""
     video_data = {
         "id": {"videoId": "RETRY_TEST_001"},
@@ -263,10 +275,14 @@ async def test_scribe_retry_logic_on_network_errors(dao):
 
         await run_scribe_cycle(batch_size=1)
 
-        assert mock_loader_instance.fetch.call_count == 3
+        assert (
+            mock_loader_instance.fetch.call_count == 3
+        ), f"Expected 3 fetch calls (2 retries + 1 success), got {mock_loader_instance.fetch.call_count}"
 
         video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("RETRY_TEST_001",))
-        assert video["has_transcript"] is True
+        assert (
+            video["has_transcript"] is True
+        ), "Video should have transcript after successful retry"
 
 
 @pytest_asyncio.fixture

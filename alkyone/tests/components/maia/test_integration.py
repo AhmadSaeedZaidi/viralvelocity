@@ -1,8 +1,8 @@
 """
-Integration tests for Maia flows.
+Unit tests for Maia flows.
 
-These tests verify end-to-end behavior of Hunter and Tracker cycles.
-Mark as integration tests: pytest -m integration
+These tests verify Hunter and Tracker cycle logic using fully-mocked
+DAO and HTTP layers — no real infrastructure required.
 """
 
 from typing import Any, Dict
@@ -13,7 +13,6 @@ from maia.hunter import run_hunter_cycle
 from maia.tracker import run_tracker_cycle
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_hunter_cycle_complete_flow(
     mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
@@ -53,10 +52,10 @@ async def test_hunter_cycle_complete_flow(
         stats = await run_hunter_cycle(batch_size=1)
 
         # Assertions
-        assert stats["queries_processed"] == 1
-        assert stats["videos_discovered"] == 1
-        assert stats["searches_successful"] == 1
-        assert stats["searches_failed"] == 0
+        assert stats["queries_processed"] == 1, f"Expected 1 query processed, got {stats}"
+        assert stats["videos_discovered"] == 1, f"Expected 1 video discovered, got {stats}"
+        assert stats["searches_successful"] == 1, f"Expected 1 successful search, got {stats}"
+        assert stats["searches_failed"] == 0, f"Expected 0 failed searches, got {stats}"
 
         # Verify DAO calls
         mock_dao.fetch_hunter_batch.assert_called_once_with(1)
@@ -65,7 +64,6 @@ async def test_hunter_cycle_complete_flow(
         mock_dao.update_search_state.assert_called_once()
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tracker_cycle_complete_flow(
     mock_tracker_target: Dict[str, Any], mock_youtube_stats_response: Dict[str, Any]
@@ -98,15 +96,14 @@ async def test_tracker_cycle_complete_flow(
         mock_get_context.__aenter__.return_value = mock_response
 
         stats = await run_tracker_cycle(batch_size=1)
-        assert stats["videos_fetched"] == 1
-        assert stats["videos_updated"] == 1
-        assert stats["updates_failed"] == 0
+        assert stats["videos_fetched"] == 1, f"Expected 1 video fetched, got {stats}"
+        assert stats["videos_updated"] == 1, f"Expected 1 video updated, got {stats}"
+        assert stats["updates_failed"] == 0, f"Expected 0 failed updates, got {stats}"
 
         mock_dao.fetch_tracker_targets.assert_called_once_with(1)
         mock_dao.update_video_stats_batch.assert_called_once()
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_hunter_handles_resiliency_strategy():
     """Test Hunter raises SystemExit on 429 rate limit (Resiliency Strategy)."""
@@ -147,7 +144,6 @@ async def test_hunter_handles_resiliency_strategy():
             await run_hunter_cycle(batch_size=1)
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tracker_handles_resiliency_strategy():
     """Test Tracker raises SystemExit on 429 rate limit (Resiliency Strategy)."""
@@ -187,7 +183,6 @@ async def test_tracker_handles_resiliency_strategy():
             await run_tracker_cycle(batch_size=1)
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_hunter_empty_queue_returns_idle():
     """Test Hunter handles empty queue gracefully."""
@@ -197,11 +192,10 @@ async def test_hunter_empty_queue_returns_idle():
 
         stats = await run_hunter_cycle(batch_size=10)
 
-        assert stats["queries_processed"] == 0
-        assert stats["videos_discovered"] == 0
+        assert stats["queries_processed"] == 0, f"Expected idle cycle (0 queries), got {stats}"
+        assert stats["videos_discovered"] == 0, f"Expected 0 videos on empty queue, got {stats}"
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tracker_no_stale_videos_returns_idle():
     """Test Tracker handles no stale videos gracefully."""
@@ -211,11 +205,10 @@ async def test_tracker_no_stale_videos_returns_idle():
 
         stats = await run_tracker_cycle(batch_size=50)
 
-        assert stats["videos_fetched"] == 0
-        assert stats["videos_updated"] == 0
+        assert stats["videos_fetched"] == 0, f"Expected idle cycle (0 fetched), got {stats}"
+        assert stats["videos_updated"] == 0, f"Expected 0 updates on idle cycle, got {stats}"
 
 
-@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tracker_enforces_batch_size_limit():
     """Test Tracker enforces YouTube API batch size limit of 50."""

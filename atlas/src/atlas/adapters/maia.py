@@ -309,40 +309,50 @@ class MaiaDAO(DatabaseAdapter, AdaptiveSchedulingMixin):
         await self._execute(query, (now, video_id))
 
     async def archive_cold_stats(self, retention_days: int = 7, batch_size: int = 5000) -> int:
+        """Archive stats older than *retention_days* from hot tier (SQL) to cold tier (Vault).
+
+        All database operations run inside a **single transaction**:
+
+        1. ``SELECT … FOR UPDATE`` locks the target rows.
+        2. Vault write pushes data to cold storage.
+        3. ``DELETE`` removes the archived rows from SQL.
+
+        If the Vault write raises, the transaction rolls back and no rows
+        are deleted.  Returns the number of rows archived.
         """
-        Archive stats older than retention_days from hot tier (SQL) to cold tier (Vault).
-        Returns the number of rows archived.
-        """
-        from atlas.vault import vault
+        from collections import defaultdict
+
+        from atlas.vault import get_vault
 
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
-        # Step 1: Select old stats (no 'id', use composite key)
-        select_query = """
-            SELECT video_id, views, likes, comment_count, timestamp
-            FROM video_stats_log
-            WHERE timestamp < %s
-            ORDER BY timestamp ASC
-            LIMIT %s
-        """
+        async with self._connection() as conn:
+            # Step 1: SELECT + lock rows within this transaction
+            cur = await conn.execute(
+                """
+                SELECT video_id, views, likes, comment_count, timestamp
+                FROM video_stats_log
+                WHERE timestamp < %s
+                ORDER BY timestamp ASC
+                LIMIT %s
+                FOR UPDATE
+                """,
+                (cutoff_date, batch_size),
+            )
+            columns = [desc[0] for desc in cur.description] if cur.description else []
+            rows = await cur.fetchall()
+            stats = [dict(zip(columns, row)) for row in rows]
 
-        stats = await self._fetch_all(select_query, (cutoff_date, batch_size))
+            if not stats:
+                logger.info("No stats to archive")
+                return 0
 
-        if not stats:
-            logger.info("No stats to archive")
-            return 0
-
-        # Step 2: Prepare for Vault (group by date)
-        try:
-            from collections import defaultdict
-
-            stats_by_date = defaultdict(list)
-
+            # Step 2: Group by date for Vault
+            stats_by_date: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
             for stat in stats:
                 ts = stat["timestamp"]
                 date_str = ts.strftime("%Y-%m-%d") if isinstance(ts, datetime) else ts[:10]
                 iso_ts = ts.isoformat() if isinstance(ts, datetime) else ts
-
                 stats_by_date[date_str].append(
                     {
                         "video_id": stat["video_id"],
@@ -353,29 +363,27 @@ class MaiaDAO(DatabaseAdapter, AdaptiveSchedulingMixin):
                     }
                 )
 
-            # Step 3: Upload to Vault (one file per date)
+            # Step 3: Write to Vault — if this raises, the transaction rolls back
+            v = get_vault()
             for date_str, day_stats in stats_by_date.items():
-                vault.append_metrics(day_stats, date=date_str)
+                v.append_metrics(day_stats, date=date_str)
                 logger.info(f"Archived {len(day_stats)} stats for date {date_str}")
 
-            # Step 4: Purge from hot tier (using composite key deletion)
-            delete_query = """
+            # Step 4: DELETE only after Vault write succeeds (same transaction)
+            video_ids = [s["video_id"] for s in stats]
+            timestamps = [s["timestamp"] for s in stats]
+            await conn.execute(
+                """
                 DELETE FROM video_stats_log
                 WHERE (video_id, timestamp) IN (
                     SELECT unnest(%s::text[]), unnest(%s::timestamp[])
                 )
-            """
-            video_ids = [s["video_id"] for s in stats]
-            timestamps = [s["timestamp"] for s in stats]
-            await self._execute(delete_query, (video_ids, timestamps))
+                """,
+                (video_ids, timestamps),
+            )
 
             logger.info(f"Archived and purged {len(stats)} stats from hot tier")
             return len(stats)
-
-        except Exception as e:
-            logger.error(f"Failed to archive stats: {e}")
-            # Don't delete if Vault upload failed
-            raise
 
     async def run_janitor(self, dry_run: bool = False) -> Dict[str, Any]:
         """

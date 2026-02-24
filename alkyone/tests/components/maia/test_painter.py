@@ -11,6 +11,7 @@ Usage: pytest -m integration tests/integration/test_painter.py
 
 import asyncio
 import logging
+import os
 import socket
 
 import pytest
