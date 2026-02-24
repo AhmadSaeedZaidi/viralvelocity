@@ -88,8 +88,10 @@ async def test_process_frames_successful_with_chapters():
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-        patch("maia.painter.flow.vault") as mock_vault,
+        patch("maia.painter.flow.get_vault") as mock_get_vault,
+        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_visuals_safe = AsyncMock()
         mock_dao.mark_video_failed = AsyncMock()
@@ -107,7 +109,7 @@ async def test_process_frames_successful_with_chapters():
 
         await process_frames_task.fn(video)
 
-        mock_vault.store_visual_evidence.assert_called_once()
+        mock_vault_retry.assert_called_once()
         mock_dao.mark_video_visuals_safe.assert_called_once_with("VIDEO_001")
 
 
@@ -129,8 +131,10 @@ async def test_process_frames_successful_with_heatmap():
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-        patch("maia.painter.flow.vault") as mock_vault,
+        patch("maia.painter.flow.get_vault") as mock_get_vault,
+        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_visuals_safe = AsyncMock()
         mock_dao.mark_video_failed = AsyncMock()
@@ -149,7 +153,7 @@ async def test_process_frames_successful_with_heatmap():
 
         await process_frames_task.fn(video)
 
-        mock_vault.store_visual_evidence.assert_called_once()
+        mock_vault_retry.assert_called_once()
         mock_dao.mark_video_visuals_safe.assert_called_once_with("VIDEO_002")
 
 
@@ -169,8 +173,10 @@ async def test_process_frames_fallback_strategy():
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-        patch("maia.painter.flow.vault") as mock_vault,
+        patch("maia.painter.flow.get_vault") as mock_get_vault,
+        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_visuals_safe = AsyncMock()
         mock_dao.mark_video_failed = AsyncMock()
@@ -189,7 +195,7 @@ async def test_process_frames_fallback_strategy():
 
         await process_frames_task.fn(video)
 
-        mock_vault.store_visual_evidence.assert_called_once()
+        mock_vault_retry.assert_called_once()
         mock_dao.mark_video_visuals_safe.assert_called_once_with("VIDEO_003")
 
 
@@ -261,8 +267,14 @@ async def test_process_frames_handles_vault_failure():
         patch("maia.painter.flow.MaiaDAO") as MockDAO,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-        patch("maia.painter.flow.vault") as mock_vault,
+        patch("maia.painter.flow.get_vault") as mock_get_vault,
+        patch(
+            "maia.painter.flow.vault_op_with_retry",
+            new_callable=AsyncMock,
+            side_effect=Exception("Vault error"),
+        ),
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
@@ -273,9 +285,6 @@ async def test_process_frames_handles_vault_failure():
         mock_process.communicate.return_value = (fake_jpeg, b"")
         mock_process.returncode = 0
         mock_popen.return_value = mock_process
-
-        # Mock vault to fail after retries
-        mock_vault.store_visual_evidence = MagicMock(side_effect=Exception("Vault error"))
 
         await process_frames_task.fn(video)
 

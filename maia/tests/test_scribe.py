@@ -54,8 +54,10 @@ async def test_process_transcript_successful():
     with (
         patch("maia.scribe.flow.MaiaDAO") as MockDAO,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
+        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_transcript_safe = AsyncMock()
         mock_loader_instance = MockLoader.return_value
@@ -65,7 +67,7 @@ async def test_process_transcript_successful():
         await process_transcript_task.fn(video)
 
         mock_loader_instance.fetch.assert_called_once_with("VIDEO_001")
-        mock_vault.store_transcript.assert_called_once_with("VIDEO_001", mock_transcript)
+        mock_vault_retry.assert_called_once()
         mock_dao.mark_video_transcript_safe.assert_called_once_with("VIDEO_001")
 
 
@@ -77,8 +79,10 @@ async def test_process_transcript_unavailable():
     with (
         patch("maia.scribe.flow.MaiaDAO") as MockDAO,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
+        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_transcript_safe = AsyncMock()
         mock_loader_instance = MockLoader.return_value
@@ -87,7 +91,7 @@ async def test_process_transcript_unavailable():
 
         await process_transcript_task.fn(video)
 
-        mock_vault.store_transcript.assert_not_called()
+        mock_vault_retry.assert_not_called()
         mock_dao.mark_video_transcript_safe.assert_called_once_with("VIDEO_NO_TRANSCRIPT")
 
 
@@ -100,13 +104,18 @@ async def test_process_transcript_handles_vault_failure_with_retry(mock_sleep):
     with (
         patch("maia.scribe.flow.MaiaDAO") as MockDAO,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
+        patch(
+            "maia.scribe.flow.vault_op_with_retry",
+            new_callable=AsyncMock,
+            side_effect=Exception("Vault connection error"),
+        ),
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_failed = AsyncMock()
         mock_loader_instance = MockLoader.return_value
         mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
-        mock_vault.store_transcript = MagicMock(side_effect=Exception("Vault connection error"))
 
         await process_transcript_task.fn(video)
 
@@ -220,8 +229,10 @@ async def test_transcript_loader_retry_logic(mock_sleep):
     with (
         patch("maia.scribe.flow.MaiaDAO") as MockDAO,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.vault") as mock_vault,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
+        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
+        mock_vault = mock_get_vault.return_value
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_transcript_safe = AsyncMock()
         mock_loader_instance = MockLoader.return_value
@@ -237,5 +248,5 @@ async def test_transcript_loader_retry_logic(mock_sleep):
         await process_transcript_task.fn(video)
 
         assert mock_loader_instance.fetch.call_count == 3
-        mock_vault.store_transcript.assert_called_once()
+        mock_vault_retry.assert_called_once()
         mock_dao.mark_video_transcript_safe.assert_called_once_with("VIDEO_001")

@@ -43,8 +43,9 @@ async def test_ingest_results_with_snowball(
     """Test ingest_results implements Snowball effect."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.flow.vault") as mock_vault,
+        patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
+        mock_vault = mock_get_vault.return_value
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
@@ -72,8 +73,9 @@ async def test_ingest_results_handles_vault_failure(
     """Test ingest_results continues even if vault storage fails."""
     with (
         patch("maia.hunter.flow.MaiaDAO") as MockDAO,
-        patch("maia.hunter.flow.vault") as mock_vault,
+        patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
+        mock_vault = mock_get_vault.return_value
 
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
