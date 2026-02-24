@@ -45,9 +45,9 @@ async def test_scribe_complete_cycle(dao):
 
     except Exception as e:
         if "429" in str(e) or "HTTP Error 429" in str(e):
-            pytest.skip("YouTube rate limit (429) encountered")
+            pytest.fail(f"YouTube rate limit (429) encountered: {e}")
         elif "TranscriptsDisabled" in str(e) or "No transcript" in str(e):
-            pytest.skip("Transcripts disabled or unavailable for this video")
+            pytest.fail(f"Transcripts disabled or unavailable for this video: {e}")
         else:
             raise
 
@@ -87,7 +87,7 @@ async def test_scribe_handles_unavailable_transcripts(dao):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scribe_handles_resiliency_strategy(dao):
-    """Test Scribe propagates SystemExit on rate limit (Resiliency Strategy)."""
+    """Test Scribe handles rate limit errors gracefully (marks video FAILED)."""
     video_data = {
         "id": {"videoId": "RATE_LIMIT_001"},
         "snippet": {
@@ -105,11 +105,15 @@ async def test_scribe_handles_resiliency_strategy(dao):
 
     with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
         mock_loader_instance = MagicMock()
-        mock_loader_instance.fetch = MagicMock(side_effect=SystemExit("429 Rate Limit"))
+        mock_loader_instance.fetch = MagicMock(side_effect=RuntimeError("429 Rate Limit"))
         MockLoader.return_value = mock_loader_instance
 
-        with pytest.raises(SystemExit):
-            await run_scribe_cycle(batch_size=1)
+        await run_scribe_cycle(batch_size=1)
+
+        video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("RATE_LIMIT_001",))
+        assert (
+            video["status"] == "FAILED"
+        ), f"Expected video status FAILED after rate limit error, got {video['status']}"
 
 
 @pytest.mark.integration

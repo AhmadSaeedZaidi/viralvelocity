@@ -390,48 +390,7 @@ def mock_youtube_search_response() -> Dict[str, Any]:
     }
 
 
-# ========================
-# REAL YOUTUBE API TESTS
-# ========================
-# These tests use real YouTube API keys from CI environment and make actual API calls.
-# They should only run in the CI environment where YOUTUBE_API_KEY_POOL_JSON is set.
-
-
-def has_real_youtube_keys() -> bool:
-    """Check if real YouTube API keys are available (not dummy/test keys)."""
-    import json
-
-    key_pool_json = os.getenv("YOUTUBE_API_KEY_POOL_JSON")
-    if not key_pool_json:
-        return False
-
-    try:
-        # Parse the key pool to check if keys look real
-        keys = json.loads(key_pool_json)
-        if not keys or not isinstance(keys, list):
-            return False
-
-        # Check if any key looks like a dummy/test key
-        for key in keys:
-            if isinstance(key, str):
-                key_lower = key.lower()
-                # Reject obvious test/dummy keys
-                if any(
-                    marker in key_lower
-                    for marker in ["test_", "dummy_", "fake_", "mock_", "example_"]
-                ):
-                    return False
-                # Real YouTube API keys are typically 39 characters
-                if len(key) < 20:
-                    return False
-
-        return True
-    except (json.JSONDecodeError, TypeError):
-        return False
-
-
 @pytest.mark.integration
-@pytest.mark.skipif(not has_real_youtube_keys(), reason="Real YouTube API keys not available")
 @pytest.mark.asyncio
 async def test_archeologist_real_youtube_api_search(dao):
     """Test Archeologist with REAL YouTube API (CI only)."""
@@ -443,7 +402,7 @@ async def test_archeologist_real_youtube_api_search(dao):
     # Verify the first key doesn't look like a test key
     first_key = keys.next_key()
     if any(marker in first_key.lower() for marker in ["test_", "dummy_", "fake_", "mock_"]):
-        pytest.skip(f"API key looks like a test key: {first_key[:10]}...")
+        pytest.fail(f"API key looks like a test key: {first_key[:10]}...")
 
     # Test historical search for a month known to have videos (January 2010)
     base_url = "https://www.googleapis.com/youtube/v3/search"
@@ -469,7 +428,7 @@ async def test_archeologist_real_youtube_api_search(dao):
     async with aiohttp.ClientSession() as session:
         async with session.get(base_url, params=params) as resp:
             if resp.status == 400:
-                pytest.skip(
+                pytest.fail(
                     f"YouTube API returned 400 - likely invalid test key (key={first_key[:10]}...)"
                 )
 
@@ -516,7 +475,6 @@ async def test_archeologist_real_youtube_api_search(dao):
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not has_real_youtube_keys(), reason="Real YouTube API keys not available")
 @pytest.mark.asyncio
 async def test_archeologist_real_api_rate_limit_detection(dao):
     """Test that Archeologist properly detects and handles rate limits from real API."""
@@ -557,7 +515,6 @@ async def test_archeologist_real_api_rate_limit_detection(dao):
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not has_real_youtube_keys(), reason="Real YouTube API keys not available")
 @pytest.mark.asyncio
 async def test_archeologist_real_api_key_rotation(dao):
     """Test KeyRing rotation with real YouTube API keys."""

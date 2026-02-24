@@ -12,7 +12,6 @@ Usage: pytest -m integration tests/integration/test_painter.py
 import asyncio
 import logging
 import os
-import socket
 
 import pytest
 import pytest_asyncio
@@ -21,15 +20,6 @@ from maia.painter.flow import run_painter_cycle
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def is_network_available() -> bool:
-    """Check if network is available for real integration tests."""
-    try:
-        socket.create_connection(("8.8.8.8", 53), timeout=3)
-        return True
-    except OSError:
-        return False
 
 
 @pytest_asyncio.fixture
@@ -44,7 +34,6 @@ async def dao(fresh_db):
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.timeout(120)
-@pytest.mark.skipif(not is_network_available(), reason="Network unavailable")
 async def test_painter_real_full_cycle_blender_tutorial(dao):
     """
     Test the complete Painter cycle on a real video (B0J27sf9N1Y).
@@ -79,22 +68,20 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         )
 
         if not has_chapters and not has_heatmap:
-            pytest.skip("Real video B0J27sf9N1Y no longer has required metadata. Skipping.")
+            pytest.fail("Real video B0J27sf9N1Y no longer has required metadata.")
 
     except asyncio.TimeoutError:
-        pytest.skip(f"Pre-flight check timed out after 30s - network or service issue")
+        pytest.fail("Pre-flight check timed out after 30s - network or service issue")
     except yt_dlp.utils.DownloadError as e:
         error_str = str(e)
         if "429" in error_str:
-            pytest.skip("YouTube Rate Limit (429) active. Skipping live test.")
+            pytest.fail("YouTube Rate Limit (429) active during pre-flight check.")
         elif "Sign in" in error_str or "bot" in error_str:
-            pytest.skip(
+            pytest.fail(
                 "All extraction strategies blocked (Invidious + direct). "
                 "YouTube anti-bot is active across all federated instances."
             )
-        raise e
-    except Exception as e:
-        pytest.skip(f"Pre-flight check failed ({type(e).__name__}): {e}")
+        raise
 
     # 2. Setup DB State
     video_data = {
