@@ -2,7 +2,7 @@ import abc
 import io
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from atlas.config import settings
@@ -20,7 +20,7 @@ HAS_HF = False
 HAS_PANDAS = False
 try:
     import pandas as pd
-    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
 
     HAS_HF = True
     HAS_PANDAS = True
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     try:
         import pandas as pd
-        from huggingface_hub import HfApi, hf_hub_download
+        from huggingface_hub import CommitOperationAdd, HfApi, hf_hub_download
     except ImportError:
         pass
 
@@ -72,7 +72,7 @@ class VaultStrategy(abc.ABC):
         self, video_id: str, data: Dict[Any, Any], date: Optional[str] = None
     ) -> None:
         if date is None:
-            date = datetime.utcnow().strftime("%Y-%m-%d")
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = f"metadata/{date}/{video_id}.json"
         self.store_json(path, data)
 
@@ -100,10 +100,10 @@ class VaultStrategy(abc.ABC):
 
 class HuggingFaceVault(VaultStrategy):
     def __init__(self) -> None:
-        if not HAS_HF or not HAS_PANDAS:
+        if not HAS_HF:
             raise ImportError(
                 "HuggingFace dependencies not installed. "
-                "Install with: pip install huggingface-hub pandas pyarrow"
+                "Install with: pip install huggingface-hub"
             )
         if not settings.HF_DATASET_ID:
             raise ValueError("HF_DATASET_ID required for HuggingFace vault")
@@ -155,29 +155,23 @@ class HuggingFaceVault(VaultStrategy):
             return []
 
     def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+        """Stores visual frames cleanly using a single commit operation to avoid API rate limits."""
         try:
-            if not HAS_PANDAS:
-                raise ImportError("Pandas required for visual evidence")
+            operations = []
+            for idx, img_bytes in frames:
+                path = f"frames/{video_id}/{idx}.jpg"
+                operations.append(CommitOperationAdd(path_in_repo=path, path_or_fileobj=img_bytes))
 
-            data = [
-                {"video_id": video_id, "frame_index": idx, "image": img_bytes}
-                for idx, img_bytes in frames
-            ]
-            df = pd.DataFrame(data)
-
-            buffer = io.BytesIO()
-            df.to_parquet(buffer, engine="pyarrow")
-            buffer.seek(0)
-
-            path = f"visuals/{video_id}.parquet"
-            self.api.upload_file(
-                path_or_fileobj=buffer,
-                path_in_repo=path,
-                repo_id=self.repo_id,
-                repo_type="dataset",
-                commit_message=f"Vault: Visual Evidence {video_id}",
-            )
-            logger.info(f"Archived visual evidence for {video_id} to HF")
+            if operations:
+                self.api.create_commit(
+                    repo_id=self.repo_id,
+                    repo_type="dataset",
+                    operations=operations,
+                    commit_message=f"Vault: Visual Evidence {video_id} ({len(frames)} frames)",
+                )
+                logger.info(f"Archived {len(frames)} frames for {video_id} to HF")
+            else:
+                logger.warning(f"No frames provided to archive for {video_id}")
         except Exception as e:
             logger.error(f"Failed to archive visuals for {video_id}: {e}")
             raise
@@ -234,9 +228,9 @@ class HuggingFaceVault(VaultStrategy):
             raise ImportError("Pandas required for metrics")
 
         if date is None:
-            date = datetime.utcnow().strftime("%Y-%m-%d")
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if hour is None:
-            hour = datetime.utcnow().strftime("%H")
+            hour = datetime.now(timezone.utc).strftime("%H")
 
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
 
@@ -323,9 +317,10 @@ class GCSVault(VaultStrategy):
             return []
 
     def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+        """Stores visual frames individually using the frames/ path."""
         try:
             for idx, img_bytes in frames:
-                path = f"visuals/{video_id}/{idx}.jpg"
+                path = f"frames/{video_id}/{idx}.jpg"
                 blob = self.bucket.blob(path)
                 blob.upload_from_string(img_bytes, content_type="image/jpeg")
             logger.info(f"Stored {len(frames)} frames for {video_id} to GCS")
@@ -380,9 +375,9 @@ class GCSVault(VaultStrategy):
             )
 
         if date is None:
-            date = datetime.utcnow().strftime("%Y-%m-%d")
+            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if hour is None:
-            hour = datetime.utcnow().strftime("%H")
+            hour = datetime.now(timezone.utc).strftime("%H")
 
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
 

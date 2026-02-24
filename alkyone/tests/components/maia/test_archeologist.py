@@ -151,7 +151,7 @@ async def test_archeologist_handles_resiliency_strategy(dao):
         # Mock 429 response on first attempts, then success
         call_count = {"count": 0}
 
-        async def mock_get_with_429():
+        async def mock_get_with_429(*args, **kwargs):
             call_count["count"] += 1
             if call_count["count"] <= 2:
                 # First 2 calls return 429
@@ -166,7 +166,7 @@ async def test_archeologist_handles_resiliency_strategy(dao):
                 return mock_resp
 
         mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = mock_get_with_429
+        mock_get_context.__aenter__ = AsyncMock(side_effect=mock_get_with_429)
         mock_get_context.__aexit__ = AsyncMock(return_value=None)
 
         mock_session_instance.get.return_value = mock_get_context
@@ -206,7 +206,7 @@ async def test_archeologist_key_rotation_on_403(dao):
 
         call_count = {"count": 0}
 
-        async def mock_get_response():
+        async def mock_get_response(*args, **kwargs):
             call_count["count"] += 1
             if call_count["count"] <= 2:
                 mock_resp = AsyncMock()
@@ -219,7 +219,7 @@ async def test_archeologist_key_rotation_on_403(dao):
                 return mock_resp
 
         mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = mock_get_response
+        mock_get_context.__aenter__ = AsyncMock(side_effect=mock_get_response)
         mock_get_context.__aexit__ = AsyncMock(return_value=None)
 
         mock_session_instance.get.return_value = mock_get_context
