@@ -351,7 +351,7 @@ class StealthVideoStreamer:
 
                 # Brief jitter between retries
                 await asyncio.sleep(random.uniform(0.5, 2.0))
-                
+
         logger.warning(
             f"Invidious exhausted ({self.MAX_INVIDIOUS_ATTEMPTS} attempts). "
             f"Falling back to direct yt-dlp strategies."
