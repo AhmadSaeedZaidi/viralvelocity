@@ -221,38 +221,32 @@ class StealthVideoStreamer:
         }
 
     def _get_android_options(self) -> Dict[str, Any]:
-        """Secondary strategy: iOS/Android clients."""
+        """Secondary strategy: TV/iOS clients."""
         opts = self._get_base_options()
         opts.update(
             {
                 "extractor_args": {
                     "youtube": {
-                        # iOS is currently heavily favored against bot checks
-                        "player_client": ["ios", "android"],
-                        # We MUST REMOVE "player_skip": ["webpage"] so Deno can fetch the PO token payload!
+                        # TV client bypasses PO Token checks since TVs lack JS engines
+                        "player_client": ["tv", "ios", "android"],
                     }
                 },
             }
         )
-        if self.cookies_path:
-            opts["cookiefile"] = str(self.cookies_path)
         return opts
 
     def _get_web_safari_options(self) -> Dict[str, Any]:
-        """Tertiary strategy: Default Web + JS Engine."""
+        """Tertiary strategy: Embedded TV / Mobile Web."""
         opts = self._get_base_options()
         opts.update(
             {
                 "extractor_args": {
                     "youtube": {
-                        # "default" forces it to use the full web pipeline with the Deno JS engine
-                        "player_client": ["default", "mweb", "web_safari"],
+                        "player_client": ["tv_embedded", "mweb", "web_safari"],
                     }
                 },
             }
         )
-        if self.cookies_path:
-            opts["cookiefile"] = str(self.cookies_path)
         return opts
 
     def _get_authenticated_options(self) -> Dict[str, Any]:
@@ -303,53 +297,63 @@ class StealthVideoStreamer:
 
     async def _try_invidious(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
-        Attempt extraction through Invidious federation with instance rotation.
-
-        Returns:
-            Video info dict on success, None if all instances exhausted.
+        Attempt extraction through Invidious federation via direct API calls.
+        Bypasses yt-dlp entirely to prevent it from delegating back to YouTube
+        and leaking our datacenter IP to the anti-bot wall.
         """
         for attempt in range(self.MAX_INVIDIOUS_ATTEMPTS):
             instance = await _instance_manager.get_instance()
-            target_url = f"{instance}/watch?v={video_id}"
-            opts = self._get_base_options()
+            api_url = f"{instance}/api/v1/videos/{video_id}"
 
             try:
                 logger.info(
                     f"[Invidious {attempt + 1}/{self.MAX_INVIDIOUS_ATTEMPTS}] "
-                    f"Trying {instance} for {video_id}"
+                    f"Trying API {instance} for {video_id}"
                 )
 
-                loop = asyncio.get_running_loop()
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as session:
+                    async with session.get(api_url) as resp:
+                        if resp.status != 200:
+                            raise ValueError(f"HTTP {resp.status}")
 
-                def _do_fetch(
-                    url: str = target_url, options: Dict[str, Any] = opts
-                ) -> Dict[str, Any]:
-                    return self._fetch_sync(url, options)
+                        data = await resp.json()
 
-                info: Dict[str, Any] = await asyncio.wait_for(
-                    loop.run_in_executor(None, _do_fetch),
-                    timeout=60,  # Hard timeout for the entire extraction
-                )
+                        # Construct a yt-dlp compatible info dict
+                        info = {
+                            "id": video_id,
+                            "title": data.get("title", f"Video {video_id}"),
+                            "duration": data.get("lengthSeconds", 0),
+                            # Invidious returns chapters as 'storyboards'
+                            "chapters": data.get("storyboards", []),
+                            "heatmap": [],
+                            "url": None,
+                        }
 
-                # Validate: must have a playable stream URL
-                resolved = self._resolve_stream_url(info)
-                if resolved:
-                    info["url"] = resolved
-                    logger.info(f"✓ Invidious success via {instance}")
-                    return info
-                else:
-                    raise ValueError("No mp4-compatible stream URL in extraction result")
+                        # Find the best proxied mp4 format stream
+                        formats = data.get("formatStreams", [])
+                        mp4_formats = [
+                            f for f in formats if f.get("container") == "mp4" and f.get("url")
+                        ]
+
+                        if not mp4_formats:
+                            raise ValueError("No proxied mp4 streams available via API")
+
+                        # Pick the highest quality one
+                        best_mp4 = sorted(mp4_formats, key=lambda x: x.get("height", 0))[-1]
+                        info["url"] = best_mp4["url"]
+
+                        logger.info(f"✓ Invidious success via {instance} API (yt-dlp bypassed)")
+                        return info
 
             except asyncio.TimeoutError:
                 logger.warning(f"✗ Invidious timeout on {instance}")
                 _instance_manager.mark_bad(instance)
 
             except Exception as e:
-                # Use repr(e) to dump the full raw error to logs
                 logger.warning(f"✗ Invidious failed on {instance}: {repr(e)}")
                 _instance_manager.mark_bad(instance)
-
-                # Brief jitter between retries
                 await asyncio.sleep(random.uniform(0.5, 2.0))
 
         logger.warning(
