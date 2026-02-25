@@ -50,14 +50,16 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
 
     # 1. Pre-flight Check using StealthVideoStreamer
     print(f"\n[Test] Verifying metadata for {video_id}...")
+    # 1. Pre-flight Check using StealthVideoStreamer
+    print(f"\n[Test] Verifying metadata for {video_id}...")
     try:
         from maia.painter.streamer import StealthVideoStreamer
 
         streamer = StealthVideoStreamer()
         # extract_info now tries Invidious first, then direct yt-dlp
-        # Run with timeout to prevent hanging
+        # Run with 180s timeout to allow Deno JS challenge to complete
         info = await asyncio.wait_for(
-            asyncio.to_thread(streamer.extract_info, video_id), timeout=30.0
+            asyncio.to_thread(streamer.extract_info, video_id), timeout=180.0
         )
 
         has_chapters = len(info.get("chapters", []) or []) > 0
@@ -71,7 +73,7 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
             pytest.fail("Real video B0J27sf9N1Y no longer has required metadata.")
 
     except asyncio.TimeoutError:
-        pytest.fail("Pre-flight check timed out after 30s - network or service issue")
+        pytest.fail("Pre-flight check timed out after 180s - network or service issue")
     except yt_dlp.utils.DownloadError as e:
         error_str = str(e)
         if "429" in error_str:

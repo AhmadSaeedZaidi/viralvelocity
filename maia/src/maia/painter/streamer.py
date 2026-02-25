@@ -217,17 +217,19 @@ class StealthVideoStreamer:
             # Format Trap: Force mp4 for OpenCV compatibility
             "format": "best[ext=mp4]/best",
             "force_ipv4": True,
+            "extractor_retries": 3,  # Let yt-dlp retry bot checks internally
         }
 
     def _get_android_options(self) -> Dict[str, Any]:
-        """Secondary strategy: Android client (bypasses web CAPTCHA)."""
+        """Secondary strategy: iOS/Android clients."""
         opts = self._get_base_options()
         opts.update(
             {
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["android"],
-                        "player_skip": ["webpage", "configs"],
+                        # iOS is currently heavily favored against bot checks
+                        "player_client": ["ios", "android"],
+                        # We MUST REMOVE "player_skip": ["webpage"] so Deno can fetch the PO token payload!
                     }
                 },
             }
@@ -237,14 +239,14 @@ class StealthVideoStreamer:
         return opts
 
     def _get_web_safari_options(self) -> Dict[str, Any]:
-        """Tertiary strategy: Web Safari + PO Token."""
+        """Tertiary strategy: Default Web + JS Engine."""
         opts = self._get_base_options()
         opts.update(
             {
                 "extractor_args": {
                     "youtube": {
-                        "player_client": ["web_safari"],
-                        "player_skip": ["configs"],
+                        # "default" forces it to use the full web pipeline with the Deno JS engine
+                        "player_client": ["default", "mweb", "web_safari"],
                     }
                 },
             }
@@ -343,12 +345,13 @@ class StealthVideoStreamer:
                 _instance_manager.mark_bad(instance)
 
             except Exception as e:
-                logger.warning(f"✗ Invidious failed on {instance}: {e}")
+                # Use repr(e) to dump the full raw error to logs
+                logger.warning(f"✗ Invidious failed on {instance}: {repr(e)}")
                 _instance_manager.mark_bad(instance)
 
                 # Brief jitter between retries
                 await asyncio.sleep(random.uniform(0.5, 2.0))
-
+                
         logger.warning(
             f"Invidious exhausted ({self.MAX_INVIDIOUS_ATTEMPTS} attempts). "
             f"Falling back to direct yt-dlp strategies."
