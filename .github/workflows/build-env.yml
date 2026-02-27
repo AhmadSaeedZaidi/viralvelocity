@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: AhmadSaeedZaidi/alkyone/ci-env 
+  IMAGE_NAME: AhmadSaeedZaidi/pleiades/ci-env 
 
 permissions:
   contents: read
