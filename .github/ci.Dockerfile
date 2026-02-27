@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # System deps: make, git, ffmpeg, yt-dlp, Deno, build essentials
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        make git build-essential ffmpeg curl unzip ca-certificates && \
+        make git build-essential ffmpeg curl unzip ca-certificates nodejs npm && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Deno
@@ -13,7 +13,7 @@ RUN curl -fsSL https://deno.land/install.sh | sh && \
 
 # Install Poetry
 ENV POETRY_VERSION=2.0.0
-# CRITICAL FIX: Turn off virtualenvs. Install dependencies globally in the container system Python.
+# Install dependencies globally in the container system Python.
 RUN pip install --no-cache-dir poetry==${POETRY_VERSION} && \
     poetry config virtualenvs.create false
 
