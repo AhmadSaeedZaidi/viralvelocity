@@ -3,15 +3,16 @@ name: Build CI Environment
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: ['**'] 
     paths:
       - '.github/workflows/build-env.yml'
       - '**/pyproject.toml'
       - '**/poetry.lock'
+      - '.github/ci.Dockerfile'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/ci-env
+  IMAGE_NAME: AhmadSaeedZaidi/alkyone/ci-env 
 
 permissions:
   contents: read
