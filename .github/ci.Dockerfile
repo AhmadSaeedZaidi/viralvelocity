@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # System deps: make, git, ffmpeg, yt-dlp, Deno, build essentials
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        make git build-essential ffmpeg curl unzip ca-certificates nodejs npm && \
+        make git build-essential ffmpeg curl unzip ca-certificates nodejs npm jq && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Deno
