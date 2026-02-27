@@ -22,17 +22,17 @@ WORKDIR /workspace
 # Copy dependency manifests first (cache layer)
 COPY atlas/pyproject.toml atlas/poetry.lock* atlas/
 COPY maia/pyproject.toml maia/poetry.lock* maia/
-COPY pleiades/pyproject.toml pleiades/poetry.lock* pleiades/
+COPY alkyone/pyproject.toml alkyone/poetry.lock* alkyone/
 
 # Copy source so editable installs resolve
 COPY atlas/ atlas/
 COPY maia/ maia/
-COPY pleiades/ pleiades/
+COPY alkyone/ alkyone/
 
 # Install all project dependencies system-wide
 RUN cd atlas && poetry install --no-interaction && \
     cd ../maia && poetry install --no-interaction && \
-    cd ../pleiades && poetry install --no-interaction
+    cd ../alkyone && poetry install --no-interaction
 
 # Purge yt-dlp cache
 RUN rm -rf ~/.cache/yt-dlp || true
