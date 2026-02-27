@@ -73,10 +73,7 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         if "429" in error_str:
             pytest.fail("YouTube Rate Limit (429) active during pre-flight check.")
         elif "Sign in" in error_str or "bot" in error_str:
-            pytest.fail(
-                "All extraction strategies blocked. "
-                "YouTube anti-bot is active."
-            )
+            pytest.fail("All extraction strategies blocked. " "YouTube anti-bot is active.")
         raise
 
     # 2. Setup DB State
