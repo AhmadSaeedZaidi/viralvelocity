@@ -22,6 +22,8 @@ from atlas.utils import KeyRing, ResiliencyExecutor
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
+from maia.utils import RateLimitError, execute_with_rate_limit
+
 logger = logging.getLogger(__name__)
 
 tracker_keys = KeyRing("tracking")
@@ -106,8 +108,8 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
 
     # Execute with resiliency strategy
     try:
-        response_json = await tracker_executor.execute_async(make_request)
-    except SystemExit:
+        response_json = await execute_with_rate_limit(tracker_executor, make_request)
+    except RateLimitError:
         # Resiliency strategy - propagate clean termination
         raise
     except Exception as e:
@@ -244,7 +246,7 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
             f"Failed: {stats['updates_failed']}"
         )
 
-    except SystemExit:
+    except RateLimitError:
         # Resiliency strategy: Rate limit detected - propagate immediately
         run_logger.critical("Tracker Cycle terminated by resiliency strategy (429 Rate Limit)")
         raise
@@ -259,7 +261,7 @@ def main() -> None:
     """Entry point for running the Adaptive Tracker as a standalone service."""
     try:
         asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
-    except SystemExit as e:
+    except RateLimitError as e:
         # Resiliency strategy: Exit with specific code for rate limit
         logger.critical(f"Adaptive Tracker terminated: {e}")
         raise

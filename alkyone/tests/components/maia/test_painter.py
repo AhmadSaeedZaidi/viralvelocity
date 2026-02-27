@@ -3,7 +3,7 @@ Integration tests for Maia Painter.
 
 Verifies end-to-end behavior using REAL external services:
 1. Real YouTube Video (Blender 4.0 Tutorial - B0J27sf9N1Y)
-2. Real Network Calls (Invidious federation → yt-dlp fallback)
+2. Real Network Calls (direct yt-dlp with cookies)
 3. Real Vault Storage
 
 Usage: pytest -m integration tests/integration/test_painter.py
@@ -42,22 +42,16 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
     1. Pre-flight: Video actually has chapters/heatmap (via StealthVideoStreamer).
     2. Execution: Painter agent runs successfully.
     3. Outcome: Video is marked as 'has_visuals' in the DB.
-
-    The StealthVideoStreamer tries Invidious federation first, then falls back
-    to direct yt-dlp strategies automatically.
     """
     video_id = "B0J27sf9N1Y"
 
-    # 1. Pre-flight Check using StealthVideoStreamer
-    print(f"\n[Test] Verifying metadata for {video_id}...")
     # 1. Pre-flight Check using StealthVideoStreamer
     print(f"\n[Test] Verifying metadata for {video_id}...")
     try:
         from maia.painter.streamer import StealthVideoStreamer
 
         streamer = StealthVideoStreamer()
-        # extract_info now tries Invidious first, then direct yt-dlp
-        # Run with 180s timeout to allow Deno JS challenge to complete
+        # Run with 180s timeout to allow extraction
         info = await asyncio.wait_for(
             asyncio.to_thread(streamer.extract_info, video_id), timeout=180.0
         )
@@ -80,8 +74,8 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
             pytest.fail("YouTube Rate Limit (429) active during pre-flight check.")
         elif "Sign in" in error_str or "bot" in error_str:
             pytest.fail(
-                "All extraction strategies blocked (Invidious + direct). "
-                "YouTube anti-bot is active across all federated instances."
+                "All extraction strategies blocked. "
+                "YouTube anti-bot is active."
             )
         raise
 

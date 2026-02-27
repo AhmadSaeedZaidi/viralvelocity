@@ -10,6 +10,7 @@ import pytest
 
 from maia.painter.flow import fetch_painter_targets_task, painter_flow, process_frames_task
 from maia.painter.streamer import StealthVideoStreamer
+from maia.utils import RateLimitError
 
 
 @pytest.mark.asyncio
@@ -293,7 +294,7 @@ async def test_process_frames_handles_vault_failure():
 
 @pytest.mark.asyncio
 async def test_process_frames_propagates_resiliency_strategy():
-    """Test process_frames propagates SystemExit for Resiliency Strategy."""
+    """Test process_frames propagates RateLimitError for Resiliency Strategy."""
     video = {"id": "VIDEO_001", "title": "Test Video"}
 
     with (
@@ -301,9 +302,11 @@ async def test_process_frames_propagates_resiliency_strategy():
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
     ):
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.extract_info = MagicMock(side_effect=SystemExit("429 Rate Limit"))
+        mock_streamer_instance.extract_info = MagicMock(
+            side_effect=RateLimitError("429 Rate Limit")
+        )
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(RateLimitError):
             await process_frames_task.fn(video)
 
 

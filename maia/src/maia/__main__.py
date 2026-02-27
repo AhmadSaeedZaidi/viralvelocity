@@ -9,6 +9,7 @@ import sys
 
 from maia import __version__
 from maia.registry import AGENT_REGISTRY
+from maia.utils import RateLimitError
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -68,7 +69,7 @@ def main(args: list[str] | None = None) -> int:
         logger.info(f"{parsed_args.command.capitalize()} completed: {result}")
         return 0
 
-    except SystemExit as e:
+    except RateLimitError as e:
         logger.critical(f"Maia terminated by resiliency strategy: {e}")
         raise
 

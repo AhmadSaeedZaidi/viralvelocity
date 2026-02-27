@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from maia.scribe.flow import fetch_scribe_targets_task, process_transcript_task, scribe_flow
+from maia.utils import RateLimitError
 
 
 @pytest.mark.asyncio
@@ -74,6 +75,8 @@ async def test_process_transcript_successful():
 @pytest.mark.asyncio
 async def test_process_transcript_unavailable():
     """Test process_transcript handles unavailable transcripts gracefully."""
+    from youtube_transcript_api._errors import TranscriptsDisabled
+
     video = {"id": "VIDEO_NO_TRANSCRIPT", "title": "Video Without Transcript"}
 
     with (
@@ -86,7 +89,9 @@ async def test_process_transcript_unavailable():
         mock_dao = MockDAO.return_value
         mock_dao.mark_video_transcript_safe = AsyncMock()
         mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(return_value=None)
+        mock_loader_instance.fetch = MagicMock(
+            side_effect=TranscriptsDisabled("VIDEO_NO_TRANSCRIPT")
+        )
         mock_vault.store_transcript = MagicMock()
 
         await process_transcript_task.fn(video)
@@ -143,7 +148,7 @@ async def test_process_transcript_handles_transcript_fetch_failure():
 
 @pytest.mark.asyncio
 async def test_process_transcript_propagates_resiliency_strategy():
-    """Test process_transcript propagates SystemExit for Resiliency Strategy."""
+    """Test process_transcript propagates RateLimitError for Resiliency Strategy."""
     video = {"id": "VIDEO_001", "title": "Test Video"}
 
     with (
@@ -152,9 +157,9 @@ async def test_process_transcript_propagates_resiliency_strategy():
     ):
         mock_dao = MockDAO.return_value
         mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(side_effect=SystemExit("429 Rate Limit"))
+        mock_loader_instance.fetch = MagicMock(side_effect=RateLimitError("429 Rate Limit"))
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(RateLimitError):
             await process_transcript_task.fn(video)
 
 

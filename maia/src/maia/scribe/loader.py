@@ -8,6 +8,12 @@ from youtube_transcript_api import (  # type: ignore[attr-defined]
     YouTubeTranscriptApi,
 )
 
+from maia.utils import RateLimitError
+
+
+class TranscriptExtractionError(Exception):
+    """Raised when transcript extraction fails or returns empty data."""
+
 
 class TranscriptLoader:
     """
@@ -21,10 +27,16 @@ class TranscriptLoader:
         except Exception:
             self.logger = logging.getLogger("maia.scribe.loader")
 
-    def fetch(self, video_id: str) -> Optional[List[Dict[Any, Any]]]:
-        """
-        Fetches transcript.
-        Implements Resiliency Strategy: If blocked (TooManyRequests), raises SystemExit.
+    def fetch(self, video_id: str) -> List[Dict[Any, Any]]:
+        """Fetch transcript for a YouTube video.
+
+        Returns:
+            Non-empty list of transcript segments.
+
+        Raises:
+            RateLimitError: On YouTube 429 / TooManyRequests.
+            TranscriptExtractionError: When no transcript data can be obtained.
+            TranscriptsDisabled: When the video has captions disabled.
         """
         try:
             # We fetch the list object to inspect available transcripts
@@ -46,20 +58,23 @@ class TranscriptLoader:
 
             # Fetch the actual data
             result: List[Dict[Any, Any]] = transcript.fetch()
+            if not result:
+                raise TranscriptExtractionError(
+                    f"Transcript fetch returned empty data for {video_id}"
+                )
             return result
 
         except TooManyRequests:
-            self.logger.critical(
-                f"IP BLOCKED by YouTube (TooManyRequests). Initiating Resiliency Strategy for Scribe."
-            )
-            # CRITICAL: This kills the container to force a rotation
-            raise SystemExit("429 Rate Limit (Scribe) - Container Suicide")
+            self.logger.critical("IP BLOCKED by YouTube (TooManyRequests). Raising RateLimitError.")
+            raise RateLimitError("429 Rate Limit (Scribe) — YouTube TooManyRequests")
 
         except TranscriptsDisabled:
-            # This is a valid state (video has no captions), return None so we can mark it 'unavailable'
-            return None
+            raise
+
+        except TranscriptExtractionError:
+            raise
 
         except Exception as e:
-            # Network glitches or video deleted during processing
-            self.logger.warning(f"Error fetching transcript for {video_id}: {e}")
-            return None
+            raise TranscriptExtractionError(
+                f"Failed to extract transcript for {video_id}: {e}"
+            ) from e

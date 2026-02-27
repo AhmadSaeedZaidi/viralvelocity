@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from maia.archeologist.flow import ArcheologistAgent, archeology_flow, hunt_history_task
+from maia.utils import RateLimitError
 
 
 @pytest.mark.asyncio
@@ -116,7 +117,7 @@ async def test_hunt_history_handles_403_key_rotation():
 
 @pytest.mark.asyncio
 async def test_hunt_history_handles_429_resiliency_strategy():
-    """Test Archeologist raises SystemExit on 429 rate limit (Resiliency Strategy)."""
+    """Test Archeologist raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
     with (
         patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
@@ -141,7 +142,7 @@ async def test_hunt_history_handles_429_resiliency_strategy():
         mock_session_instance.get.return_value = mock_get_context
         MockSession.return_value = mock_session_instance
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(RateLimitError):
             await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
 
 

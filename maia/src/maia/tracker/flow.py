@@ -11,6 +11,8 @@ from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
 
+from maia.utils import RateLimitError, execute_with_rate_limit
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,8 +77,8 @@ async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyEx
                     raise Exception(f"HTTP {resp.status}")
 
     try:
-        response_json = await executor.execute_async(make_request)
-    except SystemExit:
+        response_json = await execute_with_rate_limit(executor, make_request)
+    except RateLimitError:
         raise
     except Exception as e:
         run_logger.error(f"Failed to fetch stats: {e}")
@@ -161,7 +163,7 @@ async def tracker_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[st
             f"Failed: {stats['updates_failed']}"
         )
 
-    except SystemExit:
+    except RateLimitError:
         run_logger.critical("Tracker Cycle terminated by Resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
@@ -240,7 +242,7 @@ def main() -> None:
     try:
         agent = TrackerAgent()
         asyncio.run(agent.run())
-    except SystemExit as e:
+    except RateLimitError as e:
         logger.critical(f"Tracker terminated: {e}")
         raise
     except KeyboardInterrupt:

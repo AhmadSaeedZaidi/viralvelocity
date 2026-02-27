@@ -12,6 +12,8 @@ from atlas.utils import KeyRing, ResiliencyExecutor
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
+from maia.utils import RateLimitError, execute_with_rate_limit
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,8 +80,8 @@ async def search_youtube_task(
                     raise Exception(f"HTTP {resp.status}")
 
     try:
-        return await executor.execute_async(make_request)
-    except SystemExit:
+        return await execute_with_rate_limit(executor, make_request)
+    except RateLimitError:
         raise
     except Exception as e:
         run_logger.error(f"Search failed for '{query}': {e}")
@@ -212,7 +214,7 @@ async def hunter_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str
                     stats["searches_successful"] += 1
                 else:
                     stats["searches_failed"] += 1
-            except SystemExit:
+            except RateLimitError:
                 raise
             except Exception as e:
                 run_logger.error(f"Error processing topic '{topic.get('query_term')}': {e}")
@@ -226,7 +228,7 @@ async def hunter_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str
             f"Failed: {stats['searches_failed']}"
         )
 
-    except SystemExit:
+    except RateLimitError:
         run_logger.critical("Hunter Cycle terminated by Resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
@@ -311,7 +313,7 @@ def main() -> None:
     try:
         agent = HunterAgent()
         asyncio.run(agent.run())
-    except SystemExit as e:
+    except RateLimitError as e:
         logger.critical(f"Hunter terminated: {e}")
         raise
     except KeyboardInterrupt:

@@ -104,11 +104,11 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
                 # Tenacity exhausted all retries (likely due to persistent 429 errors)
                 if attempt == max_retries - 1:
                     run_logger.critical("All retry attempts exhausted. Aborting Archeologist.")
-                    raise SystemExit("429 Rate Limit - Archeologist")
+                    raise RateLimitError("429 Rate Limit - Archeologist")
                 continue  # Try next API key
 
             except Exception as e:
-                if isinstance(e, SystemExit):
+                if isinstance(e, RateLimitError):
                     raise
                 run_logger.error(f"Network error in Archeologist: {e}")
                 if attempt == max_retries - 1:

@@ -1,5 +1,7 @@
 import json
 import logging
+import tempfile
+from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from pydantic import Field, PostgresDsn, SecretStr, field_validator, model_validator
@@ -40,6 +42,14 @@ class Settings(BaseSettings):  # type: ignore[misc]
     JANITOR_RETENTION_DAYS: int = Field(7, description="Days to retain processed data in hot queue")
     JANITOR_SAFETY_CHECK: bool = Field(
         True, description="Verify data exists in Vault before deletion"
+    )
+
+    YOUTUBE_COOKIES_PATH: Optional[str] = Field(
+        None, description="Path to Netscape cookies.txt file for YouTube authentication"
+    )
+    YOUTUBE_COOKIES_CONTENT: Optional[SecretStr] = Field(
+        None,
+        description="Raw Netscape cookies.txt content (written to temp file at startup)",
     )
 
     @model_validator(mode="after")
@@ -94,6 +104,30 @@ class Settings(BaseSettings):  # type: ignore[misc]
             "tracking": tracking_keys,
             "archeology": archeology_keys,
         }
+
+    @property
+    def youtube_cookies_resolved_path(self) -> Optional[str]:
+        """Resolve the YouTube cookies file path.
+
+        Priority:
+        1. ``YOUTUBE_COOKIES_PATH`` — explicit file path.
+        2. ``YOUTUBE_COOKIES_CONTENT`` — raw content materialised to a temp file.
+        3. ``None`` — no cookies configured.
+        """
+        if self.YOUTUBE_COOKIES_PATH:
+            p = Path(self.YOUTUBE_COOKIES_PATH)
+            if p.exists():
+                return str(p)
+            logger.warning(f"YOUTUBE_COOKIES_PATH set but file missing: {p}")
+            return None
+
+        if self.YOUTUBE_COOKIES_CONTENT:
+            content = self.YOUTUBE_COOKIES_CONTENT.get_secret_value()
+            tmp = Path(tempfile.gettempdir()) / "youtube_cookies.txt"
+            tmp.write_text(content)
+            return str(tmp)
+
+        return None
 
     model_config = {
         "env_file": ".env",

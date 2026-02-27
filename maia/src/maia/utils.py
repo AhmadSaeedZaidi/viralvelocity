@@ -7,8 +7,9 @@ Centralises helpers that were previously duplicated across agent modules
 import asyncio
 import functools
 import logging
-from typing import Any, Callable, Coroutine, TypeVar
+from typing import Any, Callable, Coroutine, Optional, TypeVar
 
+from atlas.utils import ResiliencyExecutor
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,33 @@ T = TypeVar("T")
 
 class RateLimitError(Exception):
     """HTTP 429 rate-limit exceeded."""
+
+
+# ── Boundary wrapper ─────────────────────────────────────────────────────────
+
+
+async def execute_with_rate_limit(
+    executor: ResiliencyExecutor,
+    request_func: Callable[[str], Any],
+    error_classifier: Optional[Callable[[Exception], tuple[bool, bool]]] = None,
+) -> Optional[Any]:
+    """Execute an async request via ResiliencyExecutor, converting SystemExit to RateLimitError.
+
+    Atlas's ResiliencyExecutor calls ``sys.exit(0)`` when all API keys are
+    exhausted (the "Hydra Protocol" — container suicide for IP rotation).
+    ``SystemExit`` is a ``BaseException`` that crashes ``asyncio.gather``
+    and bypasses normal ``except Exception`` handlers.
+
+    This boundary wrapper catches ``SystemExit`` at the maia layer and
+    re-raises it as ``RateLimitError(Exception)`` so it propagates cleanly
+    through async task groups and Prefect flows.
+    """
+    try:
+        return await executor.execute_async(request_func, error_classifier)
+    except SystemExit:
+        raise RateLimitError(
+            f"All API keys exhausted for {executor.agent_name} — rate-limited (429)"
+        )
 
 
 # ── Executor helpers ─────────────────────────────────────────────────────────

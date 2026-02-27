@@ -16,9 +16,12 @@ from tenacity import (
     wait_exponential,
 )
 
-from maia.utils import vault_op_with_retry
+# Re-export TranscriptsDisabled so the flow can catch it
+from youtube_transcript_api import TranscriptsDisabled  # type: ignore[attr-defined]
 
-from .loader import TranscriptLoader
+from maia.utils import RateLimitError, vault_op_with_retry
+
+from .loader import TranscriptExtractionError, TranscriptLoader
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +61,17 @@ async def process_transcript_task(video: Dict[str, Any]) -> None:
     try:
         transcript_data = await _fetch_transcript_with_retry(loader, vid_id)
 
-        if transcript_data:
-            v = get_vault()
-            await vault_op_with_retry(lambda: v.store_transcript(vid_id, transcript_data))
-            await dao.mark_video_transcript_safe(vid_id)
-            run_logger.info(f"Scribed transcript for {vid_id}")
-        else:
-            run_logger.warning(f"Transcripts unavailable/disabled for {vid_id}")
-            await dao.mark_video_transcript_safe(vid_id)
+        v = get_vault()
+        await vault_op_with_retry(lambda: v.store_transcript(vid_id, transcript_data))
+        await dao.mark_video_transcript_safe(vid_id)
+        run_logger.info(f"Scribed transcript for {vid_id}")
 
-    except SystemExit:
+    except RateLimitError:
+        run_logger.critical(f"Rate limit hit while scribing {vid_id}. Propagating.")
         raise
+    except TranscriptsDisabled:
+        run_logger.warning(f"Transcripts disabled for {vid_id}")
+        await dao.mark_video_transcript_safe(vid_id)
     except Exception as e:
         run_logger.error(f"Failed to scribe {vid_id} after retries: {e}")
         await dao.mark_video_failed(vid_id)

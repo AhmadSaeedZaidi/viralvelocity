@@ -107,47 +107,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: Development
     timeout-minutes: 15
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-env:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pypoetry
-            atlas/.venv
-            maia/.venv
-            alkyone/.venv
-          key: poetry-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            poetry-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
-
-      - name: Install Poetry
+      - name: Manifest YouTube Cookies
         run: |
-          pip install poetry==${{ env.POETRY_VERSION }}
-          poetry config virtualenvs.in-project true
-
-      - name: Install Multimedia Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-
-      - name: Install Dependencies
-        run: |
-          cd atlas && poetry install --no-interaction
-          cd ../maia && poetry install --no-interaction
-          cd ../alkyone && poetry install --no-interaction
+          echo "${{ secrets.YOUTUBE_COOKIES_TXT }}" > /tmp/youtube_cookies.txt
+          echo "YOUTUBE_COOKIES_PATH=/tmp/youtube_cookies.txt" >> "$GITHUB_ENV"
 
       - name: Purge yt-dlp cache
         run: rm -rf ~/.cache/yt-dlp || true
@@ -177,6 +149,9 @@ jobs:
           YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
           KEY_POOL_ARCHEOLOGY_SIZE: ${{ secrets.KEY_POOL_ARCHEOLOGY_SIZE }}
           KEY_POOL_TRACKING_SIZE: ${{ secrets.KEY_POOL_TRACKING_SIZE }}
+          
+          # YouTube Cookies (manifested in earlier step)
+          YOUTUBE_COOKIES_PATH: ${{ env.YOUTUBE_COOKIES_PATH }}
           
           # Vault Configuration
           VAULT_PROVIDER: ${{ vars.VAULT_PROVIDER || 'huggingface' }}

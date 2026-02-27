@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import logging
-import os
 import random
 import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -14,12 +13,12 @@ from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
 from maia.painter.streamer import StealthVideoStreamer
-from maia.utils import vault_op_with_retry
+from maia.utils import RateLimitError, vault_op_with_retry
 
 logger = logging.getLogger(__name__)
 
 # CONCURRENCY CONTROL
-# 5-8 is optimal to saturate network without triggering 429s on Invidious instances
+# 5-8 is optimal to saturate network without triggering 429s
 MAX_CONCURRENT_VIDEOS = 5
 
 
@@ -133,9 +132,8 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
     vid_id = video["id"]
 
     try:
-        # 1. Fetch Metadata using StealthVideoStreamer (Invidious-first cascade)
-        cookie_path = os.getenv("MAIA_COOKIES_PATH")
-        streamer = StealthVideoStreamer(cookies_path=cookie_path)
+        # 1. Fetch Metadata using StealthVideoStreamer (direct yt-dlp with cookies)
+        streamer = StealthVideoStreamer()
         info = await asyncio.to_thread(streamer.extract_info, vid_id)
 
         stream_url = info.get("url")
@@ -193,7 +191,7 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
         await dao.mark_video_visuals_safe(vid_id)
         run_logger.info(f"✅ Painted {len(frames_to_vault)} keyframes for {vid_id}")
 
-    except SystemExit:
+    except RateLimitError:
         raise
     except Exception as e:
         run_logger.error(f"Painter failed on {vid_id}: {e}")
