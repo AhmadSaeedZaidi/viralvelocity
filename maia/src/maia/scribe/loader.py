@@ -1,12 +1,19 @@
+"""Maia Scribe: Transcript loader using cookie-authenticated requests session.
+
+The loader builds a ``requests.Session`` populated with the YouTube cookies
+resolved from ``atlas.config.settings.youtube_cookies_resolved_path`` and passes
+it into ``YouTubeTranscriptApi(http_client=...)``. This bypasses YouTube's
+anti-bot protections for both the transcript listing and content fetch.
+"""
+
+import http.cookiejar as cookiejar
 import logging
 from typing import Any, Dict, List, Optional
 
+import requests  # type: ignore[import-untyped]
 from prefect import get_run_logger
-from youtube_transcript_api import (  # type: ignore[attr-defined]
-    TooManyRequests,
-    TranscriptsDisabled,
-    YouTubeTranscriptApi,
-)
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import IpBlocked, RequestBlocked, TranscriptsDisabled
 
 from maia.utils import RateLimitError
 
@@ -17,56 +24,107 @@ class TranscriptExtractionError(Exception):
 
 class TranscriptLoader:
     """
-    Wrapper for youtube-transcript-api to handle proxy rotation logic.
+    Wrapper for ``youtube-transcript-api`` 1.x with cookie authentication.
+
+    Cookie path is resolved exclusively through ``atlas.config.settings`` at
+    construction time. Direct ``os.environ`` access is forbidden.
     """
 
-    def __init__(self) -> None:
-        # We try to get the prefect logger, fallback to standard if running outside flow context
+    def __init__(self, cookies_path: Optional[str] = None) -> None:
+        """Initialise loader.
+
+        Args:
+            cookies_path: Explicit override for cookie file path.
+                          When *None* (default) the path is resolved from
+                          ``atlas.config.settings.youtube_cookies_resolved_path``.
+        """
         try:
-            self.logger = get_run_logger()
+            self.logger: Any = get_run_logger()
         except Exception:
             self.logger = logging.getLogger("maia.scribe.loader")
 
+        if cookies_path is not None:
+            resolved: Optional[str] = cookies_path
+        else:
+            from atlas.config import settings
+
+            resolved = settings.youtube_cookies_resolved_path
+
+        self.cookies_path: Optional[str] = resolved
+        self._http_client = self._build_http_client(resolved)
+
+        if not resolved:
+            self.logger.warning(
+                "TranscriptLoader: No cookies configured. "
+                "YouTube may rate-limit or block unauthenticated transcript requests."
+            )
+
+    @staticmethod
+    def _build_http_client(cookies_path: Optional[str]) -> requests.Session:
+        """Build a ``requests.Session`` with optional cookies and a browser UA."""
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+        )
+
+        if cookies_path:
+            try:
+                jar = cookiejar.MozillaCookieJar(cookies_path)
+                jar.load(ignore_discard=True, ignore_expires=True)
+                session.cookies = jar  # type: ignore[assignment]
+            except Exception as exc:
+                logging.getLogger("maia.scribe.loader").warning(
+                    f"TranscriptLoader: Failed to load cookies from {cookies_path}: {exc}"
+                )
+
+        return session
+
     def fetch(self, video_id: str) -> List[Dict[Any, Any]]:
-        """Fetch transcript for a YouTube video.
+        """Fetch transcript for a YouTube video using authenticated session.
 
         Returns:
-            Non-empty list of transcript segments.
+            Non-empty list of transcript segments (``{"text", "start", "duration"}``).
 
         Raises:
-            RateLimitError: On YouTube 429 / TooManyRequests.
+            RateLimitError: On YouTube 429 / TooManyRequests / IpBlocked.
             TranscriptExtractionError: When no transcript data can be obtained.
             TranscriptsDisabled: When the video has captions disabled.
         """
         try:
-            # We fetch the list object to inspect available transcripts
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)  # type: ignore[attr-defined]
+            api = YouTubeTranscriptApi(http_client=self._http_client)
+            transcript_list = api.list(video_id)
 
-            # Priority 1: Manual English
             try:
                 transcript = transcript_list.find_manually_created_transcript(["en"])
             except Exception:
-                # Priority 2: Generated English (Better than nothing)
                 try:
                     transcript = transcript_list.find_generated_transcript(["en"])
                 except Exception:
-                    # Priority 3: Any Manual (Foreign language is better than no text)
-                    # We look for common languages.
                     transcript = transcript_list.find_manually_created_transcript(
                         ["es", "fr", "de", "pt", "ru", "ja", "ko"]
                     )
 
-            # Fetch the actual data
-            result: List[Dict[Any, Any]] = transcript.fetch()
+            fetched = transcript.fetch()
+            result: List[Dict[Any, Any]] = [
+                {"text": s.text, "start": s.start, "duration": s.duration} for s in fetched.snippets
+            ]
             if not result:
                 raise TranscriptExtractionError(
                     f"Transcript fetch returned empty data for {video_id}"
                 )
             return result
 
-        except TooManyRequests:
-            self.logger.critical("IP BLOCKED by YouTube (TooManyRequests). Raising RateLimitError.")
-            raise RateLimitError("429 Rate Limit (Scribe) — YouTube TooManyRequests")
+        except (IpBlocked, RequestBlocked) as exc:
+            self.logger.critical(
+                f"YouTube blocked transcript request for {video_id}: {type(exc).__name__}"
+            )
+            raise RateLimitError(f"429/Block (Scribe) — YouTube {type(exc).__name__}") from exc
 
         except TranscriptsDisabled:
             raise

@@ -333,8 +333,9 @@ class TestJanitorArchival:
         assert (
             total_archived == total_stats
         ), f"Expected {total_stats} stats archived in perf test, got {total_archived}"
-        # Allow more time for real vault uploads (HuggingFace API)
-        assert elapsed < 60, f"Archival took {elapsed}s, expected < 60s"
+        # Real-infra budget: Neon DB roundtrips + HuggingFace API uploads.
+        # 10k rows / 4 batch uploads typically completes in 60-90s.
+        assert elapsed < 180, f"Archival took {elapsed}s, expected < 180s"
 
 
 @pytest_asyncio.fixture

@@ -114,4 +114,6 @@ env = [
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "timeout: per-test timeout in seconds (handled by pytest-timeout)",
+    "production_e2e: E2E that may target the production HuggingFace vault; set PLEIADES_USE_PRODUCTION_VAULT=1 to run (see alkyone/fixtures.py)",
 ]

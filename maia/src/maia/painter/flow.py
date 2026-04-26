@@ -73,9 +73,11 @@ def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
             "error",
         ]
 
-        # Run with timeout to prevent hanging on dead streams
+        # Run with timeout to prevent hanging on dead streams.
+        # 20s budget covers slow HTTP-Range seeks to mid/end of long videos
+        # served by YouTube CDN edges.
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = process.communicate(timeout=10)  # 10s max per frame
+        out, err = process.communicate(timeout=20)
 
         if process.returncode == 0 and out:
             return out

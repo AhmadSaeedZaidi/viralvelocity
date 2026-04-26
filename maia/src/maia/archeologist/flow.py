@@ -8,7 +8,7 @@ from typing import Any, Dict, Union, cast
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
-from atlas.utils import KeyRing
+from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
 from tenacity import (
     RetryError,
@@ -19,6 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from maia.hunter.flow import enrich_channels_task
 from maia.utils import RateLimitError
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,30 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
                         dao.ingest_video_metadata(item, priority_override=100) for item in items
                     ]
                     await asyncio.gather(*ingest_tasks)
+
+                    # Channel index: stub rows come from ``ingest_video_metadata``; full
+                    # title + ``channel_stats_log`` via ``channels.list`` (same as Hunter).
+                    channel_ids = [
+                        it.get("snippet", {}).get("channelId")
+                        for it in items
+                        if it.get("snippet", {}).get("channelId")
+                    ]
+                    if channel_ids:
+                        # Use the hunting key pool (same as ``enrich_channels`` in Hunter).
+                        enrich_ex = ResiliencyExecutor(
+                            KeyRing("hunting"), agent_name="archeologist_enrich"
+                        )
+                        try:
+                            n = await enrich_channels_task(channel_ids, enrich_ex)
+                            run_logger.info(
+                                f"Enriched {n} channel(s) for recovered relics (Cat: {category})"
+                            )
+                        except RateLimitError:
+                            raise
+                        except Exception as e:
+                            run_logger.warning(
+                                f"Channel enrichment after archeology ingest (non-fatal): {e}"
+                            )
 
                     run_logger.info(
                         f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"

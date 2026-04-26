@@ -1,34 +1,99 @@
-import asyncio
-import logging
 import os
-from typing import Any, AsyncGenerator, Dict, List
 
-import pytest
-import pytest_asyncio
+# ============================================================================
+# CRITICAL VAULT ROUTING — MUST RUN BEFORE ANY ``atlas.*`` IMPORT
+# ============================================================================
+# Production ``.env`` sets ``HF_DATASET_ID`` to the production vault
+# (Rolaficus/pleiades-vault). Tests MUST route writes to the test vault
+# (Rolaficus/pleiades-vault-test) to avoid polluting production.
+#
+# This override force-sets ``os.environ["HF_DATASET_ID"]`` BEFORE any module
+# from ``atlas`` is imported. Atlas's Pydantic ``BaseSettings`` reads
+# ``os.environ`` first (before ``.env``), so this guarantees:
+#   1. ``settings.HF_DATASET_ID`` is the test value when first instantiated.
+#   2. ``HuggingFaceVault.__init__`` (which snapshots ``self.repo_id`` from
+#      settings at construction time) writes to the test vault.
+#
+# Override may be customised via ``HF_DATASET_ID_TEST`` env var.
+# Set ``PLEIADES_USE_PRODUCTION_VAULT=1`` to run a named E2E against the real
+# ``HF_DATASET_ID`` from ``.env`` (default: ``Rolaficus/pleiades-vault``). All
+# other tests keep using the test dataset.
+# ============================================================================
+_TEST_VAULT_DEFAULT = "Rolaficus/pleiades-vault-test"
+_USE_PROD_VAULT = os.getenv("PLEIADES_USE_PRODUCTION_VAULT", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+if not _USE_PROD_VAULT:
+    os.environ["HF_DATASET_ID"] = os.getenv("HF_DATASET_ID_TEST", _TEST_VAULT_DEFAULT)
 
-# Import Atlas config system - it handles environment variables automatically
-# Atlas uses Pydantic BaseSettings which loads from environment
-from atlas.config import settings
-from atlas.db import db
+import asyncio  # noqa: E402
+import logging  # noqa: E402
+from typing import Any, AsyncGenerator, Dict, List  # noqa: E402
 
-# --- ENVIRONMENT OVERRIDES FOR TESTING ---
-# These override production values for test safety
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from atlas.config import settings  # noqa: E402
+from atlas.db import db  # noqa: E402
+
+logger = logging.getLogger("alkyone.fixtures")
+logger.info(f"Test session vault: {settings.HF_DATASET_ID}")
+
+
+def _mirror_settings_to_environ() -> None:
+    """Mirror loaded ``atlas.config.settings`` values back into ``os.environ``.
+
+    Required because some libraries (e.g. ``huggingface_hub``) and tests still
+    look at ``os.environ`` directly, but Pydantic BaseSettings only updates the
+    Settings object — not ``os.environ`` — when reading from ``.env``.
+    """
+    pairs: list[tuple[str, str]] = []
+
+    if settings.DATABASE_URL and not os.getenv("DATABASE_URL"):
+        pairs.append(("DATABASE_URL", str(settings.DATABASE_URL)))
+
+    if settings.HF_TOKEN and not os.getenv("HF_TOKEN"):
+        pairs.append(("HF_TOKEN", settings.HF_TOKEN.get_secret_value()))
+
+    if settings.HF_DATASET_ID and not os.getenv("HF_DATASET_ID"):
+        pairs.append(("HF_DATASET_ID", settings.HF_DATASET_ID))
+
+    if settings.VAULT_PROVIDER and not os.getenv("VAULT_PROVIDER"):
+        pairs.append(("VAULT_PROVIDER", settings.VAULT_PROVIDER))
+
+    if not os.getenv("YOUTUBE_API_KEY_POOL_JSON"):
+        try:
+            raw = settings.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()
+            pairs.append(("YOUTUBE_API_KEY_POOL_JSON", raw))
+        except Exception:
+            pass
+
+    if settings.youtube_cookies_resolved_path and not os.getenv("YOUTUBE_COOKIES_PATH"):
+        pairs.append(("YOUTUBE_COOKIES_PATH", settings.youtube_cookies_resolved_path))
+
+    if settings.PREFECT_API_URL and not os.getenv("PREFECT_API_URL"):
+        pairs.append(("PREFECT_API_URL", settings.PREFECT_API_URL))
+
+    if settings.PREFECT_API_KEY and not os.getenv("PREFECT_API_KEY"):
+        pairs.append(("PREFECT_API_KEY", settings.PREFECT_API_KEY.get_secret_value()))
+
+    for k, v in pairs:
+        os.environ[k] = v
+
+
+_mirror_settings_to_environ()
+
+# Test-runtime overrides (do not pollute production)
 os.environ["ENV"] = os.getenv("ENV", "development")
 os.environ["COMPLIANCE_MODE"] = os.getenv("COMPLIANCE_MODE", "False")
 
-# Ensure YOUTUBE_API_KEY_POOL_JSON is set (required by Settings to initialize)
-# - In CI: GitHub Secrets inject real keys as environment variables
-# - Locally: Must be set in shell environment (no .env loading here)
-# - Fallback: Use dummy key for unit tests that mock KeyRing anyway
 if not os.getenv("YOUTUBE_API_KEY_POOL_JSON"):
-    logger_setup = logging.getLogger("alkyone.fixtures")
-    logger_setup.warning(
+    logger.warning(
         "YOUTUBE_API_KEY_POOL_JSON not set! Using fallback dummy key. "
         "Integration tests requiring real YouTube API will be skipped."
     )
     os.environ["YOUTUBE_API_KEY_POOL_JSON"] = '["DUMMY_KEY_FOR_UNIT_TESTS_ONLY"]'
-
-logger = logging.getLogger("alkyone.fixtures")
 
 _uploaded_files: List[str] = []
 

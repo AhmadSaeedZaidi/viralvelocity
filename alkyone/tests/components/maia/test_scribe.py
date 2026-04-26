@@ -35,6 +35,10 @@ async def test_scribe_complete_cycle(dao):
 
     await dao.ingest_video_metadata(test_video)
 
+    ch = await dao.get_channel_by_id("UCOKHwx1VCdgnxwbjyb9Iu1g")
+    assert ch is not None, "Blender Guru channel should be indexed alongside the video"
+    assert (ch.get("title") or "").find("Blender") >= 0 or "Guru" in (ch.get("title") or "")
+
     try:
         await run_scribe_cycle(batch_size=1)
 

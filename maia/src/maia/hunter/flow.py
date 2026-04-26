@@ -4,12 +4,13 @@ import argparse
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 from atlas.adapters.maia import MaiaDAO
 from atlas.utils import KeyRing, ResiliencyExecutor
 from atlas.vault import get_vault
+from atlas.youtube import lookup_channels
 from prefect import flow, get_run_logger, task
 
 from maia.utils import RateLimitError, execute_with_rate_limit
@@ -88,17 +89,76 @@ async def search_youtube_task(
         return None
 
 
+@task(name="enrich_channels")
+async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecutor) -> int:
+    """Resolve unindexed/stale channels via the YouTube Data API + log a stats snapshot.
+
+    For every channel id passed in:
+    * If the channel has no row in ``channel_stats_log`` newer than 24h, it is
+      fetched via ``channels.list?part=snippet,statistics`` and persisted via
+      :meth:`MaiaDAO.ingest_channel_snapshot`.
+    * Otherwise it is skipped.
+
+    Returns the number of channels actually refreshed (real API calls + DB writes).
+    """
+    if not channel_ids:
+        return 0
+
+    dao = MaiaDAO()
+    run_logger = get_run_logger()
+
+    unique = list({cid for cid in channel_ids if cid})
+
+    needs: List[str] = []
+    for cid in unique:
+        try:
+            if await dao.channel_needs_refresh(cid):
+                needs.append(cid)
+        except Exception as e:
+            run_logger.warning(f"channel_needs_refresh({cid}) failed: {e}")
+
+    if not needs:
+        run_logger.info("No channels need enrichment (all have recent stats).")
+        return 0
+
+    run_logger.info(f"Enriching {len(needs)} channel(s) via YouTube channels.list API")
+
+    try:
+        items = await lookup_channels(needs, executor=executor)
+    except RateLimitError:
+        raise
+    except Exception as e:
+        run_logger.error(f"channels.list lookup failed for {len(needs)} ids: {e}")
+        return 0
+
+    written = 0
+    for item in items:
+        try:
+            await dao.ingest_channel_snapshot(item)
+            written += 1
+        except Exception as e:
+            run_logger.error(f"Failed to ingest channel snapshot for {item.get('id')}: {e}")
+
+    run_logger.info(f"Enriched {written}/{len(needs)} channel records (API hit, snapshot logged).")
+    return written
+
+
 @task(name="ingest_results")
-async def ingest_results_task(topic: Dict[str, Any], response: Dict[str, Any]) -> None:
+async def ingest_results_task(
+    topic: Dict[str, Any],
+    response: Dict[str, Any],
+    executor: Optional[ResiliencyExecutor] = None,
+) -> None:
     """
     Ingest video metadata and implement the Snowball Effect.
 
     Steps:
     1. Store raw metadata to vault (cold archive) — concurrent, best-effort
     2. Ingest structured metadata to database (hot index) — concurrent
-    3. Extract tags from all videos (Snowball)
-    4. Add unique tags to search queue
-    5. Update topic state with pagination token
+    3. Enrich newly-discovered channels via channels.list API + snapshot log
+    4. Extract tags from all videos (Snowball)
+    5. Add unique tags to search queue
+    6. Update topic state with pagination token
     """
     if not response:
         return
@@ -138,7 +198,21 @@ async def ingest_results_task(topic: Dict[str, Any], response: Dict[str, Any]) -
     # Fire vault stores and DB inserts concurrently
     await asyncio.gather(*vault_tasks, *db_tasks)
 
-    # 3. Extract snowball tags (pure computation — no I/O)
+    # 3. Enrich newly-discovered channels (snippet -> channels.list -> stats log)
+    if executor is not None:
+        channel_ids = [
+            item.get("snippet", {}).get("channelId")
+            for item in items
+            if item.get("snippet", {}).get("channelId")
+        ]
+        try:
+            await enrich_channels_task(channel_ids, executor)
+        except RateLimitError:
+            raise
+        except Exception as e:
+            run_logger.error(f"Channel enrichment failed (non-fatal): {e}")
+
+    # 4. Extract snowball tags (pure computation — no I/O)
     snowball_tags: List[str] = []
     for item in items:
         snippet = item.get("snippet", {})
@@ -208,7 +282,7 @@ async def hunter_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str
             try:
                 result = await search_youtube_task(topic, executor)
                 if result:
-                    await ingest_results_task(topic, result)
+                    await ingest_results_task(topic, result, executor)
                     items = result.get("items", [])
                     stats["videos_discovered"] += len(items)
                     stats["searches_successful"] += 1
@@ -306,6 +380,14 @@ async def search_youtube(topic: Dict[str, Any]) -> Any:
 async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> None:
     """Legacy function wrapper for backward compatibility."""
     await ingest_results_task(topic, response)
+
+
+@task(name="enrich_channels")
+async def enrich_channels(channel_ids: List[str]) -> int:
+    """Legacy function wrapper for backward compatibility."""
+    keys = KeyRing("hunting")
+    executor = ResiliencyExecutor(keys, agent_name="hunter")
+    return await enrich_channels_task(channel_ids, executor)
 
 
 def main() -> None:

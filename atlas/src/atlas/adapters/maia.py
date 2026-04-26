@@ -58,22 +58,46 @@ class MaiaDAO(DatabaseAdapter, AdaptiveSchedulingMixin):
         await self._execute_many(query, params_list)
         return len(unique_terms)
 
+    _CHANNEL_TITLE_PENDING = "Pending channel index"
+
     async def ingest_video_metadata(
         self, video_data: Dict[str, Any], priority_override: Optional[int] = None
     ) -> None:
-        channel_query = """
+        """Insert video + ensure ``channels`` row exists when ``channelId`` is known.
+
+        YouTube search and some tooling only guarantee ``channelId``; ``channelTitle``
+        may be missing. We still insert a channel stub so the ``videos.channel_id`` FK
+        is satisfied and :meth:`channel_needs_refresh` is true (no stats), which lets
+        :func:`enrich_channels_task` pull full channel metadata via ``channels.list``.
+        """
+        channel_upsert = """
             INSERT INTO channels (id, title, created_at)
             VALUES (%s, %s, %s)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT (id) DO UPDATE SET
+                title = CASE
+                    WHEN BTRIM(EXCLUDED.title) <> ''
+                        AND EXCLUDED.title <> %s
+                    THEN EXCLUDED.title
+                    WHEN BTRIM(channels.title) <> ''
+                        AND channels.title <> %s
+                    THEN channels.title
+                    ELSE EXCLUDED.title
+                END
         """
 
         snippet = video_data.get("snippet", {})
         channel_id = snippet.get("channelId")
-        channel_title = snippet.get("channelTitle")
+        channel_title = (
+            snippet.get("channelTitle")
+            or snippet.get("channel")
+            or (self._CHANNEL_TITLE_PENDING if channel_id else None)
+        )
 
         if channel_id and channel_title:
+            pend = self._CHANNEL_TITLE_PENDING
             await self._execute(
-                channel_query, (channel_id, channel_title, datetime.now(timezone.utc))
+                channel_upsert,
+                (channel_id, channel_title, datetime.now(timezone.utc), pend, pend),
             )
 
         video_query = """
@@ -111,6 +135,129 @@ class MaiaDAO(DatabaseAdapter, AdaptiveSchedulingMixin):
                 default_language,
                 datetime.now(timezone.utc),
             ),
+        )
+
+    async def ingest_channel_snapshot(self, channel_data: Dict[str, Any]) -> None:
+        """Upsert a channel record with full metadata + log a stats snapshot.
+
+        Accepts a YouTube ``channels.list`` API ``item`` shape::
+
+            {
+              "id": "UC...",
+              "snippet": {"title", "country", "customUrl", "publishedAt"},
+              "statistics": {"subscriberCount", "viewCount", "videoCount", ...}
+            }
+
+        Behaviour:
+
+        * UPSERTs into ``channels`` with title, country, custom_url, created_at;
+          updates ``last_scraped_at`` to ``NOW()`` on every call.
+        * INSERTs a row into ``channel_stats_log`` with subscriber/view/video counts
+          (no-op only if all stats are missing).
+
+        Idempotent: safe to call repeatedly; produces a fresh stats row each time.
+        """
+        ch_id = channel_data.get("id")
+        if not ch_id:
+            logger.warning("ingest_channel_snapshot called without channel id")
+            return
+
+        snippet = channel_data.get("snippet", {}) or {}
+        stats = channel_data.get("statistics", {}) or {}
+
+        title = snippet.get("title") or ch_id
+        country = snippet.get("country")
+        custom_url = snippet.get("customUrl")
+        created_at = snippet.get("publishedAt")
+
+        upsert_query = """
+            INSERT INTO channels (id, title, country, custom_url, created_at, last_scraped_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                country = COALESCE(EXCLUDED.country, channels.country),
+                custom_url = COALESCE(EXCLUDED.custom_url, channels.custom_url),
+                created_at = COALESCE(channels.created_at, EXCLUDED.created_at),
+                last_scraped_at = EXCLUDED.last_scraped_at
+        """
+        now = datetime.now(timezone.utc)
+        await self._execute(
+            upsert_query,
+            (ch_id, title, country, custom_url, created_at, now),
+        )
+
+        def _to_int(v: Any) -> Optional[int]:
+            if v is None:
+                return None
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        sub_count = _to_int(stats.get("subscriberCount"))
+        view_count = _to_int(stats.get("viewCount"))
+        video_count = _to_int(stats.get("videoCount"))
+
+        if sub_count is None and view_count is None and video_count is None:
+            logger.info(f"Channel {ch_id} upserted; no statistics provided to log")
+            return
+
+        log_query = """
+            INSERT INTO channel_stats_log (channel_id, timestamp, view_count, subscriber_count, video_count)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (channel_id, timestamp) DO NOTHING
+        """
+        await self._execute(log_query, (ch_id, now, view_count, sub_count, video_count))
+        logger.info(
+            f"Channel snapshot {ch_id}: subs={sub_count}, views={view_count}, videos={video_count}"
+        )
+
+    async def channel_needs_refresh(self, channel_id: str, max_age_hours: int = 24) -> bool:
+        """Return True if the channel has no stats row newer than ``max_age_hours``."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        row = await self._fetch_one(
+            """
+            SELECT 1 FROM channel_stats_log
+            WHERE channel_id = %s AND timestamp >= %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (channel_id, cutoff),
+        )
+        return row is None
+
+    async def get_video_by_id(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single ``videos`` row by primary key."""
+        return await self._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
+
+    async def get_channel_by_id(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single ``channels`` row by primary key."""
+        return await self._fetch_one("SELECT * FROM channels WHERE id = %s", (channel_id,))
+
+    async def get_latest_video_stats(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch the most recent ``video_stats_log`` row for a given video."""
+        return await self._fetch_one(
+            """
+            SELECT video_id, views, likes, comment_count, timestamp
+            FROM video_stats_log
+            WHERE video_id = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (video_id,),
+        )
+
+    async def get_latest_channel_stats(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch the most recent ``channel_stats_log`` row for a given channel."""
+        return await self._fetch_one(
+            """
+            SELECT channel_id, subscriber_count, view_count, video_count, timestamp
+            FROM channel_stats_log
+            WHERE channel_id = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (channel_id,),
         )
 
     async def fetch_tracker_targets(self, batch_size: int = 50) -> List[Dict[str, Any]]:

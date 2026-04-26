@@ -13,10 +13,19 @@ Environment variables are provided by:
 DO NOT use dotenv here - Atlas handles environment loading.
 """
 
-import os
-from unittest.mock import AsyncMock, patch
+# CRITICAL: Override HF_DATASET_ID before ANY atlas.* import below, unless
+# ``PLEIADES_USE_PRODUCTION_VAULT=1`` (E2E against the real vault from ``.env``).
+# Mirrors alkyone.fixtures; duplicated because pytest may load conftest first.
+import os as _os  # noqa: E402
 
-import pytest
+if _os.getenv("PLEIADES_USE_PRODUCTION_VAULT", "").lower() not in ("1", "true", "yes"):
+    _os.environ["HF_DATASET_ID"] = _os.getenv(
+        "HF_DATASET_ID_TEST", "Rolaficus/pleiades-vault-test"
+    )
+
+from unittest.mock import AsyncMock, patch  # noqa: E402
+
+import pytest  # noqa: E402
 
 
 def pytest_configure(config):
@@ -27,6 +36,11 @@ def pytest_configure(config):
     """
     config.addinivalue_line(
         "markers", "integration: marks tests requiring REAL infrastructure (DB, Vault, API)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "production_e2e: E2E run against the production HuggingFace vault; requires "
+        "PLEIADES_USE_PRODUCTION_VAULT=1 (no automatic test-dataset override)",
     )
 
 
@@ -42,33 +56,40 @@ def pytest_collection_modifyitems(config, items):
     - HF_TOKEN + HF_DATASET_ID: Real HuggingFace vault
     - YOUTUBE_API_KEY_POOL_JSON: Real YouTube API keys (not dummy/test keys)
 
-    If ANY credential is missing, integration tests are SKIPPED (not failed, not mocked).
-    """
-    # Check environment for real credentials
-    has_real_db = bool(os.getenv("DATABASE_URL"))
-    has_real_vault = bool(os.getenv("HF_TOKEN")) and bool(os.getenv("HF_DATASET_ID"))
-    api_keys_json = os.getenv("YOUTUBE_API_KEY_POOL_JSON", "")
-    has_real_api = bool(api_keys_json) and not any(
-        marker in api_keys_json.upper() for marker in ["DUMMY", "TEST", "FAKE", "MOCK"]
-    )
+    Configuration is loaded from ``atlas.config.settings`` (Pydantic BaseSettings),
+    which respects both shell env vars (CI) and ``.env`` file (local dev).
 
-    # Prepare skip marker with detailed message
-    missing = []
-    if not has_real_db:
-        missing.append("DATABASE_URL")
-    if not has_real_vault:
-        missing.append("HF_TOKEN/HF_DATASET_ID")
-    if not has_real_api:
-        missing.append("YOUTUBE_API_KEY_POOL_JSON (real keys)")
+    If ANY credential is missing or looks like a dummy, integration tests are SKIPPED.
+    """
+    missing: list[str] = []
+
+    try:
+        from atlas.config import settings
+
+        if not settings.DATABASE_URL:
+            missing.append("DATABASE_URL")
+
+        if not settings.HF_TOKEN or not settings.HF_DATASET_ID:
+            missing.append("HF_TOKEN/HF_DATASET_ID")
+
+        api_keys = settings.api_keys
+        if not api_keys:
+            missing.append("YOUTUBE_API_KEY_POOL_JSON (no keys)")
+        else:
+            first = api_keys[0].upper()
+            dummy_markers = ("DUMMY", "TEST_", "FAKE", "MOCK", "EXAMPLE")
+            if any(m in first for m in dummy_markers) or len(api_keys[0]) < 30:
+                missing.append("YOUTUBE_API_KEY_POOL_JSON (dummy keys)")
+    except Exception as exc:
+        missing.append(f"atlas.config load failure: {exc}")
 
     if missing:
         skip_msg = (
             f"Integration tests require REAL infrastructure. Missing: {', '.join(missing)}. "
-            f"In CI: Check GitHub Secrets. Local: Set environment variables."
+            f"In CI: Check GitHub Secrets. Local: Set values in .env or shell env."
         )
         skip_integration = pytest.mark.skip(reason=skip_msg)
 
-        # Apply skip marker to all integration tests
         for item in items:
             if "integration" in item.keywords:
                 item.add_marker(skip_integration)

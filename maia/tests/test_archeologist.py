@@ -17,9 +17,13 @@ async def test_hunt_history_successful_retrieval():
     with (
         patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
+        patch(
+            "maia.archeologist.flow.enrich_channels_task", new_callable=AsyncMock
+        ) as mock_enrich,
     ):
         mock_dao = MockDAO.return_value
         mock_dao.ingest_video_metadata = AsyncMock()
+        mock_enrich.return_value = 0
 
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])

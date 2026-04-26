@@ -33,7 +33,7 @@ async def dao(fresh_db):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(420)
 async def test_painter_real_full_cycle_blender_tutorial(dao):
     """
     Test the complete Painter cycle on a real video (B0J27sf9N1Y).
@@ -81,6 +81,7 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         "id": {"videoId": video_id},
         "snippet": {
             "channelId": info.get("channel_id", "unknown"),
+            "channelTitle": info.get("channel") or info.get("uploader") or "Test Channel",
             "title": info.get("title", "Test Video"),
             "publishedAt": "2023-11-16T00:00:00Z",
             "tags": ["blender"],
@@ -89,6 +90,11 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         },
     }
     await dao.ingest_video_metadata(video_data)
+
+    ch_id = str(video_data["snippet"]["channelId"])
+    ch_row = await dao.get_channel_by_id(ch_id)
+    assert ch_row is not None, "Channel should be indexed when a video is ingested (FK + title)"
+    assert (ch_row.get("title") or "").strip(), "Channel title should be set (yt-dlp / snippet)"
 
     # Reset state from potential previous runs
     await dao._execute(

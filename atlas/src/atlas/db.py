@@ -60,16 +60,54 @@ class DatabaseManager:
 
     async def setup_test_schema(self) -> None:
         """
-        Initialize database schema for testing.
+        Initialize database schema.
+
+        Resilient to environments (e.g. Neon) where ``timescaledb`` or
+        ``vector`` extensions are unavailable: extension creation and
+        ``create_hypertable`` calls are best-effort, while CREATE TABLE
+        statements are mandatory.
         """
+        from psycopg.errors import (
+            DuplicateObject,
+            FeatureNotSupported,
+            InsufficientPrivilege,
+            UndefinedFile,
+            UndefinedFunction,
+        )
+
+        timescale_available = True
         async with self.get_connection() as conn:
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
+            for ext_sql in (
+                "CREATE EXTENSION IF NOT EXISTS vector;",
+                "CREATE EXTENSION IF NOT EXISTS timescaledb;",
+            ):
+                try:
+                    await conn.execute(ext_sql)
+                except (
+                    DuplicateObject,
+                    FeatureNotSupported,
+                    InsufficientPrivilege,
+                    UndefinedFile,
+                ) as exc:
+                    logger.warning(f"Skipping extension ({type(exc).__name__}): {ext_sql}")
+                    if "timescaledb" in ext_sql:
+                        timescale_available = False
 
-            sql = load_schema_sql(include_extensions=False)
-            await conn.execute(sql)
-
-            logger.info("Test schema initialized successfully")
+        sql = load_schema_sql(include_extensions=False)
+        statements = [s.strip() for s in sql.split(";") if s.strip()]
+        async with self.get_connection() as conn:
+            for stmt in statements:
+                is_hypertable = "create_hypertable" in stmt.lower()
+                if is_hypertable and not timescale_available:
+                    continue
+                try:
+                    await conn.execute(stmt + ";")
+                except UndefinedFunction as exc:
+                    if is_hypertable:
+                        logger.warning(f"Skipping hypertable conversion: {exc}")
+                        continue
+                    raise
+        logger.info("Schema initialized successfully")
 
     async def reset_for_test(self) -> None:
         """
