@@ -145,7 +145,8 @@ class ScribeAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        return await scribe_flow(batch_size=batch_size)
+        result: Dict[str, Any] = await scribe_flow(batch_size=batch_size)
+        return result
 
 
 @flow(name="run_scribe_cycle")

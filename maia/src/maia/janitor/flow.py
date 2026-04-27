@@ -173,7 +173,8 @@ class JanitorAgent:
         Returns:
             Dict with keys: stats_archived, videos_deleted, cleanup_stats
         """
-        return await janitor_flow(dry_run=dry_run, archive_stats=archive_stats)
+        result: Dict[str, Any] = await janitor_flow(dry_run=dry_run, archive_stats=archive_stats)
+        return result
 
 
 @flow(name="janitor_cycle")

@@ -111,3 +111,7 @@ context/
 COOKIES.txt
 .secrets/
 *cookies*.txt
+
+# --- Cline ---
+.clinerules/
+.cline*/

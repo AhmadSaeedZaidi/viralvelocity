@@ -348,7 +348,8 @@ class HunterAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        return await hunter_flow(batch_size=batch_size, executor=self.executor)
+        result: Dict[str, Any] = await hunter_flow(batch_size=batch_size, executor=self.executor)
+        return result
 
 
 @flow(name="run_hunter_cycle")
@@ -387,7 +388,8 @@ async def enrich_channels(channel_ids: List[str]) -> int:
     """Legacy function wrapper for backward compatibility."""
     keys = KeyRing("hunting")
     executor = ResiliencyExecutor(keys, agent_name="hunter")
-    return await enrich_channels_task(channel_ids, executor)
+    result: int = await enrich_channels_task(channel_ids, executor)
+    return result
 
 
 def main() -> None:

@@ -218,7 +218,10 @@ class ArcheologistAgent:
         Returns:
             Dictionary with campaign statistics
         """
-        return await archeology_flow(start_year=start_year, end_year=end_year, keys=self.keys)
+        result: Dict[str, Any] = await archeology_flow(
+            start_year=start_year, end_year=end_year, keys=self.keys
+        )
+        return result
 
 
 @flow(name="run_archeology_campaign")

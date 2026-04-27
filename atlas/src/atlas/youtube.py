@@ -16,6 +16,7 @@ returned no items, e.g. video deleted or channel hidden).
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -50,9 +51,8 @@ async def _execute_get(
             ) as resp:
                 text = await resp.text()
                 if resp.status == 200:
-                    import json
-
-                    return json.loads(text) if text else {}
+                    result: Dict[str, Any] = json.loads(text) if text else {}
+                    return result
                 if resp.status in (403, 429):
                     raise Exception(f"HTTP {resp.status}: {text[:200]}")
                 raise Exception(f"HTTP {resp.status}: {text[:200]}")

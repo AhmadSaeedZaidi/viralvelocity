@@ -209,7 +209,8 @@ class TrackerAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        return await tracker_flow(batch_size=batch_size, executor=self.executor)
+        result: Dict[str, Any] = await tracker_flow(batch_size=batch_size, executor=self.executor)
+        return result
 
 
 @flow(name="run_tracker_cycle")
@@ -234,7 +235,8 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
     """Legacy function wrapper for backward compatibility."""
     keys = KeyRing("tracking")
     executor = ResiliencyExecutor(keys, agent_name="tracker")
-    return await update_stats_task(videos, executor)
+    result: int = await update_stats_task(videos, executor)
+    return result
 
 
 def main() -> None:

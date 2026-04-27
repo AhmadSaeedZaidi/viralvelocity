@@ -21,8 +21,40 @@ env:
   CI_IMAGE: ghcr.io/ahmadsaeedzaidi/pleiades/ci-env:latest
 
 jobs:
+  check-changes:
+    name: Check for dependency changes
+    runs-on: ubuntu-latest
+    outputs:
+      needs-build: ${{ steps.filter.outputs.any_changed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for dependency changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          base: ${{ github.event.repository.default_branch }}
+          filters: |
+            any_changed:
+              - '.github/workflows/build-env.yml'
+              - '.github/ci.Dockerfile'
+              - '**/pyproject.toml'
+              - '**/poetry.lock'
+
+  build-env:
+    name: Build CI Environment
+    needs: check-changes
+    if: needs.check-changes.outputs.needs-build == 'true'
+    uses: ./.github/workflows/build-env.yml
+    secrets: inherit
+
   quality:
     name: Quality (Linting & Type Checking)
+    needs: build-env
+    if: always() && (needs.build-env.result == 'success' || needs.build-env.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     container:
@@ -40,8 +72,8 @@ jobs:
 
   unit-tests:
     name: Unit Tests
-    runs-on: ubuntu-latest
     needs: quality
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     container:
       image: ghcr.io/ahmadsaeedzaidi/pleiades/ci-env:latest

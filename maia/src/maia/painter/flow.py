@@ -257,7 +257,8 @@ class PainterAgent:
         )
 
     async def run(self, batch_size: int = 5, **kwargs: Any) -> Dict[str, Any]:
-        return await painter_flow(batch_size=batch_size)
+        result: Dict[str, Any] = await painter_flow(batch_size=batch_size)
+        return result
 
 
 @task(name="fetch_painter_targets")
