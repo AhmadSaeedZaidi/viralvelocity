@@ -88,13 +88,6 @@ jobs:
           username: ${{ vars.NEON_USERNAME }}
           api_key: ${{ secrets.NEON_API_KEY }}
 
-      - name: Run Database Migrations
-        working-directory: ./atlas
-        env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-        run: make migrate
-        continue-on-error: false
-
       - name: Run Integration Tests
         env:
           # Database (from ephemeral Neon branch)
