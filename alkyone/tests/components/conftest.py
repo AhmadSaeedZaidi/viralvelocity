@@ -19,9 +19,7 @@ DO NOT use dotenv here - Atlas handles environment loading.
 import os as _os  # noqa: E402
 
 if _os.getenv("PLEIADES_USE_PRODUCTION_VAULT", "").lower() not in ("1", "true", "yes"):
-    _os.environ["HF_DATASET_ID"] = _os.getenv(
-        "HF_DATASET_ID_TEST", "Rolaficus/pleiades-vault-test"
-    )
+    _os.environ["HF_DATASET_ID"] = _os.getenv("HF_DATASET_ID_TEST", "Rolaficus/pleiades-vault-test")
 
 from unittest.mock import AsyncMock, patch  # noqa: E402
 
