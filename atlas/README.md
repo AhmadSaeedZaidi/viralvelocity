@@ -1,101 +1,67 @@
 # Atlas
 
-> Core infrastructure library for the Pleiades Surveillance Platform
+Infrastructure library for the Pleiades platform. Provides PostgreSQL connection management, object storage (HF/GCS), event sourcing, Discord notifications, and YouTube API helpers.
 
-Atlas provides unified interfaces for persistence, storage, observability, and governance across the Pleiades ecosystem.
+## Architecture
 
-## Features
+```
+atlas/
+├── models/        # Pydantic domain models (Channel, Video, VideoStats, etc.)
+├── repositories/  # Repository pattern — domain-focused data access
+│   ├── VideoRepository
+│   ├── ChannelRepository
+│   ├── SearchQueueRepository
+│   ├── WatchlistRepository
+│   └── EventRepository
+├── adapters/      # DatabaseAdapter base class (low-level SQL primitives)
+├── db.py          # DatabaseManager — async PostgreSQL connection pool
+├── vault.py       # VaultStrategy — HF/GCS object storage (Strategy pattern)
+├── events.py      # EventBus — immutable event sourcing
+├── notifications.py  # DiscordNotifier — channel-based webhook routing
+├── utils.py       # KeyRing, ResiliencyExecutor, retry helpers
+├── youtube.py     # YouTube Data API v3 helpers
+├── config.py      # Pydantic Settings
+└── schema.sql     # PostgreSQL schema (TimescaleDB hypertables)
+```
 
-- **Database Layer**: Serverless Postgres connection pooling with health checks
-- **Storage Strategy**: Dual-vault support (HuggingFace/GCS) with swappable backends
-- **Event Bus**: Immutable event sourcing with async emission
-- **Notifications**: Discord webhook routing with channel-based alerting
-- **Type Safe**: 100% type-annotated with strict mypy compliance
+**Design patterns:** Repository, DAO, Singleton, Strategy, Protocol.
 
 ## Quick Start
 
 ```bash
-# Install
 cd atlas
 poetry install --extras all --with dev
-
-# Configure
-cp ENV.example .env
-# Edit .env with your credentials
-
-# Provision database
-make setup
-
-# Verify connectivity
-make smoke-test
-
-# Run tests
-make test
+cp ENV.example .env   # edit with your credentials
+make setup            # provision database schema
+make test             # run unit tests
 ```
 
 ## Usage
 
 ```python
-from atlas import db, vault, events, notifier, AlertLevel
+from atlas.repositories import VideoRepository
+from atlas.models import Video
 
-# Database
-async with db.get_connection() as conn:
-    result = await conn.execute("SELECT * FROM channels")
+repo = VideoRepository()
 
-# Storage
-vault.store_json("metadata/video.json", {"id": "abc123"})
-data = vault.fetch_json("metadata/video.json")
-
-# Events
-await events.emit("video.discovered", "abc123", {"title": "Example"})
-
-# Notifications
-await notifier.send(
-    "Discovery Complete",
-    "Found 10 new videos",
-    level=AlertLevel.SUCCESS
-)
+# Fetch videos needing transcripts
+videos = await repo.fetch_scribe_batch(batch_size=10)
+for v in videos:
+    transcript = await extract_transcript(v.id)
+    await repo.mark_transcript_safe(v.id)
 ```
 
-## Documentation
+## TODO (Phases 4-5)
 
-- **[Quick Start](docs/quickstart.md)** - Get up and running in 5 minutes
-- **[API Reference](docs/api-reference.md)** - Complete API documentation
-- **[Architecture](docs/architecture.md)** - Design patterns and system architecture
-- **[Contributing](docs/contributing.md)** - Development workflow and guidelines
-- **[Migration Guide](docs/migration.md)** - Upgrading from v0.1.x
-- **[Changelog](CHANGELOG.md)** - Version history
+- **PHASE-4:** Fix database bypass violations — `setup.py`, `events.py` (done), test fixtures directly importing `db`
+- **PHASE-5:** Migrate all Maia agents from deprecated `MaiaDAO` to individual repositories
 
-## Environment Variables
+See `TODO` comments in `maia/`, `tools/`, `alkyone/` for exact locations.
 
-See [ENV.example](ENV.example) for configuration template.
+## Configuration
 
-**Required:**
-- `DATABASE_URL` - PostgreSQL connection string
-- `YOUTUBE_API_KEY_POOL_JSON` - JSON array of API keys
-- `VAULT_PROVIDER` - Storage backend (`huggingface` or `gcs`)
-
-**Provider-specific:**
-- HuggingFace: `HF_DATASET_ID`, `HF_TOKEN`
-- GCS: `GCS_BUCKET_NAME`, `GOOGLE_APPLICATION_CREDENTIALS`
-
-## Development
-
-```bash
-make help          # Show all commands
-make install       # Install dependencies
-make setup         # Provision database
-make test          # Run unit tests
-make smoke-test    # Verify live services
-make format        # Format code
-make lint          # Check style
-make type-check    # Run mypy
-```
+See [ENV.example](ENV.example) for all options.
 
 ## License
 
-MIT License - See [LICENSE.md](../LICENSE.md)
-
-## Author
-
-Ahmad Saeed Zaidi
+MIT

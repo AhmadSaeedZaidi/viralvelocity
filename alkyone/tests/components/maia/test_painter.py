@@ -23,18 +23,25 @@ logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
-async def dao(fresh_db):
-    """Provide MaiaDAO instance for testing with real vault."""
-    from atlas.adapters.maia import MaiaDAO
+async def video_repo(fresh_db):
+    """Provide VideoRepository for testing with real vault."""
+    from atlas.repositories import VideoRepository
 
-    dao_instance = MaiaDAO()
-    yield dao_instance
+    yield VideoRepository()
+
+
+@pytest_asyncio.fixture
+async def channel_repo(fresh_db):
+    """Provide ChannelRepository for testing with real vault."""
+    from atlas.repositories import ChannelRepository
+
+    yield ChannelRepository()
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.timeout(420)
-async def test_painter_real_full_cycle_blender_tutorial(dao):
+async def test_painter_real_full_cycle_blender_tutorial(video_repo, channel_repo):
     """
     Test the complete Painter cycle on a real video (B0J27sf9N1Y).
 
@@ -73,7 +80,9 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         if "429" in error_str:
             pytest.fail("YouTube Rate Limit (429) active during pre-flight check.")
         elif "Sign in" in error_str or "bot" in error_str:
-            pytest.fail("All extraction strategies blocked. " "YouTube anti-bot is active.")
+            pytest.fail(
+                "All extraction strategies blocked. " "YouTube anti-bot is active."
+            )
         raise
 
     # 2. Setup DB State
@@ -81,7 +90,9 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         "id": {"videoId": video_id},
         "snippet": {
             "channelId": info.get("channel_id", "unknown"),
-            "channelTitle": info.get("channel") or info.get("uploader") or "Test Channel",
+            "channelTitle": info.get("channel")
+            or info.get("uploader")
+            or "Test Channel",
             "title": info.get("title", "Test Video"),
             "publishedAt": "2023-11-16T00:00:00Z",
             "tags": ["blender"],
@@ -89,16 +100,21 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
             "defaultLanguage": "en",
         },
     }
-    await dao.ingest_video_metadata(video_data)
+    await video_repo.ingest_video_metadata(video_data)
 
     ch_id = str(video_data["snippet"]["channelId"])
-    ch_row = await dao.get_channel_by_id(ch_id)
-    assert ch_row is not None, "Channel should be indexed when a video is ingested (FK + title)"
-    assert (ch_row.get("title") or "").strip(), "Channel title should be set (yt-dlp / snippet)"
+    ch_row = await channel_repo.get_by_id(ch_id)
+    assert (
+        ch_row is not None
+    ), "Channel should be indexed when a video is ingested (FK + title)"
+    assert (
+        ch_row.title or ""
+    ).strip(), "Channel title should be set (yt-dlp / snippet)"
 
     # Reset state from potential previous runs
-    await dao._execute(
-        "UPDATE videos SET has_visuals = FALSE, status = 'PENDING' WHERE id = %s", (video_id,)
+    await video_repo._execute(
+        "UPDATE videos SET has_visuals = FALSE, status = 'PENDING' WHERE id = %s",
+        (video_id,),
     )
 
     # 3. Run Agent
@@ -110,10 +126,16 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
 
     # 4. Assertions - Database State
     print("[Test] Verifying Database State...")
-    video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
+    video = await video_repo._fetch_one(
+        "SELECT * FROM videos WHERE id = %s", (video_id,)
+    )
 
-    assert video["status"] != "FAILED", f"Video processing failed. Status: {video.get('status')}"
-    assert video["has_visuals"] is True, "Painter finished but 'has_visuals' is not True."
+    assert (
+        video["status"] != "FAILED"
+    ), f"Video processing failed. Status: {video.get('status')}"
+    assert (
+        video["has_visuals"] is True
+    ), "Painter finished but 'has_visuals' is not True."
 
     # 5. CRITICAL: Verify REAL HuggingFace Upload
     print("[Test] Verifying REAL HuggingFace Upload...")
@@ -132,7 +154,9 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
         # Check if visual evidence files exist in the REAL HuggingFace dataset
         try:
             files_in_repo = api.list_repo_files(repo_id=hf_dataset, repo_type="dataset")
-            visual_files = [f for f in files_in_repo if f.startswith(f"frames/{video_id}/")]
+            visual_files = [
+                f for f in files_in_repo if f.startswith(f"frames/{video_id}/")
+            ]
 
             assert len(visual_files) > 0, (
                 f"CRITICAL FAILURE: No files found in HuggingFace for video {video_id}! "
@@ -160,7 +184,7 @@ async def test_painter_real_full_cycle_blender_tutorial(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_painter_handles_real_404_video(dao):
+async def test_painter_handles_real_404_video(video_repo):
     """
     Test resiliency against a non-existent video ID.
     Verifies the system marks FAILED gracefully without crashing.
@@ -171,9 +195,11 @@ async def test_painter_handles_real_404_video(dao):
         "id": {"videoId": fake_id},
         "snippet": {"title": "Invalid Video", "publishedAt": "2024-01-01T00:00:00Z"},
     }
-    await dao.ingest_video_metadata(video_data)
+    await video_repo.ingest_video_metadata(video_data)
 
     await run_painter_cycle(batch_size=1)
 
-    video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", (fake_id,))
+    video = await video_repo._fetch_one(
+        "SELECT * FROM videos WHERE id = %s", (fake_id,)
+    )
     assert video["status"] == "FAILED", "Invalid video should be marked FAILED"

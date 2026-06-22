@@ -8,12 +8,6 @@ logger = logging.getLogger("atlas.adapters")
 
 
 class DatabaseAdapterProtocol(Protocol):
-    """Protocol defining the database methods required by adapter mixins.
-
-    Any class composing an adapter mixin (e.g. ``AdaptiveSchedulingMixin``) must
-    satisfy this protocol — typically by extending :class:`DatabaseAdapter`.
-    """
-
     async def _execute(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> None: ...
 
     async def _fetch_all(
@@ -24,11 +18,6 @@ class DatabaseAdapterProtocol(Protocol):
 
 
 class DatabaseAdapter:
-    """
-    Base class for database adapters.
-    Provides common patterns for executing queries and handling results.
-    """
-
     @asynccontextmanager
     async def _connection(self) -> AsyncIterator[Any]:
         async with db.get_connection() as conn:
@@ -43,6 +32,7 @@ class DatabaseAdapter:
     async def _execute(self, query: str, params: Optional[Tuple[Any, ...]] = None) -> None:
         async with self._connection() as conn:
             await conn.execute(query, params or ())
+            await conn.commit()
 
     async def _fetch_one(
         self, query: str, params: Optional[Tuple[Any, ...]] = None
@@ -76,6 +66,7 @@ class DatabaseAdapter:
     async def _execute_many(self, query: str, params_list: List[Tuple[Any, ...]]) -> None:
         async with self._cursor() as cur:
             await cur.executemany(query, params_list)
+            await cur.connection.commit()
 
     async def _fetch_scalar(
         self, query: str, params: Optional[Tuple[Any, ...]] = None

@@ -15,12 +15,12 @@ from maia.utils import RateLimitError
 async def test_hunt_history_successful_retrieval():
     """Test hunt_history successfully retrieves and ingests historical videos."""
     with (
-        patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
+        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
         patch("maia.archeologist.flow.enrich_channels_task", new_callable=AsyncMock) as mock_enrich,
     ):
-        mock_dao = MockDAO.return_value
-        mock_dao.ingest_video_metadata = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.ingest_video_metadata = AsyncMock()
         mock_enrich.return_value = 0
 
         mock_keys = MagicMock()
@@ -74,18 +74,18 @@ async def test_hunt_history_successful_retrieval():
 
         await hunt_history_task.fn(year=2010, month=5, keys=mock_keys)
 
-        assert mock_dao.ingest_video_metadata.call_count == 10
+        assert mock_repo.ingest_video_metadata.call_count == 10
 
 
 @pytest.mark.asyncio
 async def test_hunt_history_handles_403_key_rotation():
     """Test Archeologist rotates keys on 403 Forbidden errors."""
     with (
-        patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
+        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
     ):
-        mock_dao = MockDAO.return_value
-        mock_dao.ingest_video_metadata = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.ingest_video_metadata = AsyncMock()
 
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])
@@ -121,10 +121,10 @@ async def test_hunt_history_handles_403_key_rotation():
 async def test_hunt_history_handles_429_resiliency_strategy():
     """Test Archeologist raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
     with (
-        patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
+        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
     ):
-        mock_dao = MockDAO.return_value
+        mock_repo = MockRepo.return_value
 
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(return_value="fake_key")
@@ -152,10 +152,10 @@ async def test_hunt_history_handles_429_resiliency_strategy():
 async def test_hunt_history_handles_network_errors():
     """Test Archeologist handles network errors gracefully."""
     with (
-        patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
+        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
     ):
-        mock_dao = MockDAO.return_value
+        mock_repo = MockRepo.return_value
 
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(return_value="fake_key")
@@ -201,11 +201,11 @@ async def test_run_archeology_campaign_iterates_through_years():
 async def test_hunt_history_handles_empty_response():
     """Test hunt_history handles empty API responses gracefully."""
     with (
-        patch("maia.archeologist.flow.MaiaDAO") as MockDAO,
+        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
     ):
-        mock_dao = MockDAO.return_value
-        mock_dao.ingest_video_metadata = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.ingest_video_metadata = AsyncMock()
 
         mock_keys = MagicMock()
         mock_keys.next_key = MagicMock(return_value="fake_key")
@@ -230,4 +230,4 @@ async def test_hunt_history_handles_empty_response():
 
         await hunt_history_task.fn(year=2025, month=1, keys=mock_keys)
 
-        assert mock_dao.ingest_video_metadata.call_count == 0
+        assert mock_repo.ingest_video_metadata.call_count == 0

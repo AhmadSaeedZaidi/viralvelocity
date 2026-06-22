@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-from maia.painter.flow import fetch_painter_targets_task, painter_flow, process_frames_task
+from maia.painter.flow import (
+    fetch_painter_targets_task,
+    painter_flow,
+    process_frames_task,
+)
 from maia.painter.streamer import StealthVideoStreamer
 from maia.utils import RateLimitError
 
@@ -16,33 +20,35 @@ from maia.utils import RateLimitError
 @pytest.mark.asyncio
 async def test_fetch_painter_targets_empty():
     """Test fetch_painter_targets returns empty list when no videos need visual processing."""
-    with patch("maia.painter.flow.MaiaDAO") as MockDAO:
-        mock_dao = MockDAO.return_value
-        mock_dao.fetch_painter_batch = AsyncMock(return_value=[])
+    with patch("maia.painter.flow.VideoRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.fetch_painter_batch = AsyncMock(return_value=[])
 
         result = await fetch_painter_targets_task.fn(batch_size=5)
 
         assert result == []
-        mock_dao.fetch_painter_batch.assert_called_once_with(5)
+        mock_repo.fetch_painter_batch.assert_called_once_with(5)
 
 
 @pytest.mark.asyncio
 async def test_fetch_painter_targets_with_videos():
     """Test fetch_painter_targets returns videos needing visual processing."""
+    from atlas.models import Video
+
     mock_videos = [
-        {"id": "VIDEO_001", "title": "Test Video 1"},
-        {"id": "VIDEO_002", "title": "Test Video 2"},
+        Video(id="VIDEO_001", title="Test Video 1"),
+        Video(id="VIDEO_002", title="Test Video 2"),
     ]
 
-    with patch("maia.painter.flow.MaiaDAO") as MockDAO:
-        mock_dao = MockDAO.return_value
-        mock_dao.fetch_painter_batch = AsyncMock(return_value=mock_videos)
+    with patch("maia.painter.flow.VideoRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.fetch_painter_batch = AsyncMock(return_value=mock_videos)
 
         result = await fetch_painter_targets_task.fn(batch_size=5)
 
         assert len(result) == 2
         assert result[0]["id"] == "VIDEO_001"
-        mock_dao.fetch_painter_batch.assert_called_once_with(5)
+        mock_repo.fetch_painter_batch.assert_called_once_with(5)
 
 
 def test_video_streamer_extract_heatmap_peaks():
@@ -83,24 +89,25 @@ async def test_process_frames_successful_with_chapters():
         ],
         "heatmap": [],
     }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # Minimal JPEG header + data
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
-        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
+        patch(
+            "maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock
+        ) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
-        mock_dao = MockDAO.return_value
-        mock_dao.mark_video_visuals_safe = AsyncMock()
-        mock_dao.mark_video_failed = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_visuals_safe = AsyncMock()
+        mock_repo.mark_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        # Mock FFmpeg subprocess to return fake JPEG bytes
         mock_process = MagicMock()
         mock_process.communicate.return_value = (fake_jpeg, b"")
         mock_process.returncode = 0
@@ -111,7 +118,7 @@ async def test_process_frames_successful_with_chapters():
         await process_frames_task.fn(video)
 
         mock_vault_retry.assert_called_once()
-        mock_dao.mark_video_visuals_safe.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_visuals_safe.assert_called_once_with("VIDEO_001")
 
 
 @pytest.mark.asyncio
@@ -126,25 +133,26 @@ async def test_process_frames_successful_with_heatmap():
             {"start_time": 10.0, "value": 0.9},
         ],
     }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # Minimal JPEG header + data
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
-        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
+        patch(
+            "maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock
+        ) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
-        mock_dao = MockDAO.return_value
-        mock_dao.mark_video_visuals_safe = AsyncMock()
-        mock_dao.mark_video_failed = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_visuals_safe = AsyncMock()
+        mock_repo.mark_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[10.0])
 
-        # Mock FFmpeg subprocess to return fake JPEG bytes
         mock_process = MagicMock()
         mock_process.communicate.return_value = (fake_jpeg, b"")
         mock_process.returncode = 0
@@ -155,7 +163,7 @@ async def test_process_frames_successful_with_heatmap():
         await process_frames_task.fn(video)
 
         mock_vault_retry.assert_called_once()
-        mock_dao.mark_video_visuals_safe.assert_called_once_with("VIDEO_002")
+        mock_repo.mark_visuals_safe.assert_called_once_with("VIDEO_002")
 
 
 @pytest.mark.asyncio
@@ -168,25 +176,26 @@ async def test_process_frames_fallback_strategy():
         "chapters": [],
         "heatmap": [],
     }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # Minimal JPEG header + data
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
-        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
+        patch(
+            "maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock
+        ) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
-        mock_dao = MockDAO.return_value
-        mock_dao.mark_video_visuals_safe = AsyncMock()
-        mock_dao.mark_video_failed = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_visuals_safe = AsyncMock()
+        mock_repo.mark_failed = AsyncMock()
 
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[])
 
-        # Mock FFmpeg subprocess to return fake JPEG bytes
         mock_process = MagicMock()
         mock_process.communicate.return_value = (fake_jpeg, b"")
         mock_process.returncode = 0
@@ -197,7 +206,7 @@ async def test_process_frames_fallback_strategy():
         await process_frames_task.fn(video)
 
         mock_vault_retry.assert_called_once()
-        mock_dao.mark_video_visuals_safe.assert_called_once_with("VIDEO_003")
+        mock_repo.mark_visuals_safe.assert_called_once_with("VIDEO_003")
 
 
 @pytest.mark.asyncio
@@ -207,17 +216,17 @@ async def test_process_frames_handles_no_stream_url():
     mock_video_info = {"url": None, "chapters": [], "heatmap": []}
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
     ):
-        mock_dao = MockDAO.return_value
-        mock_dao.mark_video_failed = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
         await process_frames_task.fn(video)
 
-        mock_dao.mark_video_failed.assert_called_once_with("VIDEO_NO_STREAM")
+        mock_repo.mark_failed.assert_called_once_with("VIDEO_NO_STREAM")
 
 
 @pytest.mark.asyncio
@@ -232,16 +241,15 @@ async def test_process_frames_handles_video_capture_failure():
     }
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
     ):
-        mock_dao = MockDAO.return_value
-        mock_dao.mark_video_failed = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        # Mock FFmpeg to fail (non-zero exit code)
         mock_process = MagicMock()
         mock_process.communicate.return_value = (b"", b"FFmpeg error")
         mock_process.returncode = 1
@@ -249,7 +257,7 @@ async def test_process_frames_handles_video_capture_failure():
 
         await process_frames_task.fn(video)
 
-        mock_dao.mark_video_failed.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
 
 
 @pytest.mark.asyncio
@@ -265,7 +273,7 @@ async def test_process_frames_handles_vault_failure():
     fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
@@ -276,12 +284,11 @@ async def test_process_frames_handles_vault_failure():
         ),
     ):
         mock_vault = mock_get_vault.return_value
-        mock_dao = MockDAO.return_value
-        mock_dao.mark_video_failed = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        # Mock FFmpeg to succeed
         mock_process = MagicMock()
         mock_process.communicate.return_value = (fake_jpeg, b"")
         mock_process.returncode = 0
@@ -289,7 +296,7 @@ async def test_process_frames_handles_vault_failure():
 
         await process_frames_task.fn(video)
 
-        mock_dao.mark_video_failed.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
 
 
 @pytest.mark.asyncio
@@ -298,7 +305,7 @@ async def test_process_frames_propagates_resiliency_strategy():
     video = {"id": "VIDEO_001", "title": "Test Video"}
 
     with (
-        patch("maia.painter.flow.MaiaDAO") as MockDAO,
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
     ):
         mock_streamer_instance = MockStreamer.return_value
@@ -332,8 +339,12 @@ async def test_run_painter_cycle_processes_batch():
     ]
 
     with (
-        patch("maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock) as mock_fetch,
-        patch("maia.painter.flow.process_frames_task", new_callable=AsyncMock) as mock_process,
+        patch(
+            "maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock
+        ) as mock_fetch,
+        patch(
+            "maia.painter.flow.process_frames_task", new_callable=AsyncMock
+        ) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.return_value = None

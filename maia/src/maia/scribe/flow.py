@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import VideoRepository
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 from tenacity import (
@@ -43,17 +43,17 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
 @task(name="fetch_scribe_targets")
 async def fetch_scribe_targets_task(batch_size: int) -> List[Dict[str, Any]]:
     """Fetch videos that need transcripts."""
-    dao = MaiaDAO()
-    targets = await dao.fetch_scribe_batch(batch_size)
+    video_repo = VideoRepository()
+    targets = await video_repo.fetch_scribe_batch(batch_size)
     if targets:
         get_run_logger().info(f"Fetched {len(targets)} videos needing transcripts.")
-    return targets
+    return [t.model_dump(mode="json") for t in targets]
 
 
 @task(name="process_transcript")
 async def process_transcript_task(video: Dict[str, Any]) -> None:
     """Process a single video's transcript."""
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
     run_logger = get_run_logger()
     vid_id = video["id"]
     loader = TranscriptLoader()
@@ -63,7 +63,7 @@ async def process_transcript_task(video: Dict[str, Any]) -> None:
 
         v = get_vault()
         await vault_op_with_retry(lambda: v.store_transcript(vid_id, transcript_data))
-        await dao.mark_video_transcript_safe(vid_id)
+        await video_repo.mark_transcript_safe(vid_id)
         run_logger.info(f"Scribed transcript for {vid_id}")
 
     except RateLimitError:
@@ -71,10 +71,10 @@ async def process_transcript_task(video: Dict[str, Any]) -> None:
         raise
     except TranscriptsDisabled:
         run_logger.warning(f"Transcripts disabled for {vid_id}")
-        await dao.mark_video_transcript_safe(vid_id)
+        await video_repo.mark_transcript_safe(vid_id)
     except Exception as e:
         run_logger.error(f"Failed to scribe {vid_id} after retries: {e}")
-        await dao.mark_video_failed(vid_id)
+        await video_repo.mark_failed(vid_id)
 
 
 @flow(name="run_scribe_cycle")

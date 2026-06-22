@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import WatchlistRepository
 from atlas.utils import KeyRing, ResiliencyExecutor
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
@@ -27,10 +27,10 @@ from maia.utils import RateLimitError, execute_with_rate_limit
 logger = logging.getLogger(__name__)
 
 tracker_keys = KeyRing("tracking")
-tracker_executor = ResiliencyExecutor(tracker_keys, agent_name="tracker")  # Resiliency strategy
+tracker_executor = ResiliencyExecutor(tracker_keys, agent_name="tracker")
 
 
-@task(name="fetch_targets")  # type: ignore[misc]
+@task(name="fetch_targets")
 async def fetch_targets(batch_size: int = 50) -> Any:
     """
     Fetch videos from watchlist needing updates.
@@ -44,11 +44,11 @@ async def fetch_targets(batch_size: int = 50) -> Any:
     Returns:
         List of watchlist records
     """
-    dao = MaiaDAO()
+    watchlist_repo = WatchlistRepository()
     run_logger = get_run_logger()
 
     try:
-        targets = await dao.fetch_tracking_batch(batch_size)
+        targets = await watchlist_repo.fetch_batch(batch_size)
         run_logger.info(f"Fetched {len(targets)} videos from watchlist (batch_size={batch_size}).")
         return targets
     except Exception as e:
@@ -76,7 +76,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         return 0
 
     run_logger = get_run_logger()
-    dao = MaiaDAO()
+    watchlist_repo = WatchlistRepository()
 
     video_ids = [v["video_id"] for v in videos]
     id_str = ",".join(video_ids)
@@ -85,11 +85,10 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
 
     base_url = "https://www.googleapis.com/youtube/v3/videos"
     params = {
-        "part": "snippet,statistics",  # Need snippet for publishedAt
+        "part": "snippet,statistics",
         "id": id_str,
     }
 
-    # Define request function for ResiliencyExecutor
     async def make_request(api_key: str) -> Dict[str, Any]:
         params["key"] = api_key
 
@@ -106,11 +105,9 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
                     run_logger.error(f"Tracker HTTP {resp.status}: {error_text[:200]}")
                     raise Exception(f"HTTP {resp.status}")
 
-    # Execute with resiliency strategy
     try:
         response_json = await execute_with_rate_limit(tracker_executor, make_request)
     except RateLimitError:
-        # Resiliency strategy - propagate clean termination
         raise
     except Exception as e:
         run_logger.error(f"Failed to fetch stats: {e}")
@@ -125,7 +122,6 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         run_logger.warning("API returned no items (videos may be deleted/private).")
         return 0
 
-    # Process results and prepare for Vault and watchlist updates
     now = datetime.now(timezone.utc)
     metrics_data = []
     watchlist_updates = []
@@ -135,13 +131,11 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
         stats = item.get("statistics", {})
         snippet = item.get("snippet", {})
 
-        # Extract published_at for tier calculation
         published_at_str = snippet.get("publishedAt")
         if not published_at_str:
             run_logger.warning(f"No publishedAt for {vid_id}, skipping")
             continue
 
-        # Parse published_at
         try:
             if published_at_str.endswith("Z"):
                 published_at = datetime.fromisoformat(published_at_str[:-1]).replace(
@@ -155,7 +149,6 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
             run_logger.warning(f"Failed to parse publishedAt for {vid_id}: {e}")
             continue
 
-        # Prepare metrics for Vault
         metrics_data.append(
             {
                 "video_id": vid_id,
@@ -167,8 +160,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
             }
         )
 
-        # Calculate next tracking tier and time
-        tier, next_track_at = dao.calculate_next_track_time(published_at)
+        tier, next_track_at = watchlist_repo.calculate_next_track_time(published_at)
 
         watchlist_updates.append(
             {
@@ -179,19 +171,16 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
             }
         )
 
-    # Store metrics to Vault (Parquet)
     if metrics_data:
         try:
             get_vault().append_metrics(metrics_data)
             run_logger.info(f"✓ Stored {len(metrics_data)} metrics to Vault")
         except Exception as e:
             run_logger.error(f"Failed to store metrics to Vault: {e}")
-            # Continue anyway to update watchlist
 
-    # Update watchlist schedules
     if watchlist_updates:
         try:
-            await dao.update_watchlist_schedule(watchlist_updates)
+            await watchlist_repo.update_schedule(watchlist_updates)
             run_logger.info(f"✓ Updated {len(watchlist_updates)} watchlist schedules")
         except Exception as e:
             run_logger.error(f"Failed to update watchlist: {e}")
@@ -223,7 +212,6 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
     }
 
     try:
-        # Enforce YouTube API batch limit
         if batch_size > 50:
             run_logger.warning(f"Batch size {batch_size} exceeds YouTube API limit. Capping at 50.")
             batch_size = 50
@@ -247,7 +235,6 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
         )
 
     except RateLimitError:
-        # Resiliency strategy: Rate limit detected - propagate immediately
         run_logger.critical("Tracker Cycle terminated by resiliency strategy (429 Rate Limit)")
         raise
     except Exception as e:
@@ -258,11 +245,9 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
 
 
 def main() -> None:
-    """Entry point for running the Adaptive Tracker as a standalone service."""
     try:
-        asyncio.run(run_tracker_cycle())  # type: ignore[arg-type]
+        asyncio.run(run_tracker_cycle())
     except RateLimitError as e:
-        # Resiliency strategy: Exit with specific code for rate limit
         logger.critical(f"Adaptive Tracker terminated: {e}")
         raise
     except KeyboardInterrupt:
@@ -273,7 +258,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Configure logging for standalone execution
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

@@ -35,7 +35,7 @@ from typing import Any, AsyncGenerator, Dict, List  # noqa: E402
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from atlas.config import settings  # noqa: E402
-from atlas.db import db  # noqa: E402
+from atlas import db  # noqa: E402
 
 logger = logging.getLogger("alkyone.fixtures")
 logger.info(f"Test session vault: {settings.HF_DATASET_ID}")

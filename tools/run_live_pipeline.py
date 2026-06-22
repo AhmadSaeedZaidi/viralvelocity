@@ -9,7 +9,7 @@ End-to-end steps:
     1. Resolve the target video via YouTube ``videos.list``.
     2. Resolve the channel via ``channels.list`` and snapshot it (channels +
        channel_stats_log).
-    3. Persist the video metadata via ``MaiaDAO.ingest_video_metadata``.
+    3. Persist the video metadata via ``VideoRepository.ingest_video_metadata``.
     4. Reset ``has_visuals`` / ``has_transcript`` flags so the agents pick it up.
     5. Run the Painter cycle  → frames in vault under ``frames/<video_id>/``.
     6. Run the Scribe cycle   → transcript in vault under ``transcripts/<video_id>.json``.
@@ -81,7 +81,7 @@ def _mirror_settings_to_environ() -> None:
 def _build_video_data_for_ingest(item: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a ``videos.list`` API item to ``ingest_video_metadata``-compatible shape.
 
-    The DAO only reads from ``snippet`` plus a top-level ``id``. ``ingest`` already
+    The repository only reads from ``snippet`` plus a top-level ``id``. ``ingest`` already
     handles both ``id="VIDEOID"`` and ``id={"videoId": "VIDEOID"}`` shapes.
     """
     return {
@@ -119,26 +119,32 @@ async def _resolve_targets(
 
 async def _seed_database(video: Dict[str, Any], channel: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Insert the channel snapshot + video metadata, reset processing flags."""
-    from atlas.adapters.maia import MaiaDAO
+    from atlas.repositories import ChannelRepository, VideoRepository
 
-    dao = MaiaDAO()
+    channel_repo = ChannelRepository()
+    video_repo = VideoRepository()
+
     if channel is not None:
-        await dao.ingest_channel_snapshot(channel)
-    await dao.ingest_video_metadata(_build_video_data_for_ingest(video))
+        await channel_repo.ingest_channel_snapshot(channel)
+    await video_repo.ingest_video_metadata(_build_video_data_for_ingest(video))
     vid_id = video["id"]
-    await dao._execute(
-        """
-        UPDATE videos
-        SET has_visuals = FALSE,
-            has_transcript = FALSE,
-            status = 'PENDING',
-            last_updated_at = NULL
-        WHERE id = %s
-        """,
-        (vid_id,),
-    )
-    row = await dao.get_video_by_id(vid_id)
-    return row or {}
+
+    async with video_repo._connection() as conn:
+        await conn.execute(
+            """
+            UPDATE videos
+            SET has_visuals = FALSE,
+                has_transcript = FALSE,
+                status = 'PENDING',
+                last_updated_at = NULL
+            WHERE id = %s
+            """,
+            (vid_id,),
+        )
+        await conn.commit()
+
+    row = await video_repo.get_by_id(vid_id)
+    return row.model_dump() if row else {}
 
 
 async def _run_painter() -> None:
@@ -159,15 +165,15 @@ async def _run_tracker(video_id: str) -> None:
     We do **not** use :func:`tracker_flow` here: ``fetch_tracker_targets`` applies a
     global ``LIMIT`` across all stale videos. On a busy Neon database the Blender
     tutorial row may not appear in the first 50 candidates, so metrics would be
-    skipped. Instead we call :func:`update_stats_task` for exactly ``video_id``.
+    skipped. Instead we call :func:`update_stats_task`` for exactly ``video_id``.
     """
-    from atlas.adapters.maia import MaiaDAO
+    from atlas.repositories import VideoRepository
     from atlas.utils import KeyRing, ResiliencyExecutor
     from maia.tracker.flow import update_stats_task
 
-    dao = MaiaDAO()
-    row = await dao.get_video_by_id(video_id)
-    if not row:
+    video_repo = VideoRepository()
+    video = await video_repo.get_by_id(video_id)
+    if not video:
         logger.warning("Tracker step: no video row for %s", video_id)
         return
 
@@ -177,9 +183,9 @@ async def _run_tracker(video_id: str) -> None:
         [
             {
                 "id": video_id,
-                "title": row.get("title"),
-                "published_at": row.get("published_at"),
-                "last_updated_at": row.get("last_updated_at"),
+                "title": video.title,
+                "published_at": video.published_at,
+                "last_updated_at": video.last_updated_at,
             }
         ],
         executor,
@@ -189,62 +195,63 @@ async def _run_tracker(video_id: str) -> None:
 
 async def _verify(video_id: str, channel_id: Optional[str]) -> List[Tuple[str, bool, str]]:
     """Return a list of ``(check_name, ok, detail)`` tuples for all artifacts."""
-    from atlas.adapters.maia import MaiaDAO
     from atlas.config import settings
+    from atlas.repositories import ChannelRepository, VideoRepository
     from atlas.vault import get_vault
 
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
+    channel_repo = ChannelRepository()
     results: List[Tuple[str, bool, str]] = []
 
-    video = await dao.get_video_by_id(video_id)
+    video = await video_repo.get_by_id(video_id)
     if video:
         results.append(
             (
                 "videos row exists",
                 True,
-                f"title={video.get('title')!r} status={video.get('status')}",
+                f"title={video.title!r} status={video.status}",
             )
         )
-        results.append(("videos.has_transcript", bool(video.get("has_transcript")), ""))
-        results.append(("videos.has_visuals", bool(video.get("has_visuals")), ""))
+        results.append(("videos.has_transcript", bool(video.has_transcript), ""))
+        results.append(("videos.has_visuals", bool(video.has_visuals), ""))
     else:
         results.append(("videos row exists", False, "row missing"))
 
     if channel_id:
-        ch = await dao.get_channel_by_id(channel_id)
+        ch = await channel_repo.get_by_id(channel_id)
         if ch:
             results.append(
-                ("channels row exists", True, f"title={ch.get('title')!r}")
+                ("channels row exists", True, f"title={ch.title!r}")
             )
         else:
             results.append(("channels row exists", False, "row missing"))
 
-        ch_stats = await dao.get_latest_channel_stats(channel_id)
+        ch_stats = await channel_repo.get_latest_stats(channel_id)
         if ch_stats:
             results.append(
                 (
                     "channel_stats_log row exists",
                     True,
                     (
-                        f"subs={ch_stats.get('subscriber_count')} "
-                        f"views={ch_stats.get('view_count')} "
-                        f"videos={ch_stats.get('video_count')}"
+                        f"subs={ch_stats.subscriber_count} "
+                        f"views={ch_stats.view_count} "
+                        f"videos={ch_stats.video_count}"
                     ),
                 )
             )
         else:
             results.append(("channel_stats_log row exists", False, "no stats logged"))
 
-    vstats = await dao.get_latest_video_stats(video_id)
+    vstats = await video_repo.get_latest_stats(video_id)
     if vstats:
         results.append(
             (
                 "video_stats_log row exists",
                 True,
                 (
-                    f"views={vstats.get('views')} "
-                    f"likes={vstats.get('likes')} "
-                    f"comments={vstats.get('comment_count')}"
+                    f"views={vstats.views} "
+                    f"likes={vstats.likes} "
+                    f"comments={vstats.comment_count}"
                 ),
             )
         )

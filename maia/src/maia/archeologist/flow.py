@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Union, cast
 
 import aiohttp
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import VideoRepository
 from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
 from tenacity import (
@@ -55,7 +55,7 @@ async def _fetch_with_backoff(
 async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
     """Search for top videos in target categories for a specific month in history."""
     run_logger = get_run_logger()
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
 
     start_date = datetime(year, month, 1, tzinfo=timezone.utc)
     if month == 12:
@@ -92,19 +92,17 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
                     items = data.get("items", [])
 
                     ingest_tasks = [
-                        dao.ingest_video_metadata(item, priority_override=100) for item in items
+                        video_repo.ingest_video_metadata(item, priority_override=100)
+                        for item in items
                     ]
                     await asyncio.gather(*ingest_tasks)
 
-                    # Channel index: stub rows come from ``ingest_video_metadata``; full
-                    # title + ``channel_stats_log`` via ``channels.list`` (same as Hunter).
                     channel_ids = [
                         it.get("snippet", {}).get("channelId")
                         for it in items
                         if it.get("snippet", {}).get("channelId")
                     ]
                     if channel_ids:
-                        # Use the hunting key pool (same as ``enrich_channels`` in Hunter).
                         enrich_ex = ResiliencyExecutor(
                             KeyRing("hunting"), agent_name="archeologist_enrich"
                         )
@@ -123,21 +121,20 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
                     run_logger.info(
                         f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
                     )
-                    break  # Success - exit retry loop
+                    break
 
             except RetryError:
-                # Tenacity exhausted all retries (likely due to persistent 429 errors)
                 if attempt == max_retries - 1:
                     run_logger.critical("All retry attempts exhausted. Aborting Archeologist.")
                     raise RateLimitError("429 Rate Limit - Archeologist")
-                continue  # Try next API key
+                continue
 
             except Exception as e:
                 if isinstance(e, RateLimitError):
                     raise
                 run_logger.error(f"Network error in Archeologist: {e}")
                 if attempt == max_retries - 1:
-                    break  # Skip this category after exhausting retries
+                    break
 
 
 @flow(name="run_archeology_campaign")
@@ -184,13 +181,11 @@ class ArcheologistAgent:
     name = "archeologist"
 
     def __init__(self) -> None:
-        """Initialize the Archeologist agent with its KeyRing."""
         self.logger = logging.getLogger(self.name)
         self.keys = KeyRing("archeology")
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        """Register command-line arguments for the Archeologist agent."""
         parser.add_argument(
             "--start-year",
             type=int,
@@ -207,17 +202,6 @@ class ArcheologistAgent:
     async def run(
         self, start_year: int = 2005, end_year: int = 2024, **kwargs: Any
     ) -> Dict[str, Any]:
-        """
-        Execute an archeology campaign to discover historical videos.
-
-        Args:
-            start_year: Start year for historical campaign
-            end_year: End year for historical campaign
-            **kwargs: Additional arguments (ignored)
-
-        Returns:
-            Dictionary with campaign statistics
-        """
         result: Dict[str, Any] = await archeology_flow(
             start_year=start_year, end_year=end_year, keys=self.keys
         )
@@ -226,18 +210,12 @@ class ArcheologistAgent:
 
 @flow(name="run_archeology_campaign")
 async def run_archeology_campaign(start_year: int = 2005, end_year: int = 2024) -> None:
-    """
-    Legacy function wrapper for backward compatibility.
-
-    Prefer using ArcheologistAgent directly for new code.
-    """
     agent = ArcheologistAgent()
     await agent.run(start_year=start_year, end_year=end_year)
 
 
 @task(name="hunt_history")
 async def hunt_history(year: int, month: int) -> None:
-    """Legacy function wrapper for backward compatibility."""
     keys = KeyRing("archeology")
     await hunt_history_task(year, month, keys)
 

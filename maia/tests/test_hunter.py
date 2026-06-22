@@ -13,22 +13,22 @@ from maia.hunter.flow import fetch_batch_task, ingest_results_task
 @pytest.mark.asyncio
 async def test_fetch_batch_empty_queue():
     """Test fetch_batch when queue is empty."""
-    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
-        mock_dao = MockDAO.return_value
-        mock_dao.fetch_hunter_batch = AsyncMock(return_value=[])
+    with patch("maia.hunter.flow.SearchQueueRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.fetch_batch = AsyncMock(return_value=[])
 
         result = await fetch_batch_task.fn(batch_size=10)
 
         assert result == []
-        mock_dao.fetch_hunter_batch.assert_called_once_with(10)
+        mock_repo.fetch_batch.assert_called_once_with(10)
 
 
 @pytest.mark.asyncio
 async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
     """Test fetch_batch with items in queue."""
-    with patch("maia.hunter.flow.MaiaDAO") as MockDAO:
-        mock_dao = MockDAO.return_value
-        mock_dao.fetch_hunter_batch = AsyncMock(return_value=[mock_search_queue_item])
+    with patch("maia.hunter.flow.SearchQueueRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.fetch_batch = AsyncMock(return_value=[mock_search_queue_item])
 
         result = await fetch_batch_task.fn(batch_size=10)
 
@@ -42,28 +42,30 @@ async def test_ingest_results_with_snowball(
 ):
     """Test ingest_results implements Snowball effect."""
     with (
-        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
+        patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
         patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
         mock_vault = mock_get_vault.return_value
 
-        mock_dao = MockDAO.return_value
-        mock_dao.ingest_video_metadata = AsyncMock()
-        mock_dao.add_to_search_queue = AsyncMock(return_value=3)
-        mock_dao.update_search_state = AsyncMock()
+        mock_video = MockVideoRepo.return_value
+        mock_search = MockSearchRepo.return_value
+        mock_video.ingest_video_metadata = AsyncMock()
+        mock_search.add_terms = AsyncMock(return_value=3)
+        mock_search.update_state = AsyncMock()
         mock_vault.store_metadata = MagicMock()
 
         await ingest_results_task.fn(mock_search_queue_item, mock_youtube_search_response)
 
-        assert mock_dao.ingest_video_metadata.call_count == 1
+        assert mock_video.ingest_video_metadata.call_count == 1
 
-        mock_dao.add_to_search_queue.assert_called_once()
-        args = mock_dao.add_to_search_queue.call_args[0][0]
+        mock_search.add_terms.assert_called_once()
+        args = mock_search.add_terms.call_args[0][0]
         assert "test" in args
         assert "example" in args
         assert "ai" in args
 
-        mock_dao.update_search_state.assert_called_once()
+        mock_search.update_state.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -72,17 +74,19 @@ async def test_ingest_results_handles_vault_failure(
 ):
     """Test ingest_results continues even if vault storage fails."""
     with (
-        patch("maia.hunter.flow.MaiaDAO") as MockDAO,
+        patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
+        patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
         patch("maia.hunter.flow.get_vault") as mock_get_vault,
     ):
         mock_vault = mock_get_vault.return_value
 
-        mock_dao = MockDAO.return_value
-        mock_dao.ingest_video_metadata = AsyncMock()
-        mock_dao.add_to_search_queue = AsyncMock(return_value=3)
-        mock_dao.update_search_state = AsyncMock()
+        mock_video = MockVideoRepo.return_value
+        mock_search = MockSearchRepo.return_value
+        mock_video.ingest_video_metadata = AsyncMock()
+        mock_search.add_terms = AsyncMock(return_value=3)
+        mock_search.update_state = AsyncMock()
         mock_vault.store_metadata = MagicMock(side_effect=Exception("Vault error"))
 
         await ingest_results_task.fn(mock_search_queue_item, mock_youtube_search_response)
 
-        assert mock_dao.ingest_video_metadata.call_count == 1
+        assert mock_video.ingest_video_metadata.call_count == 1

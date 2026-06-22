@@ -13,9 +13,9 @@ Architecture:
 - Painter: Visual Archival (Intelligent keyframe extraction)
 
 Core Principles:
-- Stateless: All state persists in Atlas
-- DAO Pattern: Database access via atlas.adapters.maia.MaiaDAO only
-- Resiliency Strategy: Rate limit = immediate container suicide for IP rotation
+    - Stateless: All state persists in Atlas
+    - Repository Pattern: Database access via atlas.repositories.*
+    - Resiliency Strategy: Rate limit = immediate container suicide for IP rotation
 """
 
 __version__ = "0.1.0"

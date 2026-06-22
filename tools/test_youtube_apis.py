@@ -136,7 +136,8 @@ def test_youtube_transcript_api(env: dict) -> bool:
         try:
             # Try without cookies first (for auto-generated captions)
             print("   Trying auto-generated captions...")
-            transcripts = YouTubeTranscriptApi.list_transcripts(test_video_id)
+            api = YouTubeTranscriptApi()
+            transcripts = api.list(test_video_id)
             
             transcript_list = list(transcripts)
             print(f"   ✅ Found {len(transcript_list)} transcript(s)")
@@ -151,12 +152,20 @@ def test_youtube_transcript_api(env: dict) -> bool:
             
             # Try with cookies if available
             print("   Trying with cookies...")
-            from youtube_transcript_api import YouTubeTranscriptApi
+            import requests
+            import http.cookiejar as cookiejar
             
-            transcripts = YouTubeTranscriptApi.list_transcripts(
-                test_video_id,
-                cookies=str(cookies_file)
-            )
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            })
+            jar = cookiejar.MozillaCookieJar(str(cookies_file))
+            jar.load(ignore_discard=True, ignore_expires=True)
+            session.cookies = jar
+            
+            api_with_cookies = YouTubeTranscriptApi(http_client=session)
+            transcripts = api_with_cookies.list(test_video_id)
             
             transcript_list = list(transcripts)
             print(f"   ✅ Found {len(transcript_list)} transcript(s) with cookies")
@@ -181,7 +190,7 @@ def test_ytdlp_download(env: dict) -> bool:
     try:
         import yt_dlp
         
-        test_video_id = "Z1t4T0d6xqg"
+        test_video_id = "jNQXAC9IVRw"
         video_url = f"https://www.youtube.com/watch?v={test_video_id}"
         
         print(f"\n📥 Testing download for: {test_video_id}")

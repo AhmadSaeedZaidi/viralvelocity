@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import ChannelRepository, SearchQueueRepository, VideoRepository
 from atlas.utils import KeyRing, ResiliencyExecutor
 from atlas.vault import get_vault
 from atlas.youtube import lookup_channels
@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 @task(name="fetch_batch")
 async def fetch_batch_task(batch_size: int) -> List[Dict[str, Any]]:
     """Fetch a batch of queries from the search queue."""
-    dao = MaiaDAO()
+    repo = SearchQueueRepository()
     run_logger = get_run_logger()
 
-    batch = await dao.fetch_hunter_batch(batch_size)
+    batch = await repo.fetch_batch(batch_size)
     if not batch:
         run_logger.info("Hunter Queue is empty. Sleeping...")
         return []
@@ -96,7 +96,7 @@ async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecu
     For every channel id passed in:
     * If the channel has no row in ``channel_stats_log`` newer than 24h, it is
       fetched via ``channels.list?part=snippet,statistics`` and persisted via
-      :meth:`MaiaDAO.ingest_channel_snapshot`.
+      :meth:`ChannelRepository.ingest_channel_snapshot`.
     * Otherwise it is skipped.
 
     Returns the number of channels actually refreshed (real API calls + DB writes).
@@ -104,7 +104,7 @@ async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecu
     if not channel_ids:
         return 0
 
-    dao = MaiaDAO()
+    channel_repo = ChannelRepository()
     run_logger = get_run_logger()
 
     unique = list({cid for cid in channel_ids if cid})
@@ -112,10 +112,10 @@ async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecu
     needs: List[str] = []
     for cid in unique:
         try:
-            if await dao.channel_needs_refresh(cid):
+            if await channel_repo.needs_refresh(cid):
                 needs.append(cid)
         except Exception as e:
-            run_logger.warning(f"channel_needs_refresh({cid}) failed: {e}")
+            run_logger.warning(f"channel_repo.needs_refresh({cid}) failed: {e}")
 
     if not needs:
         run_logger.info("No channels need enrichment (all have recent stats).")
@@ -134,7 +134,7 @@ async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecu
     written = 0
     for item in items:
         try:
-            await dao.ingest_channel_snapshot(item)
+            await channel_repo.ingest_channel_snapshot(item)
             written += 1
         except Exception as e:
             run_logger.error(f"Failed to ingest channel snapshot for {item.get('id')}: {e}")
@@ -163,7 +163,8 @@ async def ingest_results_task(
     if not response:
         return
 
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
+    search_repo = SearchQueueRepository()
     run_logger = get_run_logger()
 
     items = response.get("items", [])
@@ -189,7 +190,7 @@ async def ingest_results_task(
     async def _db_ingest(item: Dict[str, Any]) -> None:
         vid_id = item.get("id", {}).get("videoId") or item.get("id")
         try:
-            await dao.ingest_video_metadata(item)
+            await video_repo.ingest_video_metadata(item)
         except Exception as e:
             run_logger.error(f"Failed to ingest video {vid_id} to database: {e}")
 
@@ -223,7 +224,7 @@ async def ingest_results_task(
 
     if snowball_tags:
         try:
-            added_count = await dao.add_to_search_queue(snowball_tags)
+            added_count = await search_repo.add_terms(snowball_tags)
             run_logger.info(
                 f"Snowball Effect: Added {added_count} unique tags to search queue "
                 f"(from {len(snowball_tags)} total tags)"
@@ -232,7 +233,7 @@ async def ingest_results_task(
             run_logger.error(f"Failed to snowball tags into search queue: {e}")
 
     try:
-        await dao.update_search_state(
+        await search_repo.update_state(
             topic["id"],
             next_token,
             len(items),

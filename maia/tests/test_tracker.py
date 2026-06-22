@@ -13,22 +13,26 @@ from maia.tracker.flow import fetch_targets_task, update_stats_task
 @pytest.mark.asyncio
 async def test_fetch_targets_empty():
     """Test fetch_targets when no videos need updates."""
-    with patch("maia.tracker.flow.MaiaDAO") as MockDAO:
-        mock_dao = MockDAO.return_value
-        mock_dao.fetch_tracker_targets = AsyncMock(return_value=[])
+    with patch("maia.tracker.flow.VideoRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.fetch_tracker_targets = AsyncMock(return_value=[])
 
         result = await fetch_targets_task.fn(batch_size=50)
 
         assert result == []
-        mock_dao.fetch_tracker_targets.assert_called_once_with(50)
+        mock_repo.fetch_tracker_targets.assert_called_once_with(50)
 
 
 @pytest.mark.asyncio
 async def test_fetch_targets_with_videos(mock_tracker_target: Dict[str, Any]):
     """Test fetch_targets returns videos needing updates."""
-    with patch("maia.tracker.flow.MaiaDAO") as MockDAO:
-        mock_dao = MockDAO.return_value
-        mock_dao.fetch_tracker_targets = AsyncMock(return_value=[mock_tracker_target])
+    from atlas.models import Video
+
+    with patch("maia.tracker.flow.VideoRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.fetch_tracker_targets = AsyncMock(
+            return_value=[Video(**mock_tracker_target)]
+        )
 
         result = await fetch_targets_task.fn(batch_size=50)
 
@@ -48,12 +52,13 @@ async def test_update_stats_empty_list():
 async def test_update_stats_handles_api_errors(mock_tracker_target: Dict[str, Any]):
     """Test update_stats handles API errors gracefully."""
     with (
-        patch("maia.tracker.flow.MaiaDAO") as MockDAO,
+        patch("maia.tracker.flow.VideoRepository") as MockRepo,
         patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
     ):
 
-        mock_dao = MockDAO.return_value
-        mock_dao.update_video_stats_batch = AsyncMock()
+        mock_repo = MockRepo.return_value
+        mock_repo.log_stats_batch = AsyncMock()
+        mock_repo.update_stats_batch = AsyncMock()
 
         mock_response = AsyncMock()
         mock_response.status = 500

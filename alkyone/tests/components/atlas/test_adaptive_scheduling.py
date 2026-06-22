@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 import pytest
 import pytest_asyncio
+from atlas.models import WatchlistItem
 
 
 @pytest.mark.integration
@@ -15,22 +16,24 @@ class TestAdaptiveScheduling:
     """Test Adaptive Scheduling watchlist operations and Vault integration."""
 
     @pytest.mark.asyncio
-    async def test_add_to_watchlist(self, dao):
+    async def test_add_to_watchlist(self, watchlist_repo):
         """Test adding videos to watchlist with real database."""
         video_ids = ["VIDEO_001", "VIDEO_002", "VIDEO_003"]
 
         # Add videos to watchlist
         for vid in video_ids:
-            await dao.add_to_watchlist(vid, tier="HOURLY")
+            await watchlist_repo.add(vid, tier="HOURLY")
 
         # Verify they were added by querying watchlist table
-        watchlist = await dao._fetch_all(
+        watchlist = await watchlist_repo._fetch_all(
             "SELECT video_id FROM watchlist WHERE video_id = ANY(%s)", (video_ids,)
         )
-        assert len(watchlist) == 3, f"Expected 3 videos in watchlist, got {len(watchlist)}"
+        assert (
+            len(watchlist) == 3
+        ), f"Expected 3 videos in watchlist, got {len(watchlist)}"
 
     @pytest.mark.asyncio
-    async def test_fetch_tracking_batch(self, dao):
+    async def test_fetch_tracking_batch(self, watchlist_repo):
         """Test fetching videos due for tracking."""
         # Setup: Add videos with past next_track_at
         test_videos = [
@@ -44,10 +47,10 @@ class TestAdaptiveScheduling:
 
         # Add to watchlist (in real test)
         for video in test_videos:
-            await dao.add_to_watchlist(video["video_id"], tier=video["tier"])
+            await watchlist_repo.add(video["video_id"], tier=video["tier"])
 
         # Fetch batch
-        batch = await dao.fetch_tracking_batch(batch_size=3)
+        batch = await watchlist_repo.fetch_batch(batch_size=3)
 
         # Verify batch size respects limit
         assert len(batch) <= 3, f"Batch should respect limit of 3, got {len(batch)}"
@@ -55,13 +58,13 @@ class TestAdaptiveScheduling:
         # Verify FIFO order (oldest first)
         if len(batch) > 1:
             for i in range(len(batch) - 1):
-                assert batch[i]["next_track_at"] <= batch[i + 1]["next_track_at"], (
+                assert batch[i].next_track_at <= batch[i + 1].next_track_at, (
                     f"Batch not in FIFO order at index {i}: "
-                    f"{batch[i]['next_track_at']} > {batch[i + 1]['next_track_at']}"
+                    f"{batch[i].next_track_at} > {batch[i + 1].next_track_at}"
                 )
 
     @pytest.mark.asyncio
-    async def test_update_watchlist_schedule(self, dao):
+    async def test_update_watchlist_schedule(self, watchlist_repo):
         """Test batch updating watchlist schedules."""
         now = datetime.now(timezone.utc)
 
@@ -81,19 +84,19 @@ class TestAdaptiveScheduling:
         ]
 
         # Update schedules
-        await dao.update_watchlist_schedule(updates)
+        await watchlist_repo.update_schedule(updates)
 
         # Verify updates (would query DB in real test)
         assert True  # Placeholder
 
     @pytest.mark.asyncio
-    async def test_calculate_next_track_time(self, dao):
+    async def test_calculate_next_track_time(self, watchlist_repo):
         """Test adaptive tier calculation based on video age."""
         now = datetime.now(timezone.utc)
 
         # Test HOURLY tier (< 24h old)
         published_recent = now - timedelta(hours=12)
-        tier, next_time = dao.calculate_next_track_time(published_recent)
+        tier, next_time = watchlist_repo.calculate_next_track_time(published_recent)
         assert tier == "HOURLY", f"Expected HOURLY tier for 12h-old video, got {tier}"
         assert next_time > now, "next_track_at should be in the future"
         assert next_time <= now + timedelta(
@@ -102,7 +105,7 @@ class TestAdaptiveScheduling:
 
         # Test DAILY tier (1-7 days old)
         published_medium = now - timedelta(days=3)
-        tier, next_time = dao.calculate_next_track_time(published_medium)
+        tier, next_time = watchlist_repo.calculate_next_track_time(published_medium)
         assert tier == "DAILY", f"Expected DAILY tier for 3-day-old video, got {tier}"
         assert next_time > now, "next_track_at should be in the future"
         assert next_time <= now + timedelta(
@@ -111,15 +114,19 @@ class TestAdaptiveScheduling:
 
         # Test WEEKLY tier (> 7 days old)
         published_old = now - timedelta(days=30)
-        tier, next_time = dao.calculate_next_track_time(published_old)
-        assert tier == "WEEKLY", f"Expected WEEKLY tier for 30-day-old video, got {tier}"
+        tier, next_time = watchlist_repo.calculate_next_track_time(published_old)
+        assert (
+            tier == "WEEKLY"
+        ), f"Expected WEEKLY tier for 30-day-old video, got {tier}"
         assert next_time > now, "next_track_at should be in the future"
         assert next_time <= now + timedelta(
             days=7, hours=1
         ), f"WEEKLY next_track_at too far: {next_time}"
 
     @pytest.mark.asyncio
-    async def test_adaptive_scheduling_survives_janitor(self, dao):
+    async def test_adaptive_scheduling_survives_janitor(
+        self, video_repo, watchlist_repo
+    ):
         """Test that watchlist persists after video cleanup (Adaptive Scheduling)."""
         video_id = "VIDEO_PERSISTENT"
 
@@ -135,13 +142,13 @@ class TestAdaptiveScheduling:
                 "defaultLanguage": "en",
             },
         }
-        await dao.ingest_video_metadata(video_data)
-        await dao.add_to_watchlist(video_id, tier="HOURLY")
+        await video_repo.ingest_video_metadata(video_data)
+        await watchlist_repo.add(video_id, tier="HOURLY")
 
-        await dao.mark_video_done(video_id)
+        await video_repo.mark_done(video_id)
 
         # Verify watchlist entry exists
-        watchlist_entry = await dao._fetch_one(
+        watchlist_entry = await watchlist_repo._fetch_one(
             "SELECT * FROM watchlist WHERE video_id = %s", (video_id,)
         )
 
@@ -154,7 +161,7 @@ class TestAdaptiveScheduling:
         ), f"Watchlist video_id mismatch: {watchlist_entry['video_id']}"
 
     @pytest.mark.asyncio
-    async def test_vault_metrics_storage(self, dao):
+    async def test_vault_metrics_storage(self):
         """Test metrics are properly stored in real HuggingFace Vault via Adaptive Scheduling."""
         from atlas.vault import get_vault
 
@@ -187,9 +194,16 @@ class TestAdaptiveScheduling:
 
 
 @pytest_asyncio.fixture
-async def dao(fresh_db):
-    """Provide MaiaDAO instance for testing with real vault."""
-    from atlas.adapters.maia import MaiaDAO
+async def watchlist_repo(fresh_db):
+    """Provide WatchlistRepository for testing with real vault."""
+    from atlas.repositories import WatchlistRepository
 
-    dao_instance = MaiaDAO()
-    yield dao_instance
+    yield WatchlistRepository()
+
+
+@pytest_asyncio.fixture
+async def video_repo(fresh_db):
+    """Provide VideoRepository for testing with real vault."""
+    from atlas.repositories import VideoRepository
+
+    yield VideoRepository()

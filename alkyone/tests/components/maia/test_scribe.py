@@ -18,7 +18,7 @@ from maia.scribe.flow import process_transcript, run_scribe_cycle
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_complete_cycle(dao):
+async def test_scribe_complete_cycle(video_repo, channel_repo):
     """Test complete Scribe cycle using real Blender tutorial video with real transcripts."""
     test_video = {
         "id": {"videoId": "B0J27sf9N1Y"},
@@ -33,16 +33,18 @@ async def test_scribe_complete_cycle(dao):
         },
     }
 
-    await dao.ingest_video_metadata(test_video)
+    await video_repo.ingest_video_metadata(test_video)
 
-    ch = await dao.get_channel_by_id("UCOKHwx1VCdgnxwbjyb9Iu1g")
+    ch = await channel_repo.get_by_id("UCOKHwx1VCdgnxwbjyb9Iu1g")
     assert ch is not None, "Blender Guru channel should be indexed alongside the video"
-    assert (ch.get("title") or "").find("Blender") >= 0 or "Guru" in (ch.get("title") or "")
+    assert (ch.title or "").find("Blender") >= 0 or "Guru" in (ch.title or "")
 
     try:
         await run_scribe_cycle(batch_size=1)
 
-        video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("B0J27sf9N1Y",))
+        video = await video_repo._fetch_one(
+            "SELECT * FROM videos WHERE id = %s", ("B0J27sf9N1Y",)
+        )
         assert (
             video["has_transcript"] is True
         ), f"Video should have transcript after scribe cycle, got {video['has_transcript']}"
@@ -58,7 +60,7 @@ async def test_scribe_complete_cycle(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_handles_unavailable_transcripts(dao):
+async def test_scribe_handles_unavailable_transcripts(video_repo):
     """Test Scribe handles videos with disabled transcripts."""
     video_data = {
         "id": {"videoId": "NO_TRANSCRIPT_001"},
@@ -73,7 +75,7 @@ async def test_scribe_handles_unavailable_transcripts(dao):
         },
     }
 
-    await dao.ingest_video_metadata(video_data)
+    await video_repo.ingest_video_metadata(video_data)
 
     with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
         mock_loader_instance = MagicMock()
@@ -82,7 +84,9 @@ async def test_scribe_handles_unavailable_transcripts(dao):
 
         await run_scribe_cycle(batch_size=1)
 
-        video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("NO_TRANSCRIPT_001",))
+        video = await video_repo._fetch_one(
+            "SELECT * FROM videos WHERE id = %s", ("NO_TRANSCRIPT_001",)
+        )
         assert (
             video["has_transcript"] is True
         ), "Video should be marked as transcribed even with unavailable transcripts"
@@ -90,7 +94,7 @@ async def test_scribe_handles_unavailable_transcripts(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_handles_resiliency_strategy(dao):
+async def test_scribe_handles_resiliency_strategy(video_repo):
     """Test Scribe handles rate limit errors gracefully (marks video FAILED)."""
     video_data = {
         "id": {"videoId": "RATE_LIMIT_001"},
@@ -105,16 +109,20 @@ async def test_scribe_handles_resiliency_strategy(dao):
         },
     }
 
-    await dao.ingest_video_metadata(video_data)
+    await video_repo.ingest_video_metadata(video_data)
 
     with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
         mock_loader_instance = MagicMock()
-        mock_loader_instance.fetch = MagicMock(side_effect=RuntimeError("429 Rate Limit"))
+        mock_loader_instance.fetch = MagicMock(
+            side_effect=RuntimeError("429 Rate Limit")
+        )
         MockLoader.return_value = mock_loader_instance
 
         await run_scribe_cycle(batch_size=1)
 
-        video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("RATE_LIMIT_001",))
+        video = await video_repo._fetch_one(
+            "SELECT * FROM videos WHERE id = %s", ("RATE_LIMIT_001",)
+        )
         assert (
             video["status"] == "FAILED"
         ), f"Expected video status FAILED after rate limit error, got {video['status']}"
@@ -122,7 +130,7 @@ async def test_scribe_handles_resiliency_strategy(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_empty_queue_returns_idle(dao):
+async def test_scribe_empty_queue_returns_idle(video_repo):
     """Test Scribe handles empty queue gracefully."""
     await run_scribe_cycle(batch_size=10)
 
@@ -131,7 +139,7 @@ async def test_scribe_empty_queue_returns_idle(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_batch_size_enforcement(dao):
+async def test_scribe_batch_size_enforcement(video_repo):
     """Test Scribe respects batch size limit."""
     for i in range(10):
         video_data = {
@@ -146,7 +154,7 @@ async def test_scribe_batch_size_enforcement(dao):
                 "defaultLanguage": "en",
             },
         }
-        await dao.ingest_video_metadata(video_data)
+        await video_repo.ingest_video_metadata(video_data)
 
     mock_transcript = [{"text": "Test", "start": 0.0, "duration": 1.0}]
 
@@ -157,22 +165,24 @@ async def test_scribe_batch_size_enforcement(dao):
 
         await run_scribe_cycle(batch_size=5)
 
-        processed = await dao._fetch_all(
+        processed = await video_repo._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'BATCH_TEST_%%'"
         )
         assert (
             len(processed) == 5
         ), f"Expected 5 videos processed with batch_size=5, got {len(processed)}"
 
-        remaining = await dao._fetch_all(
+        remaining = await video_repo._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = FALSE AND id LIKE 'BATCH_TEST_%%'"
         )
-        assert len(remaining) == 5, f"Expected 5 unprocessed videos remaining, got {len(remaining)}"
+        assert (
+            len(remaining) == 5
+        ), f"Expected 5 unprocessed videos remaining, got {len(remaining)}"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_sequential_processing(dao):
+async def test_scribe_sequential_processing(video_repo):
     """Test Scribe processes videos sequentially to manage rate limits."""
 
     for i in range(3):
@@ -188,7 +198,7 @@ async def test_scribe_sequential_processing(dao):
                 "defaultLanguage": "en",
             },
         }
-        await dao.ingest_video_metadata(video_data)
+        await video_repo.ingest_video_metadata(video_data)
 
     processing_order = []
     mock_transcript = [{"text": "Test", "start": 0.0, "duration": 1.0}]
@@ -200,7 +210,7 @@ async def test_scribe_sequential_processing(dao):
 
         await run_scribe_cycle(batch_size=3)
 
-        processed = await dao._fetch_all(
+        processed = await video_repo._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'SEQ_TEST_%%'"
         )
         assert (
@@ -210,7 +220,7 @@ async def test_scribe_sequential_processing(dao):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_vault_failure_marks_video_failed(dao, mock_sleep):
+async def test_scribe_vault_failure_marks_video_failed(video_repo, mock_sleep):
     """Test Scribe marks video as failed when vault storage fails after retries."""
     video_data = {
         "id": {"videoId": "VAULT_FAIL_001"},
@@ -225,7 +235,7 @@ async def test_scribe_vault_failure_marks_video_failed(dao, mock_sleep):
         },
     }
 
-    await dao.ingest_video_metadata(video_data)
+    await video_repo.ingest_video_metadata(video_data)
 
     mock_transcript = [{"text": "Test", "start": 0.0, "duration": 1.0}]
 
@@ -238,12 +248,16 @@ async def test_scribe_vault_failure_marks_video_failed(dao, mock_sleep):
         MockLoader.return_value = mock_loader_instance
 
         mock_vault = MagicMock()
-        mock_vault.store_transcript = MagicMock(side_effect=Exception("Vault connection error"))
+        mock_vault.store_transcript = MagicMock(
+            side_effect=Exception("Vault connection error")
+        )
         mock_get_vault.return_value = mock_vault
 
         await run_scribe_cycle(batch_size=1)
 
-        video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("VAULT_FAIL_001",))
+        video = await video_repo._fetch_one(
+            "SELECT * FROM videos WHERE id = %s", ("VAULT_FAIL_001",)
+        )
         assert (
             video["status"] == "FAILED"
         ), f"Expected video status FAILED after vault error, got {video['status']}"
@@ -251,7 +265,7 @@ async def test_scribe_vault_failure_marks_video_failed(dao, mock_sleep):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_scribe_retry_logic_on_network_errors(dao, mock_sleep):
+async def test_scribe_retry_logic_on_network_errors(video_repo, mock_sleep):
     """Test Scribe retries transcript fetching on transient network errors."""
     video_data = {
         "id": {"videoId": "RETRY_TEST_001"},
@@ -266,7 +280,7 @@ async def test_scribe_retry_logic_on_network_errors(dao, mock_sleep):
         },
     }
 
-    await dao.ingest_video_metadata(video_data)
+    await video_repo.ingest_video_metadata(video_data)
 
     mock_transcript = [{"text": "Success", "start": 0.0, "duration": 1.0}]
 
@@ -287,16 +301,25 @@ async def test_scribe_retry_logic_on_network_errors(dao, mock_sleep):
             mock_loader_instance.fetch.call_count == 3
         ), f"Expected 3 fetch calls (2 retries + 1 success), got {mock_loader_instance.fetch.call_count}"
 
-        video = await dao._fetch_one("SELECT * FROM videos WHERE id = %s", ("RETRY_TEST_001",))
+        video = await video_repo._fetch_one(
+            "SELECT * FROM videos WHERE id = %s", ("RETRY_TEST_001",)
+        )
         assert (
             video["has_transcript"] is True
         ), "Video should have transcript after successful retry"
 
 
 @pytest_asyncio.fixture
-async def dao(fresh_db):
-    """Provide MaiaDAO instance for testing with real vault."""
-    from atlas.adapters.maia import MaiaDAO
+async def video_repo(fresh_db):
+    """Provide VideoRepository for testing with real vault."""
+    from atlas.repositories import VideoRepository
 
-    dao_instance = MaiaDAO()
-    yield dao_instance
+    yield VideoRepository()
+
+
+@pytest_asyncio.fixture
+async def channel_repo(fresh_db):
+    """Provide ChannelRepository for testing with real vault."""
+    from atlas.repositories import ChannelRepository
+
+    yield ChannelRepository()

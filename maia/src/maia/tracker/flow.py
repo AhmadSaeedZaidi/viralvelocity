@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import aiohttp
-from atlas.adapters.maia import MaiaDAO
+from atlas.models import VideoStats
+from atlas.repositories import VideoRepository
 from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
 
@@ -19,13 +20,13 @@ logger = logging.getLogger(__name__)
 @task(name="fetch_targets")
 async def fetch_targets_task(batch_size: int) -> List[Dict[str, Any]]:
     """Fetch videos that need statistics updates."""
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
     run_logger = get_run_logger()
 
     try:
-        targets = await dao.fetch_tracker_targets(batch_size)
+        targets = await video_repo.fetch_tracker_targets(batch_size)
         run_logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
-        return targets
+        return [t.model_dump() for t in targets]
     except Exception as e:
         run_logger.error(f"Failed to fetch tracker targets: {e}")
         return []
@@ -47,7 +48,7 @@ async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyEx
         return 0
 
     run_logger = get_run_logger()
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
 
     video_ids = [v["id"] for v in videos]
     id_str = ",".join(video_ids)
@@ -98,19 +99,19 @@ async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyEx
         for item in items:
             stats = item.get("statistics", {})
             stats_list.append(
-                {
-                    "video_id": item["id"],
-                    "views": (int(stats.get("viewCount", 0)) if stats.get("viewCount") else None),
-                    "likes": (int(stats.get("likeCount", 0)) if stats.get("likeCount") else None),
-                    "comment_count": (
+                VideoStats(
+                    video_id=item["id"],
+                    views=(int(stats.get("viewCount", 0)) if stats.get("viewCount") else None),
+                    likes=(int(stats.get("likeCount", 0)) if stats.get("likeCount") else None),
+                    comment_count=(
                         int(stats.get("commentCount", 0)) if stats.get("commentCount") else None
                     ),
-                    "timestamp": datetime.now(timezone.utc),
-                }
+                    timestamp=datetime.now(timezone.utc),
+                )
             )
 
-        await dao.log_video_stats_batch(stats_list)
-        await dao.update_video_stats_batch(items)
+        await video_repo.log_stats_batch(stats_list)
+        await video_repo.update_stats_batch(items)
 
         run_logger.info(f"✓ Logged {len(stats_list)} stats to hot tier")
         return len(items)

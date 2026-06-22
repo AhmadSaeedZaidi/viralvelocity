@@ -1,0 +1,136 @@
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from atlas.adapters import DatabaseAdapter
+from atlas.models.channel import Channel, ChannelStats
+
+logger = logging.getLogger("atlas.repositories.channel")
+
+
+class ChannelRepository(DatabaseAdapter):
+    async def save(self, channel: Channel) -> None:
+        query = """
+            INSERT INTO channels (id, title, country, custom_url, created_at, is_verified, last_scraped_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                country = COALESCE(EXCLUDED.country, channels.country),
+                custom_url = COALESCE(EXCLUDED.custom_url, channels.custom_url),
+                created_at = COALESCE(channels.created_at, EXCLUDED.created_at),
+                is_verified = EXCLUDED.is_verified,
+                last_scraped_at = EXCLUDED.last_scraped_at
+        """
+        await self._execute(
+            query,
+            (
+                channel.id,
+                channel.title,
+                channel.country,
+                channel.custom_url,
+                channel.created_at,
+                channel.is_verified,
+                channel.last_scraped_at or datetime.now(timezone.utc),
+            ),
+        )
+
+    async def get_by_id(self, channel_id: str) -> Optional[Channel]:
+        row = await self._fetch_one("SELECT * FROM channels WHERE id = %s", (channel_id,))
+        return Channel.model_validate(row) if row else None
+
+    async def get_latest_stats(self, channel_id: str) -> Optional[ChannelStats]:
+        row = await self._fetch_one(
+            """
+            SELECT channel_id, subscriber_count, view_count, video_count, timestamp
+            FROM channel_stats_log
+            WHERE channel_id = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (channel_id,),
+        )
+        return ChannelStats.model_validate(row) if row else None
+
+    async def needs_refresh(self, channel_id: str, max_age_hours: int = 24) -> bool:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        row = await self._fetch_one(
+            """
+            SELECT 1 FROM channel_stats_log
+            WHERE channel_id = %s AND timestamp >= %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """,
+            (channel_id, cutoff),
+        )
+        return row is None
+
+    async def log_stats(self, stats: ChannelStats) -> None:
+        query = """
+            INSERT INTO channel_stats_log (channel_id, timestamp, view_count, subscriber_count, video_count)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (channel_id, timestamp) DO NOTHING
+        """
+        await self._execute(
+            query,
+            (
+                stats.channel_id,
+                stats.timestamp,
+                stats.view_count,
+                stats.subscriber_count,
+                stats.video_count,
+            ),
+        )
+
+    async def ingest_channel_snapshot(self, channel_data: dict[str, Any]) -> None:
+        ch_id = channel_data.get("id")
+        if not ch_id:
+            logger.warning("ingest_channel_snapshot called without channel id")
+            return
+
+        snippet = channel_data.get("snippet", {}) or {}
+        stats = channel_data.get("statistics", {}) or {}
+
+        title = snippet.get("title") or ch_id
+        country = snippet.get("country")
+        custom_url = snippet.get("customUrl")
+        created_at = snippet.get("publishedAt")
+
+        now = datetime.now(timezone.utc)
+
+        upsert_query = """
+            INSERT INTO channels (id, title, country, custom_url, created_at, last_scraped_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                country = COALESCE(EXCLUDED.country, channels.country),
+                custom_url = COALESCE(EXCLUDED.custom_url, channels.custom_url),
+                created_at = COALESCE(channels.created_at, EXCLUDED.created_at),
+                last_scraped_at = EXCLUDED.last_scraped_at
+        """
+        await self._execute(upsert_query, (ch_id, title, country, custom_url, created_at, now))
+
+        def _to_int(v: Any) -> Optional[int]:
+            if v is None:
+                return None
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        sub_count = _to_int(stats.get("subscriberCount"))
+        view_count = _to_int(stats.get("viewCount"))
+        video_count = _to_int(stats.get("videoCount"))
+
+        if sub_count is None and view_count is None and video_count is None:
+            logger.info(f"Channel {ch_id} upserted; no statistics provided to log")
+            return
+
+        log_query = """
+            INSERT INTO channel_stats_log (channel_id, timestamp, view_count, subscriber_count, video_count)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (channel_id, timestamp) DO NOTHING
+        """
+        await self._execute(log_query, (ch_id, now, view_count, sub_count, video_count))
+        logger.info(
+            f"Channel snapshot {ch_id}: subs={sub_count}, views={view_count}, videos={video_count}"
+        )

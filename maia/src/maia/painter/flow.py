@@ -8,7 +8,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import VideoRepository
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
@@ -25,8 +25,9 @@ MAX_CONCURRENT_VIDEOS = 5
 @task(name="fetch_painter_targets")
 async def fetch_painter_targets_task(batch_size: int) -> List[Dict[str, Any]]:
     """Fetch videos that need visual processing."""
-    dao = MaiaDAO()
-    return await dao.fetch_painter_batch(batch_size)
+    video_repo = VideoRepository()
+    targets = await video_repo.fetch_painter_batch(batch_size)
+    return [t.model_dump(mode="json") for t in targets]
 
 
 def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
@@ -45,15 +46,6 @@ def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
         JPEG-encoded image bytes or None if extraction failed
     """
     try:
-        # FFmpeg command breakdown:
-        # -ss: Seek to timestamp (BEFORE -i for fast seek via HTTP Range)
-        # -i: Input URL
-        # -frames:v 1: Grab exactly 1 video frame
-        # -f image2: Force image output format
-        # -c:v mjpeg: Encode as JPEG
-        # -: Output to stdout (pipe)
-        # -y: Overwrite without confirmation
-        # -hide_banner -loglevel error: Suppress noise
         cmd = [
             "ffmpeg",
             "-ss",
@@ -73,9 +65,6 @@ def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
             "error",
         ]
 
-        # Run with timeout to prevent hanging on dead streams.
-        # 20s budget covers slow HTTP-Range seeks to mid/end of long videos
-        # served by YouTube CDN edges.
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out, err = process.communicate(timeout=20)
 
@@ -106,7 +95,6 @@ def _extract_frames_surgical(
     """
     frames_to_vault: List[Tuple[int, bytes]] = []
 
-    # Estimate FPS (default to 30 for frame index calculation)
     fps = 30.0
 
     for ts in target_timestamps:
@@ -115,7 +103,6 @@ def _extract_frames_surgical(
 
         frame_idx = int(ts * fps)
 
-        # Use FFmpeg to grab the frame
         image_bytes = _ffmpeg_extract_frame(stream_url, ts)
 
         if image_bytes:
@@ -129,12 +116,11 @@ def _extract_frames_surgical(
 @task(name="process_frames")
 async def process_frames_task(video: Dict[str, Any]) -> None:
     """Extract and store keyframes for a single video using FFmpeg surgical extraction."""
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
     run_logger = get_run_logger()
     vid_id = video["id"]
 
     try:
-        # 1. Fetch Metadata using StealthVideoStreamer (direct yt-dlp with cookies)
         streamer = StealthVideoStreamer()
         info = await asyncio.to_thread(streamer.extract_info, vid_id)
 
@@ -145,10 +131,9 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
 
         if not stream_url:
             run_logger.error(f"No stream URL found for {vid_id}")
-            await dao.mark_video_failed(vid_id)
+            await video_repo.mark_failed(vid_id)
             return
 
-        # 2. Identify Target Timestamps
         target_timestamps: Set[float] = set()
 
         if chapters:
@@ -162,7 +147,6 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
             for p in peaks:
                 target_timestamps.add(p)
 
-        # Fallback: Linear spacing if no rich metadata exists
         if not target_timestamps:
             run_logger.info(f"No chapters/heatmap for {vid_id}. Using fallback linear scaling.")
             num_frames = 5 if duration < 600 else 10
@@ -176,28 +160,26 @@ async def process_frames_task(video: Dict[str, Any]) -> None:
         sorted_timestamps = sorted(list(target_timestamps))
         run_logger.info(f"Targeting {len(sorted_timestamps)} frames for {vid_id}")
 
-        # 3. SURGICAL EXTRACTION: FFmpeg (Off-thread)
         frames_to_vault = await asyncio.to_thread(
             _extract_frames_surgical, stream_url, sorted_timestamps, duration, run_logger
         )
 
         if not frames_to_vault:
             run_logger.warning(f"No frames extracted for {vid_id}")
-            await dao.mark_video_failed(vid_id)
+            await video_repo.mark_failed(vid_id)
             return
 
-        # 4. Store to Vault
         v = get_vault()
         await vault_op_with_retry(lambda: v.store_visual_evidence(vid_id, frames_to_vault))
 
-        await dao.mark_video_visuals_safe(vid_id)
-        run_logger.info(f"✅ Painted {len(frames_to_vault)} keyframes for {vid_id}")
+        await video_repo.mark_visuals_safe(vid_id)
+        run_logger.info(f"Painted {len(frames_to_vault)} keyframes for {vid_id}")
 
     except RateLimitError:
         raise
     except Exception as e:
         run_logger.error(f"Painter failed on {vid_id}: {e}")
-        await dao.mark_video_failed(vid_id)
+        await video_repo.mark_failed(vid_id)
 
 
 @flow(name="run_painter_cycle")
@@ -221,17 +203,13 @@ async def painter_flow(batch_size: int) -> Dict[str, Any]:
 
     run_logger.info(f"Processing {len(targets)} videos in parallel...")
 
-    # CONCURRENCY CONTROL: Semaphore to limit simultaneous FFmpeg processes
     sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
 
     async def protected_process(vid: Dict[str, Any]) -> None:
-        """Process a single video with semaphore protection and jitter."""
         async with sem:
-            # Add random jitter to stagger requests and avoid thundering herd
             await asyncio.sleep(random.uniform(0.5, 2.0))
             await process_frames_task(vid)
 
-    # THE SWARM: Launch all tasks concurrently
     await asyncio.gather(*[protected_process(v) for v in targets], return_exceptions=True)
 
     run_logger.info(f"=== Painter Cycle Complete === Processed {len(targets)} videos")
@@ -248,7 +226,6 @@ class PainterAgent:
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        """Register command-line arguments for the Painter agent."""
         parser.add_argument(
             "--batch-size",
             type=int,
@@ -273,13 +250,11 @@ async def process_frames(video: Dict[str, Any]) -> None:
 
 @flow(name="run_painter_cycle")
 async def run_painter_cycle(batch_size: int = 5) -> None:
-    """Legacy wrapper for backward compatibility."""
     agent = PainterAgent()
     await agent.run(batch_size=batch_size)
 
 
 def main() -> None:
-    """Entry point for running the Painter as a standalone service."""
     try:
         agent = PainterAgent()
         asyncio.run(agent.run())

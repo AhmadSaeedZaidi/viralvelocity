@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Any, Dict
 
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import VideoRepository
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 @task(name="archive_cold_stats")
 async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, int]:
     """Archive stats older than retention_days from hot tier to cold tier (Vault)."""
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
     run_logger = get_run_logger()
 
     run_logger.info(f"Starting stats archival (retention: {retention_days} days)...")
@@ -24,7 +24,9 @@ async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, int]:
 
     while True:
         try:
-            archived = await dao.archive_cold_stats(retention_days=retention_days, batch_size=5000)
+            archived = await video_repo.archive_cold_stats(
+                retention_days=retention_days, batch_size=5000
+            )
             if archived == 0:
                 break
 
@@ -49,12 +51,12 @@ async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, int]:
 @task(name="run_janitor_cleanup")
 async def run_janitor_cleanup_task(dry_run: bool = False) -> Dict[str, Any]:
     """Run the janitor cleanup process."""
-    dao = MaiaDAO()
+    video_repo = VideoRepository()
     run_logger = get_run_logger()
 
     run_logger.info(f"Starting Janitor cleanup (dry_run={dry_run})...")
 
-    result = await dao.run_janitor(dry_run=dry_run)
+    result = await video_repo.run_janitor(dry_run=dry_run)
 
     if dry_run:
         run_logger.info(f"Janitor [DRY RUN]: Would delete {result.get('would_delete', 0)} videos")
@@ -128,12 +130,10 @@ class JanitorAgent:
     name = "janitor"
 
     def __init__(self) -> None:
-        """Initialize the Janitor agent."""
         self.logger = logging.getLogger(self.name)
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        """Register command-line arguments for the Janitor agent."""
         parser.add_argument(
             "--dry-run",
             action="store_true",
@@ -162,46 +162,27 @@ class JanitorAgent:
     async def run(
         self, dry_run: bool = False, archive_stats: bool = True, **kwargs: Any
     ) -> Dict[str, Any]:
-        """
-        Execute the Janitor cleanup cycle.
-
-        Args:
-            dry_run: Run in dry-run mode without making changes
-            archive_stats: Whether to archive stats to cold tier
-            **kwargs: Additional arguments (ignored)
-
-        Returns:
-            Dict with keys: stats_archived, videos_deleted, cleanup_stats
-        """
         result: Dict[str, Any] = await janitor_flow(dry_run=dry_run, archive_stats=archive_stats)
         return result
 
 
 @flow(name="janitor_cycle")
 async def janitor_cycle(dry_run: bool = False, archive_stats: bool = True) -> Dict[str, Any]:
-    """
-    Legacy function wrapper for backward compatibility.
-
-    Prefer using JanitorAgent directly for new code.
-    """
     agent = JanitorAgent()
     return await agent.run(dry_run=dry_run, archive_stats=archive_stats)
 
 
 @task(name="archive_cold_stats")
 async def archive_cold_stats(retention_days: int = 7) -> Any:
-    """Legacy function wrapper for backward compatibility."""
     return await archive_cold_stats_task(retention_days)
 
 
 @task(name="run_janitor_cleanup")
 async def run_janitor_cleanup(dry_run: bool = False) -> Any:
-    """Legacy function wrapper for backward compatibility."""
     return await run_janitor_cleanup_task(dry_run)
 
 
 def main() -> None:
-    """Entry point for running the Janitor as a standalone service."""
     try:
         agent = JanitorAgent()
         asyncio.run(agent.run(dry_run=True))

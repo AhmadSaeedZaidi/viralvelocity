@@ -52,11 +52,19 @@ VIDEO_ID = "B0J27sf9N1Y"
 
 
 @pytest_asyncio.fixture
-async def dao(fresh_db):
-    """Provide MaiaDAO instance against the (already-cleaned) test DB."""
-    from atlas.adapters.maia import MaiaDAO
+async def video_repo(fresh_db):
+    """Provide VideoRepository against the (already-cleaned) test DB."""
+    from atlas.repositories import VideoRepository
 
-    yield MaiaDAO()
+    yield VideoRepository()
+
+
+@pytest_asyncio.fixture
+async def channel_repo(fresh_db):
+    """Provide ChannelRepository against the (already-cleaned) test DB."""
+    from atlas.repositories import ChannelRepository
+
+    yield ChannelRepository()
 
 
 async def _resolve_via_api(
@@ -67,7 +75,9 @@ async def _resolve_via_api(
 
     videos = await lookup_videos([video_id])
     if not videos:
-        pytest.skip(f"YouTube videos.list returned 0 items for {video_id} (deleted/private?)")
+        pytest.skip(
+            f"YouTube videos.list returned 0 items for {video_id} (deleted/private?)"
+        )
     video = videos[0]
 
     channel_id = video.get("snippet", {}).get("channelId")
@@ -82,7 +92,7 @@ async def _resolve_via_api(
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.timeout(600)
-async def test_full_pipeline_real_blender(dao):
+async def test_full_pipeline_real_blender(video_repo, channel_repo):
     """Run the entire pipeline against real infrastructure on B0J27sf9N1Y.
 
     Each stage must succeed and produce verifiable artifacts in:
@@ -99,14 +109,16 @@ async def test_full_pipeline_real_blender(dao):
     assert channel_id, f"video {VIDEO_ID} has no channelId in API response"
     assert channel_item, f"channels.list returned 0 items for channel {channel_id}"
     channel_title = channel_item.get("snippet", {}).get("title")
-    print(f"[e2e]   resolved video='{title}' channel='{channel_title}' (id={channel_id})")
+    print(
+        f"[e2e]   resolved video='{title}' channel='{channel_title}' (id={channel_id})"
+    )
 
     print("[e2e] step 2/5 — seeding DB (channel snapshot + video metadata)…")
-    await dao.ingest_channel_snapshot(channel_item)
-    await dao.ingest_video_metadata(
+    await channel_repo.ingest_channel_snapshot(channel_item)
+    await video_repo.ingest_video_metadata(
         {"id": video_item.get("id"), "snippet": video_item.get("snippet", {})}
     )
-    await dao._execute(
+    await video_repo._execute(
         """
         UPDATE videos
         SET has_visuals = FALSE,
@@ -118,25 +130,35 @@ async def test_full_pipeline_real_blender(dao):
         (VIDEO_ID,),
     )
 
-    seeded_video = await dao.get_video_by_id(VIDEO_ID)
-    seeded_channel = await dao.get_channel_by_id(channel_id)
-    seeded_ch_stats = await dao.get_latest_channel_stats(channel_id)
+    seeded_video = await video_repo.get_by_id(VIDEO_ID)
+    seeded_channel = await channel_repo.get_by_id(channel_id)
+    seeded_ch_stats = await channel_repo.get_latest_stats(channel_id)
 
     assert seeded_video is not None, "video row missing after ingest"
-    assert seeded_channel is not None, "channel row missing after ingest_channel_snapshot"
     assert (
-        seeded_channel["title"] == channel_title
-    ), f"channel title mismatch: db={seeded_channel['title']!r} api={channel_title!r}"
+        seeded_channel is not None
+    ), "channel row missing after ingest_channel_snapshot"
+    assert (
+        seeded_channel.title == channel_title
+    ), f"channel title mismatch: db={seeded_channel.title!r} api={channel_title!r}"
     assert (
         seeded_ch_stats is not None
     ), "channel_stats_log row missing — ingest_channel_snapshot didn't log stats"
-    subs = seeded_ch_stats.get("subscriber_count")
-    views = seeded_ch_stats.get("view_count")
-    vcount = seeded_ch_stats.get("video_count")
-    assert subs is not None and subs > 0, f"channel subscriber_count not logged correctly: {subs}"
-    assert views is not None and views > 0, f"channel view_count not logged correctly: {views}"
-    assert vcount is not None and vcount > 0, f"channel video_count not logged correctly: {vcount}"
-    print(f"[e2e]   channel_stats_log row OK — subs={subs} views={views} videos={vcount}")
+    subs = seeded_ch_stats.subscriber_count
+    views = seeded_ch_stats.view_count
+    vcount = seeded_ch_stats.video_count
+    assert (
+        subs is not None and subs > 0
+    ), f"channel subscriber_count not logged correctly: {subs}"
+    assert (
+        views is not None and views > 0
+    ), f"channel view_count not logged correctly: {views}"
+    assert (
+        vcount is not None and vcount > 0
+    ), f"channel video_count not logged correctly: {vcount}"
+    print(
+        f"[e2e]   channel_stats_log row OK — subs={subs} views={views} videos={vcount}"
+    )
 
     print("[e2e] step 3/5 — running Painter cycle (yt-dlp + ffmpeg)…")
     from maia.painter.flow import run_painter_cycle
@@ -165,7 +187,7 @@ async def test_full_pipeline_real_blender(dao):
     # Painter / Scribe both just bumped ``last_updated_at`` to NOW() — that makes
     # this row "too fresh" for ``fetch_tracker_targets`` (which filters on tier
     # staleness). Reset it so the Tracker tier-1/2/3 query picks the row up.
-    await dao._execute(
+    await video_repo._execute(
         "UPDATE videos SET last_updated_at = NULL WHERE id = %s",
         (VIDEO_ID,),
     )
@@ -178,20 +200,20 @@ async def test_full_pipeline_real_blender(dao):
     await tracker_flow(batch_size=50, executor=executor)
 
     print("[e2e] verifying database state…")
-    final_video = await dao.get_video_by_id(VIDEO_ID)
+    final_video = await video_repo.get_by_id(VIDEO_ID)
     assert final_video is not None
-    assert final_video["status"] != "FAILED", f"video ended up FAILED: {final_video}"
-    assert final_video["has_visuals"] is True, "Painter did not mark has_visuals=TRUE"
-    assert final_video["has_transcript"] is True, "Scribe did not mark has_transcript=TRUE"
+    assert final_video.status != "FAILED", f"video ended up FAILED: {final_video}"
+    assert final_video.has_visuals is True, "Painter did not mark has_visuals=TRUE"
+    assert final_video.has_transcript is True, "Scribe did not mark has_transcript=TRUE"
 
-    vstats = await dao.get_latest_video_stats(VIDEO_ID)
+    vstats = await video_repo.get_latest_stats(VIDEO_ID)
     assert vstats is not None, "Tracker did not insert any video_stats_log row"
     assert (
-        vstats.get("views") is not None and vstats.get("views") > 0
+        vstats.views is not None and vstats.views > 0
     ), f"video_stats_log views not logged correctly: {vstats}"
     print(
-        f"[e2e]   video_stats_log row OK — views={vstats.get('views')} "
-        f"likes={vstats.get('likes')} comments={vstats.get('comment_count')}"
+        f"[e2e]   video_stats_log row OK — views={vstats.views} "
+        f"likes={vstats.likes} comments={vstats.comment_count}"
     )
 
     print("[e2e] verifying vault artifacts…")
@@ -202,7 +224,9 @@ async def test_full_pipeline_real_blender(dao):
     if settings.VAULT_PROVIDER == "huggingface":
         hf_token = os.getenv("HF_TOKEN")
         hf_dataset = os.getenv("HF_DATASET_ID")
-        assert hf_token and hf_dataset, "HF_TOKEN/HF_DATASET_ID must be set to verify vault writes"
+        assert (
+            hf_token and hf_dataset
+        ), "HF_TOKEN/HF_DATASET_ID must be set to verify vault writes"
 
         api = HfApi(token=hf_token)
         files = api.list_repo_files(repo_id=hf_dataset, repo_type="dataset")
@@ -210,10 +234,12 @@ async def test_full_pipeline_real_blender(dao):
         transcripts = [f for f in files if f == f"transcripts/{VIDEO_ID}.json"]
 
         assert len(frames) > 0, (
-            f"No frames in vault {hf_dataset!r} for {VIDEO_ID}. " f"Painter ran but did not upload."
+            f"No frames in vault {hf_dataset!r} for {VIDEO_ID}. "
+            f"Painter ran but did not upload."
         )
         assert len(transcripts) == 1, (
-            f"Transcript not in vault {hf_dataset!r} for {VIDEO_ID}. " f"Got: {transcripts}"
+            f"Transcript not in vault {hf_dataset!r} for {VIDEO_ID}. "
+            f"Got: {transcripts}"
         )
 
         from alkyone.fixtures import track_hf_upload
@@ -228,12 +254,14 @@ async def test_full_pipeline_real_blender(dao):
         assert len(v.list_files(f"frames/{VIDEO_ID}/")) > 0
         assert len(v.list_files(f"transcripts/{VIDEO_ID}.json")) == 1
 
-    print("[e2e] ALL CHECKS PASSED — full pipeline produced real artifacts on real infra.")
+    print(
+        "[e2e] ALL CHECKS PASSED — full pipeline produced real artifacts on real infra."
+    )
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_channel_auto_discovery_from_search_item(dao):
+async def test_channel_auto_discovery_from_search_item(video_repo, channel_repo):
     """When a video's channel is not yet indexed, ``enrich_channels_task`` populates it.
 
     This covers the user's requirement:
@@ -249,8 +277,8 @@ async def test_channel_auto_discovery_from_search_item(dao):
 
     blender_guru_id = "UCOKHwx1VCdgnxwbjyb9Iu1g"
 
-    pre_channel = await dao.get_channel_by_id(blender_guru_id)
-    pre_stats = await dao.get_latest_channel_stats(blender_guru_id)
+    pre_channel = await channel_repo.get_by_id(blender_guru_id)
+    pre_stats = await channel_repo.get_latest_stats(blender_guru_id)
     assert (
         pre_channel is None and pre_stats is None
     ), "fresh_db should have wiped channel data — got pre-existing rows"
@@ -261,22 +289,23 @@ async def test_channel_auto_discovery_from_search_item(dao):
     written = await enrich_channels_task([blender_guru_id], executor)
     assert written == 1, f"Expected 1 channel snapshot to be written; got {written}"
 
-    post_channel = await dao.get_channel_by_id(blender_guru_id)
+    post_channel = await channel_repo.get_by_id(blender_guru_id)
     assert post_channel is not None, "channels row not created"
-    assert post_channel["title"], "channels.title is empty"
+    assert post_channel.title, "channels.title is empty"
     assert (
-        post_channel["title"] != blender_guru_id
+        post_channel.title != blender_guru_id
     ), "channels.title was not enriched with the real channel name"
 
-    post_stats = await dao.get_latest_channel_stats(blender_guru_id)
+    post_stats = await channel_repo.get_latest_stats(blender_guru_id)
     assert post_stats is not None, "channel_stats_log row not created"
     assert (
-        post_stats.get("subscriber_count") or 0
+        post_stats.subscriber_count or 0
     ) > 0, "subscriber_count must be >0 from real API"
-    assert (post_stats.get("view_count") or 0) > 0
-    assert (post_stats.get("video_count") or 0) > 0
+    assert (post_stats.view_count or 0) > 0
+    assert (post_stats.video_count or 0) > 0
 
     again = await enrich_channels_task([blender_guru_id], executor)
     assert again == 0, (
-        "enrich_channels_task should be a no-op when stats are <24h old; " f"got {again} re-fetches"
+        "enrich_channels_task should be a no-op when stats are <24h old; "
+        f"got {again} re-fetches"
     )
