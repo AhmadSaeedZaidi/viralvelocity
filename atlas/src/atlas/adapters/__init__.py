@@ -2,9 +2,14 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, Tuple
 
-from atlas.db import db
+from psycopg import AsyncConnection
 
 logger = logging.getLogger("atlas.adapters")
+
+
+class ConnectionProvider(Protocol):
+    @asynccontextmanager
+    async def get_connection(self) -> AsyncIterator[AsyncConnection]: ...
 
 
 class DatabaseAdapterProtocol(Protocol):
@@ -18,14 +23,21 @@ class DatabaseAdapterProtocol(Protocol):
 
 
 class DatabaseAdapter:
+    def __init__(self, db_pool: Optional[ConnectionProvider] = None) -> None:
+        if db_pool is None:
+            from atlas.db import db
+
+            db_pool = db
+        self._db = db_pool
+
     @asynccontextmanager
-    async def _connection(self) -> AsyncIterator[Any]:
-        async with db.get_connection() as conn:
+    async def _connection(self) -> AsyncIterator[AsyncConnection]:
+        async with self._db.get_connection() as conn:
             yield conn
 
     @asynccontextmanager
     async def _cursor(self) -> AsyncIterator[Any]:
-        async with db.get_connection() as conn:
+        async with self._db.get_connection() as conn:
             async with conn.cursor() as cur:
                 yield cur
 

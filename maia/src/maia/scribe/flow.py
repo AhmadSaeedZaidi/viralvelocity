@@ -1,10 +1,16 @@
-"""Maia Scribe: Transcript extraction agent."""
+"""Maia Scribe: Transcript extraction agent.
+
+Consumer in the Producer-Consumer pipeline. Pulls videos needing
+transcripts from the video table, fetches them via youtube-transcript-api,
+and persists results to Atlas Vault.
+"""
 
 import argparse
 import asyncio
 import logging
 from typing import Any, Dict, List
 
+from atlas.models import Video
 from atlas.repositories import VideoRepository
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
@@ -41,21 +47,21 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
 
 
 @task(name="fetch_scribe_targets")
-async def fetch_scribe_targets_task(batch_size: int) -> List[Dict[str, Any]]:
+async def fetch_scribe_targets_task(batch_size: int) -> List[Video]:
     """Fetch videos that need transcripts."""
     video_repo = VideoRepository()
     targets = await video_repo.fetch_scribe_batch(batch_size)
     if targets:
         get_run_logger().info(f"Fetched {len(targets)} videos needing transcripts.")
-    return [t.model_dump(mode="json") for t in targets]
+    return targets
 
 
 @task(name="process_transcript")
-async def process_transcript_task(video: Dict[str, Any]) -> None:
+async def process_transcript_task(video: Video) -> None:
     """Process a single video's transcript."""
     video_repo = VideoRepository()
     run_logger = get_run_logger()
-    vid_id = video["id"]
+    vid_id = video.id
     loader = TranscriptLoader()
 
     try:
@@ -101,7 +107,7 @@ async def scribe_flow(batch_size: int) -> Dict[str, Any]:
 
     sem = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTS)
 
-    async def _bounded(video: Dict[str, Any]) -> None:
+    async def _bounded(video: Video) -> None:
         async with sem:
             await process_transcript_task(video)
 
@@ -149,6 +155,14 @@ class ScribeAgent:
         return result
 
 
+@task(name="process_transcript")
+async def process_transcript(video: Dict[str, Any]) -> None:
+    """Legacy Task wrapper — converts dict to Video and delegates."""
+    from atlas.models import Video as VideoModel
+
+    await process_transcript_task(VideoModel(**video))
+
+
 @flow(name="run_scribe_cycle")
 async def run_scribe_cycle(batch_size: int = 10) -> None:
     """
@@ -158,18 +172,6 @@ async def run_scribe_cycle(batch_size: int = 10) -> None:
     """
     agent = ScribeAgent()
     await agent.run(batch_size=batch_size)
-
-
-@task(name="fetch_scribe_targets")
-async def fetch_scribe_targets(batch_size: int = 10) -> Any:
-    """Legacy function wrapper for backward compatibility."""
-    return await fetch_scribe_targets_task(batch_size)
-
-
-@task(name="process_transcript")
-async def process_transcript(video: Dict[str, Any]) -> None:
-    """Legacy function wrapper for backward compatibility."""
-    await process_transcript_task(video)
 
 
 def main() -> None:

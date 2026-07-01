@@ -47,7 +47,7 @@ async def test_fetch_painter_targets_with_videos():
         result = await fetch_painter_targets_task.fn(batch_size=5)
 
         assert len(result) == 2
-        assert result[0]["id"] == "VIDEO_001"
+        assert result[0].id == "VIDEO_001"
         mock_repo.fetch_painter_batch.assert_called_once_with(5)
 
 
@@ -78,7 +78,9 @@ def test_video_streamer_extract_heatmap_peaks_empty():
 @pytest.mark.asyncio
 async def test_process_frames_successful_with_chapters():
     """Test process_frames successfully extracts frames using chapter strategy."""
-    video = {"id": "VIDEO_001", "title": "Test Video with Chapters"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video with Chapters")
     mock_video_info = {
         "url": "https://example.com/video.mp4",
         "duration": 200.0,
@@ -124,7 +126,9 @@ async def test_process_frames_successful_with_chapters():
 @pytest.mark.asyncio
 async def test_process_frames_successful_with_heatmap():
     """Test process_frames successfully extracts frames using heatmap strategy."""
-    video = {"id": "VIDEO_002", "title": "Test Video with Heatmap"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_002", title="Test Video with Heatmap")
     mock_video_info = {
         "url": "https://example.com/video.mp4",
         "duration": 200.0,
@@ -169,7 +173,9 @@ async def test_process_frames_successful_with_heatmap():
 @pytest.mark.asyncio
 async def test_process_frames_fallback_strategy():
     """Test process_frames uses fallback strategy when no chapters/heatmap."""
-    video = {"id": "VIDEO_003", "title": "Video without chapters or heatmap"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_003", title="Video without chapters or heatmap")
     mock_video_info = {
         "url": "https://example.com/video.mp4",
         "duration": 600.0,
@@ -212,7 +218,9 @@ async def test_process_frames_fallback_strategy():
 @pytest.mark.asyncio
 async def test_process_frames_handles_no_stream_url():
     """Test process_frames handles videos with no stream URL."""
-    video = {"id": "VIDEO_NO_STREAM", "title": "Video without stream"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_NO_STREAM", title="Video without stream")
     mock_video_info = {"url": None, "chapters": [], "heatmap": []}
 
     with (
@@ -232,7 +240,9 @@ async def test_process_frames_handles_no_stream_url():
 @pytest.mark.asyncio
 async def test_process_frames_handles_video_capture_failure():
     """Test process_frames handles FFmpeg extraction failures."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
     mock_video_info = {
         "url": "https://example.com/video.mp4",
         "duration": 100.0,
@@ -263,7 +273,9 @@ async def test_process_frames_handles_video_capture_failure():
 @pytest.mark.asyncio
 async def test_process_frames_handles_vault_failure():
     """Test process_frames handles vault storage failures after retries."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
     mock_video_info = {
         "url": "https://example.com/video.mp4",
         "duration": 100.0,
@@ -302,7 +314,9 @@ async def test_process_frames_handles_vault_failure():
 @pytest.mark.asyncio
 async def test_process_frames_propagates_resiliency_strategy():
     """Test process_frames propagates RateLimitError for Resiliency Strategy."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
 
     with (
         patch("maia.painter.flow.VideoRepository") as MockRepo,
@@ -333,9 +347,11 @@ async def test_run_painter_cycle_empty_queue():
 @pytest.mark.asyncio
 async def test_run_painter_cycle_processes_batch():
     """Test run_painter_cycle processes a batch of videos sequentially."""
+    from atlas.models import Video
+
     mock_videos = [
-        {"id": "VIDEO_001", "title": "Video 1"},
-        {"id": "VIDEO_002", "title": "Video 2"},
+        Video(id="VIDEO_001", title="Video 1"),
+        Video(id="VIDEO_002", title="Video 2"),
     ]
 
     with (

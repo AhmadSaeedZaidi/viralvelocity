@@ -1,4 +1,9 @@
-"""Maia Tracker: Video metrics monitoring agent."""
+"""Maia Tracker: Video metrics monitoring agent.
+
+Consumer in the Producer-Consumer pipeline. Pulls stale videos from
+the video table, fetches fresh statistics from the YouTube Data API,
+and persists them back to Atlas.
+"""
 
 import argparse
 import asyncio
@@ -6,13 +11,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-import aiohttp
 from atlas.models import VideoStats
 from atlas.repositories import VideoRepository
-from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
 
-from maia.utils import RateLimitError, execute_with_rate_limit
+from maia.strategies import YouTubeSearchStrategy
+from maia.utils import RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +37,15 @@ async def fetch_targets_task(batch_size: int) -> List[Dict[str, Any]]:
 
 
 @task(name="update_stats")
-async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyExecutor) -> int:
+async def update_stats_task(
+    videos: List[Dict[str, Any]], strategy: YouTubeSearchStrategy
+) -> int:
     """
     Fetch and update statistics for a batch of videos.
 
     Args:
         videos: List of video records from fetch_targets
-        executor: ResiliencyExecutor for API key rotation
+        strategy: YouTubeSearchStrategy for API access
 
     Returns:
         Number of videos successfully updated
@@ -55,30 +61,13 @@ async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyEx
 
     run_logger.info(f"Fetching stats for {len(video_ids)} videos...")
 
-    base_url = "https://www.googleapis.com/youtube/v3/videos"
-    params = {
+    params: Dict[str, Any] = {
         "part": "statistics",
         "id": id_str,
     }
 
-    async def make_request(api_key: str) -> Dict[str, Any]:
-        params["key"] = api_key
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(base_url, params=params) as resp:
-                if resp.status == 200:
-                    result: Dict[str, Any] = await resp.json()
-                    return result
-                elif resp.status in (403, 429):
-                    error_text = await resp.text()
-                    raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
-                else:
-                    error_text = await resp.text()
-                    run_logger.error(f"Tracker HTTP {resp.status}: {error_text[:200]}")
-                    raise Exception(f"HTTP {resp.status}")
-
     try:
-        response_json = await execute_with_rate_limit(executor, make_request)
+        response_json = await strategy.fetch_videos(video_ids)
     except RateLimitError:
         raise
     except Exception as e:
@@ -121,13 +110,15 @@ async def update_stats_task(videos: List[Dict[str, Any]], executor: ResiliencyEx
 
 
 @flow(name="run_tracker_cycle")
-async def tracker_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str, Any]:
+async def tracker_flow(
+    batch_size: int, strategy: YouTubeSearchStrategy
+) -> Dict[str, Any]:
     """
     Execute a complete Tracker cycle: fetch stale videos, update stats.
 
     Args:
         batch_size: Number of videos to process (max 50 for YouTube API)
-        executor: ResiliencyExecutor for API key rotation
+        strategy: YouTubeSearchStrategy for API access
 
     Returns:
         Dictionary with cycle statistics
@@ -153,7 +144,7 @@ async def tracker_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[st
             run_logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
             return stats
 
-        updated_count = await update_stats_task(targets, executor)
+        updated_count = await update_stats_task(targets, strategy)
         stats["videos_updated"] = updated_count
         stats["updates_failed"] = len(targets) - updated_count
 
@@ -184,10 +175,9 @@ class TrackerAgent:
     name = "tracker"
 
     def __init__(self) -> None:
-        """Initialize the Tracker agent with its KeyRing and executor."""
+        """Initialize the Tracker agent with its YouTube search strategy."""
         self.logger = logging.getLogger(self.name)
-        self.keys = KeyRing("tracking")
-        self.executor = ResiliencyExecutor(self.keys, agent_name="tracker")
+        self.strategy = YouTubeSearchStrategy("tracking", agent_name="tracker")
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -210,8 +200,18 @@ class TrackerAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        result: Dict[str, Any] = await tracker_flow(batch_size=batch_size, executor=self.executor)
+        result: Dict[str, Any] = await tracker_flow(
+            batch_size=batch_size, strategy=self.strategy
+        )
         return result
+
+
+@task(name="update_stats")
+async def update_stats(videos: List[Dict[str, Any]]) -> int:
+    """Legacy Task wrapper — creates strategy and delegates."""
+    strategy = YouTubeSearchStrategy("tracking", agent_name="legacy_tracker")
+    result: int = await update_stats_task(videos, strategy)
+    return result
 
 
 @flow(name="run_tracker_cycle")
@@ -229,15 +229,6 @@ async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
 async def fetch_targets(batch_size: int = 50) -> Any:
     """Legacy function wrapper for backward compatibility."""
     return await fetch_targets_task(batch_size)
-
-
-@task(name="update_stats")
-async def update_stats(videos: List[Dict[str, Any]]) -> int:
-    """Legacy function wrapper for backward compatibility."""
-    keys = KeyRing("tracking")
-    executor = ResiliencyExecutor(keys, agent_name="tracker")
-    result: int = await update_stats_task(videos, executor)
-    return result
 
 
 def main() -> None:

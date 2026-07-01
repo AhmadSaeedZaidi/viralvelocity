@@ -45,14 +45,16 @@ async def test_fetch_scribe_targets_with_videos():
         result = await fetch_scribe_targets_task.fn(batch_size=10)
 
         assert len(result) == 2
-        assert result[0]["id"] == "VIDEO_001"
+        assert result[0].id == "VIDEO_001"
         mock_repo.fetch_scribe_batch.assert_called_once_with(10)
 
 
 @pytest.mark.asyncio
 async def test_process_transcript_successful():
     """Test process_transcript successfully fetches and stores transcript."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
     mock_transcript = [
         {"text": "Hello", "start": 0.0, "duration": 1.5},
         {"text": "World", "start": 1.5, "duration": 1.0},
@@ -83,9 +85,10 @@ async def test_process_transcript_successful():
 @pytest.mark.asyncio
 async def test_process_transcript_unavailable():
     """Test process_transcript handles unavailable transcripts gracefully."""
+    from atlas.models import Video
     from youtube_transcript_api._errors import TranscriptsDisabled
 
-    video = {"id": "VIDEO_NO_TRANSCRIPT", "title": "Video Without Transcript"}
+    video = Video(id="VIDEO_NO_TRANSCRIPT", title="Video Without Transcript")
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
@@ -113,7 +116,9 @@ async def test_process_transcript_unavailable():
 @pytest.mark.asyncio
 async def test_process_transcript_handles_vault_failure_with_retry(mock_sleep):
     """Test process_transcript retries on vault storage failures."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
     mock_transcript = [{"text": "Hello", "start": 0.0, "duration": 1.0}]
 
     with (
@@ -140,7 +145,9 @@ async def test_process_transcript_handles_vault_failure_with_retry(mock_sleep):
 @pytest.mark.asyncio
 async def test_process_transcript_handles_transcript_fetch_failure():
     """Test process_transcript handles TranscriptLoader failures."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
@@ -159,7 +166,9 @@ async def test_process_transcript_handles_transcript_fetch_failure():
 @pytest.mark.asyncio
 async def test_process_transcript_propagates_resiliency_strategy():
     """Test process_transcript propagates RateLimitError for Resiliency Strategy."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
@@ -191,10 +200,12 @@ async def test_run_scribe_cycle_empty_queue():
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_processes_batch():
     """Test run_scribe_cycle processes a batch of videos sequentially."""
+    from atlas.models import Video
+
     mock_videos = [
-        {"id": "VIDEO_001", "title": "Video 1"},
-        {"id": "VIDEO_002", "title": "Video 2"},
-        {"id": "VIDEO_003", "title": "Video 3"},
+        Video(id="VIDEO_001", title="Video 1"),
+        Video(id="VIDEO_002", title="Video 2"),
+        Video(id="VIDEO_003", title="Video 3"),
     ]
 
     with (
@@ -219,10 +230,12 @@ async def test_run_scribe_cycle_processes_batch():
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_continues_on_individual_failures():
     """Test run_scribe_cycle continues processing even if individual videos fail."""
+    from atlas.models import Video
+
     mock_videos = [
-        {"id": "VIDEO_001", "title": "Video 1"},
-        {"id": "VIDEO_002", "title": "Video 2 (will fail)"},
-        {"id": "VIDEO_003", "title": "Video 3"},
+        Video(id="VIDEO_001", title="Video 1"),
+        Video(id="VIDEO_002", title="Video 2 (will fail)"),
+        Video(id="VIDEO_003", title="Video 3"),
     ]
 
     call_count = {"count": 0}
@@ -250,7 +263,9 @@ async def test_run_scribe_cycle_continues_on_individual_failures():
 @pytest.mark.asyncio
 async def test_transcript_loader_retry_logic(mock_sleep):
     """Test that transcript fetching retries on network errors."""
-    video = {"id": "VIDEO_001", "title": "Test Video"}
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_001", title="Test Video")
     mock_transcript = [{"text": "Success", "start": 0.0, "duration": 1.0}]
 
     with (

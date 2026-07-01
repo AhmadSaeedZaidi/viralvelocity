@@ -1,4 +1,9 @@
-"""Maia Painter: Video keyframe extraction agent (Turbo Mode: FFmpeg + Concurrency)."""
+"""Maia Painter: Video keyframe extraction agent (Turbo Mode: FFmpeg + Concurrency).
+
+Consumer in the Producer-Consumer pipeline. Pulls videos needing
+visual processing from the video table, extracts keyframes via FFmpeg,
+and persists them to Atlas Vault.
+"""
 
 import argparse
 import asyncio
@@ -8,6 +13,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
+from atlas.models import Video
 from atlas.repositories import VideoRepository
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
@@ -23,11 +29,11 @@ MAX_CONCURRENT_VIDEOS = 5
 
 
 @task(name="fetch_painter_targets")
-async def fetch_painter_targets_task(batch_size: int) -> List[Dict[str, Any]]:
+async def fetch_painter_targets_task(batch_size: int) -> List[Video]:
     """Fetch videos that need visual processing."""
     video_repo = VideoRepository()
     targets = await video_repo.fetch_painter_batch(batch_size)
-    return [t.model_dump(mode="json") for t in targets]
+    return targets
 
 
 def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
@@ -114,11 +120,11 @@ def _extract_frames_surgical(
 
 
 @task(name="process_frames")
-async def process_frames_task(video: Dict[str, Any]) -> None:
+async def process_frames_task(video: Video) -> None:
     """Extract and store keyframes for a single video using FFmpeg surgical extraction."""
     video_repo = VideoRepository()
     run_logger = get_run_logger()
-    vid_id = video["id"]
+    vid_id = video.id
 
     try:
         streamer = StealthVideoStreamer()
@@ -205,10 +211,10 @@ async def painter_flow(batch_size: int) -> Dict[str, Any]:
 
     sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
 
-    async def protected_process(vid: Dict[str, Any]) -> None:
+    async def protected_process(video: Video) -> None:
         async with sem:
             await asyncio.sleep(random.uniform(0.5, 2.0))
-            await process_frames_task(vid)
+            await process_frames_task(video)
 
     await asyncio.gather(*[protected_process(v) for v in targets], return_exceptions=True)
 
@@ -241,11 +247,6 @@ class PainterAgent:
 @task(name="fetch_painter_targets")
 async def fetch_painter_targets(batch_size: int = 5) -> Any:
     return await fetch_painter_targets_task(batch_size)
-
-
-@task(name="process_frames")
-async def process_frames(video: Dict[str, Any]) -> None:
-    await process_frames_task(video)
 
 
 @flow(name="run_painter_cycle")

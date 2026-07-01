@@ -11,223 +11,119 @@ from maia.archeologist.flow import ArcheologistAgent, archeology_flow, hunt_hist
 from maia.utils import RateLimitError
 
 
+@pytest.fixture
+def mock_strategy() -> MagicMock:
+    strategy = MagicMock()
+    strategy.search = AsyncMock()
+    return strategy
+
+
 @pytest.mark.asyncio
-async def test_hunt_history_successful_retrieval():
+async def test_hunt_history_successful_retrieval(mock_strategy: MagicMock):
     """Test hunt_history successfully retrieves and ingests historical videos."""
+    mock_response_data: Dict[str, Any] = {
+        "kind": "youtube#searchListResponse",
+        "items": [
+            {
+                "id": {"videoId": "OLD_VIDEO_001"},
+                "snippet": {
+                    "publishedAt": "2010-05-15T00:00:00Z",
+                    "channelId": "CHANNEL_HISTORY_001",
+                    "title": "Historical Video",
+                    "channelTitle": "Historical Channel",
+                    "tags": ["history", "gaming"],
+                    "categoryId": "20",
+                    "defaultLanguage": "en",
+                },
+            },
+            {
+                "id": {"videoId": "OLD_VIDEO_002"},
+                "snippet": {
+                    "publishedAt": "2010-05-20T00:00:00Z",
+                    "channelId": "CHANNEL_HISTORY_002",
+                    "title": "Another Old Video",
+                    "channelTitle": "Vintage Channel",
+                    "tags": ["retro"],
+                    "categoryId": "20",
+                    "defaultLanguage": "en",
+                },
+            },
+        ],
+    }
+    mock_strategy.search.return_value = mock_response_data
+
     with (
         patch("maia.archeologist.flow.VideoRepository") as MockRepo,
-        patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
         patch("maia.archeologist.flow.enrich_channels_task", new_callable=AsyncMock) as mock_enrich,
     ):
         mock_repo = MockRepo.return_value
         mock_repo.ingest_video_metadata = AsyncMock()
         mock_enrich.return_value = 0
 
-        mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])
-        mock_keys.size = 3
-
-        mock_response_data = {
-            "kind": "youtube#searchListResponse",
-            "items": [
-                {
-                    "id": {"videoId": "OLD_VIDEO_001"},
-                    "snippet": {
-                        "publishedAt": "2010-05-15T00:00:00Z",
-                        "channelId": "CHANNEL_HISTORY_001",
-                        "title": "Historical Video",
-                        "channelTitle": "Historical Channel",
-                        "tags": ["history", "gaming"],
-                        "categoryId": "20",
-                        "defaultLanguage": "en",
-                    },
-                },
-                {
-                    "id": {"videoId": "OLD_VIDEO_002"},
-                    "snippet": {
-                        "publishedAt": "2010-05-20T00:00:00Z",
-                        "channelId": "CHANNEL_HISTORY_002",
-                        "title": "Another Old Video",
-                        "channelTitle": "Vintage Channel",
-                        "tags": ["retro"],
-                        "categoryId": "20",
-                        "defaultLanguage": "en",
-                    },
-                },
-            ],
-        }
-
-        mock_session_instance = MagicMock()
-        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
-        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=mock_response_data)
-
-        mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_instance.get.return_value = mock_get_context
-        MockSession.return_value = mock_session_instance
-
-        await hunt_history_task.fn(year=2010, month=5, keys=mock_keys)
+        await hunt_history_task.fn(year=2010, month=5, strategy=mock_strategy)
 
         assert mock_repo.ingest_video_metadata.call_count == 10
+        mock_strategy.search.assert_called()
 
 
 @pytest.mark.asyncio
-async def test_hunt_history_handles_403_key_rotation():
-    """Test Archeologist rotates keys on 403 Forbidden errors."""
-    with (
-        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
-        patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-    ):
+async def test_hunt_history_handles_429_resiliency_strategy(mock_strategy: MagicMock):
+    """Test Archeologist raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
+    mock_strategy.search.side_effect = RateLimitError("429 Rate Limit")
+
+    with patch("maia.archeologist.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
         mock_repo.ingest_video_metadata = AsyncMock()
 
-        mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(side_effect=[f"key_{i}" for i in range(20)])
-        mock_keys.size = 3
-
-        mock_session_instance = MagicMock()
-        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
-        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-
-        resp_403 = AsyncMock()
-        resp_403.status = 403
-
-        resp_200 = AsyncMock()
-        resp_200.status = 200
-        resp_200.json = AsyncMock(return_value={"items": []})
-
-        cm_403 = AsyncMock()
-        cm_403.__aenter__.return_value = resp_403
-
-        cm_200 = AsyncMock()
-        cm_200.__aenter__.return_value = resp_200
-        side_effect = [cm_403, cm_403, cm_200] + [cm_200] * 10
-        mock_session_instance.get.side_effect = side_effect
-
-        MockSession.return_value = mock_session_instance
-
-        await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
-
-        assert mock_session_instance.get.call_count >= 3
-
-
-@pytest.mark.asyncio
-async def test_hunt_history_handles_429_resiliency_strategy():
-    """Test Archeologist raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
-    with (
-        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
-        patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-    ):
-        mock_repo = MockRepo.return_value
-
-        mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(return_value="fake_key")
-        mock_keys.size = 1
-
-        mock_session_instance = MagicMock()
-        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
-        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-
-        mock_response = AsyncMock()
-        mock_response.status = 429
-
-        mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_instance.get.return_value = mock_get_context
-        MockSession.return_value = mock_session_instance
-
         with pytest.raises(RateLimitError):
-            await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
+            await hunt_history_task.fn(year=2010, month=1, strategy=mock_strategy)
 
 
 @pytest.mark.asyncio
-async def test_hunt_history_handles_network_errors():
-    """Test Archeologist handles network errors gracefully."""
-    with (
-        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
-        patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-    ):
+async def test_hunt_history_handles_api_errors(mock_strategy: MagicMock):
+    """Test Archeologist handles API errors gracefully."""
+    mock_strategy.search.side_effect = Exception("API error")
+
+    with patch("maia.archeologist.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
+        mock_repo.ingest_video_metadata = AsyncMock()
 
-        mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(return_value="fake_key")
-        mock_keys.size = 1
+        await hunt_history_task.fn(year=2010, month=1, strategy=mock_strategy)
 
-        mock_session_instance = MagicMock()
-        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
-        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_instance.get = MagicMock(side_effect=ConnectionError("Network down"))
-        MockSession.return_value = mock_session_instance
-
-        await hunt_history_task.fn(year=2010, month=1, keys=mock_keys)
-
-        assert True
+        assert mock_repo.ingest_video_metadata.call_count == 0
 
 
 @pytest.mark.asyncio
-async def test_run_archeology_campaign_iterates_through_years():
+async def test_hunt_history_handles_empty_response(mock_strategy: MagicMock):
+    """Test hunt_history handles empty API responses gracefully."""
+    mock_strategy.search.return_value = {"kind": "youtube#searchListResponse", "items": []}
+
+    with patch("maia.archeologist.flow.VideoRepository") as MockRepo:
+        mock_repo = MockRepo.return_value
+        mock_repo.ingest_video_metadata = AsyncMock()
+
+        await hunt_history_task.fn(year=2025, month=1, strategy=mock_strategy)
+
+        assert mock_repo.ingest_video_metadata.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_archeology_campaign_iterates_through_years(mock_strategy: MagicMock):
     """Test archeology campaign iterates through multiple years and months."""
     with patch(
         "maia.archeologist.flow.hunt_history_task", new_callable=AsyncMock
     ) as mock_hunt_task:
-        mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(return_value="fake_key")
-        mock_keys.size = 1
-
-        result = await archeology_flow.fn(start_year=2010, end_year=2011, keys=mock_keys)
+        result = await archeology_flow.fn(
+            start_year=2010, end_year=2011, strategy=mock_strategy
+        )
 
         assert mock_hunt_task.call_count == 24
 
         first_call = mock_hunt_task.call_args_list[0]
-        assert first_call[0] == (2010, 1, mock_keys)
+        assert first_call[0] == (2010, 1, mock_strategy)
 
         last_call = mock_hunt_task.call_args_list[-1]
-        assert last_call[0] == (2011, 12, mock_keys)
+        assert last_call[0] == (2011, 12, mock_strategy)
 
         assert result["years_processed"] == 2
         assert result["months_processed"] == 24
-
-
-@pytest.mark.asyncio
-async def test_hunt_history_handles_empty_response():
-    """Test hunt_history handles empty API responses gracefully."""
-    with (
-        patch("maia.archeologist.flow.VideoRepository") as MockRepo,
-        patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
-    ):
-        mock_repo = MockRepo.return_value
-        mock_repo.ingest_video_metadata = AsyncMock()
-
-        mock_keys = MagicMock()
-        mock_keys.next_key = MagicMock(return_value="fake_key")
-        mock_keys.size = 1
-
-        mock_response_data = {"kind": "youtube#searchListResponse", "items": []}
-
-        mock_session_instance = MagicMock()
-        mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
-        mock_session_instance.__aexit__ = AsyncMock(return_value=None)
-
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=mock_response_data)
-
-        mock_get_context = MagicMock()
-        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_get_context.__aexit__ = AsyncMock(return_value=None)
-
-        mock_session_instance.get.return_value = mock_get_context
-        MockSession.return_value = mock_session_instance
-
-        await hunt_history_task.fn(year=2025, month=1, keys=mock_keys)
-
-        assert mock_repo.ingest_video_metadata.call_count == 0

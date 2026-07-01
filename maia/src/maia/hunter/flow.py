@@ -1,4 +1,9 @@
-"""Maia Hunter: YouTube video discovery agent."""
+"""Maia Hunter: YouTube video discovery agent.
+
+Producer in the Producer-Consumer pipeline. Sole responsibility is to
+identify target video IDs from the search queue and push them to the
+video table (the work queue for Scribe, Painter, Tracker).
+"""
 
 import argparse
 import asyncio
@@ -6,14 +11,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-import aiohttp
 from atlas.repositories import ChannelRepository, SearchQueueRepository, VideoRepository
-from atlas.utils import KeyRing, ResiliencyExecutor
+from atlas.utils import KeyRing
 from atlas.vault import get_vault
 from atlas.youtube import lookup_channels
 from prefect import flow, get_run_logger, task
 
-from maia.utils import RateLimitError, execute_with_rate_limit
+from maia.strategies import YouTubeSearchStrategy
+from maia.utils import RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +35,19 @@ async def fetch_batch_task(batch_size: int) -> List[Dict[str, Any]]:
         return []
 
     run_logger.info(f"Fetched {len(batch)} targets from queue.")
-    return batch
+    return [{
+        "id": item.id,
+        "query_term": item.query_term,
+        "next_page_token": item.next_page_token,
+        "last_searched_at": item.last_searched_at,
+        "priority": item.priority,
+    } for item in batch]
 
 
 @task(name="search_youtube")
 async def search_youtube_task(
-    topic: Dict[str, Any], executor: ResiliencyExecutor
-) -> Dict[str, Any] | None:
+    topic: Dict[str, Any], strategy: YouTubeSearchStrategy
+) -> Optional[Dict[str, Any]]:
     """Search YouTube API for videos matching the topic query."""
     run_logger = get_run_logger()
     query = topic["query_term"]
@@ -53,8 +64,7 @@ async def search_youtube_task(
     yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
     published_after = yesterday.isoformat()
 
-    base_url = "https://www.googleapis.com/youtube/v3/search"
-    params = {
+    params: Dict[str, Any] = {
         "part": "snippet",
         "q": query,
         "type": "video",
@@ -65,23 +75,8 @@ async def search_youtube_task(
     if page_token:
         params["pageToken"] = page_token
 
-    async def make_request(api_key: str) -> Dict[str, Any]:
-        params["key"] = api_key
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(base_url, params=params) as resp:
-                if resp.status == 200:
-                    result: Dict[str, Any] = await resp.json()
-                    return result
-                elif resp.status in (403, 429):
-                    error_text = await resp.text()
-                    raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
-                else:
-                    run_logger.error(f"HTTP {resp.status} for {query}")
-                    raise Exception(f"HTTP {resp.status}")
-
     try:
-        return await execute_with_rate_limit(executor, make_request)
+        return await strategy.search(params)
     except RateLimitError:
         raise
     except Exception as e:
@@ -90,7 +85,7 @@ async def search_youtube_task(
 
 
 @task(name="enrich_channels")
-async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecutor) -> int:
+async def enrich_channels_task(channel_ids: List[str], strategy: YouTubeSearchStrategy) -> int:
     """Resolve unindexed/stale channels via the YouTube Data API + log a stats snapshot.
 
     For every channel id passed in:
@@ -124,7 +119,7 @@ async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecu
     run_logger.info(f"Enriching {len(needs)} channel(s) via YouTube channels.list API")
 
     try:
-        items = await lookup_channels(needs, executor=executor)
+        items = await lookup_channels(needs, executor=strategy.executor)
     except RateLimitError:
         raise
     except Exception as e:
@@ -147,7 +142,7 @@ async def enrich_channels_task(channel_ids: List[str], executor: ResiliencyExecu
 async def ingest_results_task(
     topic: Dict[str, Any],
     response: Dict[str, Any],
-    executor: Optional[ResiliencyExecutor] = None,
+    strategy: Optional[YouTubeSearchStrategy] = None,
 ) -> None:
     """
     Ingest video metadata and implement the Snowball Effect.
@@ -200,14 +195,14 @@ async def ingest_results_task(
     await asyncio.gather(*vault_tasks, *db_tasks)
 
     # 3. Enrich newly-discovered channels (snippet -> channels.list -> stats log)
-    if executor is not None:
+    if strategy is not None:
         channel_ids = [
             item.get("snippet", {}).get("channelId")
             for item in items
             if item.get("snippet", {}).get("channelId")
         ]
         try:
-            await enrich_channels_task(channel_ids, executor)
+            await enrich_channels_task(channel_ids, strategy)
         except RateLimitError:
             raise
         except Exception as e:
@@ -249,13 +244,13 @@ async def ingest_results_task(
 
 
 @flow(name="run_hunter_cycle")
-async def hunter_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str, Any]:
+async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> Dict[str, Any]:
     """
     Execute a complete Hunter cycle: fetch queries, search YouTube, ingest results.
 
     Args:
         batch_size: Number of queries to process in this cycle
-        executor: ResiliencyExecutor for API key rotation
+        strategy: YouTubeSearchStrategy for API access
 
     Returns:
         Dictionary with cycle statistics
@@ -281,9 +276,9 @@ async def hunter_flow(batch_size: int, executor: ResiliencyExecutor) -> Dict[str
 
         for topic in targets:
             try:
-                result = await search_youtube_task(topic, executor)
+                result = await search_youtube_task(topic, strategy)
                 if result:
-                    await ingest_results_task(topic, result, executor)
+                    await ingest_results_task(topic, result, strategy)
                     items = result.get("items", [])
                     stats["videos_discovered"] += len(items)
                     stats["searches_successful"] += 1
@@ -323,10 +318,9 @@ class HunterAgent:
     name = "hunter"
 
     def __init__(self) -> None:
-        """Initialize the Hunter agent with its KeyRing and executor."""
+        """Initialize the Hunter agent with its YouTube search strategy."""
         self.logger = logging.getLogger(self.name)
-        self.keys = KeyRing("hunting")
-        self.executor = ResiliencyExecutor(self.keys, agent_name="hunter")
+        self.strategy = YouTubeSearchStrategy("hunting", agent_name="hunter")
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -349,17 +343,21 @@ class HunterAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        result: Dict[str, Any] = await hunter_flow(batch_size=batch_size, executor=self.executor)
+        result: Dict[str, Any] = await hunter_flow(
+            batch_size=batch_size, strategy=self.strategy
+        )
         return result
+
+
+@task(name="ingest_results")
+async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> None:
+    """Legacy Task wrapper — delegates to :func:`ingest_results_task`."""
+    await ingest_results_task(topic, response)
 
 
 @flow(name="run_hunter_cycle")
 async def run_hunter_cycle(batch_size: int = 10) -> Dict[str, Any]:
-    """
-    Legacy function wrapper for backward compatibility.
-
-    Prefer using HunterAgent directly for new code.
-    """
+    """Legacy function wrapper for backward compatibility."""
     agent = HunterAgent()
     return await agent.run(batch_size=batch_size)
 
@@ -368,29 +366,6 @@ async def run_hunter_cycle(batch_size: int = 10) -> Dict[str, Any]:
 async def fetch_batch(batch_size: int = 10) -> Any:
     """Legacy function wrapper for backward compatibility."""
     return await fetch_batch_task(batch_size)
-
-
-@task(name="search_youtube")
-async def search_youtube(topic: Dict[str, Any]) -> Any:
-    """Legacy function wrapper for backward compatibility."""
-    keys = KeyRing("hunting")
-    executor = ResiliencyExecutor(keys, agent_name="hunter")
-    return await search_youtube_task(topic, executor)
-
-
-@task(name="ingest_results")
-async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> None:
-    """Legacy function wrapper for backward compatibility."""
-    await ingest_results_task(topic, response)
-
-
-@task(name="enrich_channels")
-async def enrich_channels(channel_ids: List[str]) -> int:
-    """Legacy function wrapper for backward compatibility."""
-    keys = KeyRing("hunting")
-    executor = ResiliencyExecutor(keys, agent_name="hunter")
-    result: int = await enrich_channels_task(channel_ids, executor)
-    return result
 
 
 def main() -> None:

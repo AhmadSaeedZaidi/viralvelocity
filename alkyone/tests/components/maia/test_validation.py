@@ -160,19 +160,15 @@ async def test_update_stats_handles_deleted_videos():
 
     with (
         patch("maia.tracker.flow.VideoRepository") as MockVideoRepo,
-        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.YouTubeSearchStrategy") as MockStrategyClass,
     ):
-
         mock_video_repo = MockVideoRepo.return_value
         mock_video_repo.update_stats_batch = AsyncMock()
 
         # API returns empty items (video deleted/private)
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={"items": []})
-
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.return_value.__aenter__.return_value = mock_response
+        mock_strategy = MagicMock()
+        mock_strategy.fetch_videos = AsyncMock(return_value={"items": []})
+        MockStrategyClass.return_value = mock_strategy
 
         result = await update_stats(videos)
 
@@ -190,14 +186,14 @@ async def test_update_stats_handles_network_errors():
 
     with (
         patch("maia.tracker.flow.VideoRepository") as MockVideoRepo,
-        patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
+        patch("maia.tracker.flow.YouTubeSearchStrategy") as MockStrategyClass,
     ):
-
         mock_video_repo = MockVideoRepo.return_value
 
         # Simulate network error
-        mock_session = MockSession.return_value.__aenter__.return_value
-        mock_session.get.side_effect = Exception("Connection refused")
+        mock_strategy = MagicMock()
+        mock_strategy.fetch_videos = AsyncMock(side_effect=Exception("Connection refused"))
+        MockStrategyClass.return_value = mock_strategy
 
         result = await update_stats(videos)
 
@@ -215,15 +211,15 @@ async def test_update_stats_partial_success():
 
     with (
         patch("maia.tracker.flow.VideoRepository") as MockVideoRepo,
-        patch("maia.tracker.flow.ResiliencyExecutor") as MockExecutorClass,
+        patch("maia.tracker.flow.YouTubeSearchStrategy") as MockStrategyClass,
     ):
         mock_video_repo = MockVideoRepo.return_value
         mock_video_repo.update_stats_batch = AsyncMock()
         mock_video_repo.log_stats_batch = AsyncMock()
 
-        # Mock the ResiliencyExecutor instance
-        mock_executor = MagicMock()
-        mock_executor.execute_async = AsyncMock(
+        # Mock the YouTubeSearchStrategy instance
+        mock_strategy = MagicMock()
+        mock_strategy.fetch_videos = AsyncMock(
             return_value={
                 "items": [
                     {
@@ -237,7 +233,7 @@ async def test_update_stats_partial_success():
                 ]
             }
         )
-        MockExecutorClass.return_value = mock_executor
+        MockStrategyClass.return_value = mock_strategy
 
         result = await update_stats(videos)
 

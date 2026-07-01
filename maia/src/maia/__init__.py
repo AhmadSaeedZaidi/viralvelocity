@@ -5,16 +5,23 @@ Maia is a Prefect-based agent system for video discovery, monitoring,
 archival, and media processing. It operates as a stateless layer that
 interfaces exclusively with Atlas for all persistence.
 
-Architecture:
-- Hunter: Discovery & Ingestion (YouTube search + Snowball sampling)
-- Tracker: Velocity Monitoring (3-Zone Defense strategy)
-- Archeologist: Historical Curation (Grave Robbery method)
-- Scribe: Transcription (youtube-transcript-api wrapper)
-- Painter: Visual Archival (Intelligent keyframe extraction)
+Architecture (Producer-Consumer Pipeline):
+
+  Producers (identify targets, push to work queue):
+  - Hunter:      Discovery & Ingestion (YouTube search + Snowball sampling)
+  - Archeologist: Historical Curation (Grave Robbery method)
+
+  Consumers (pull from work queue, process, update status):
+  - Scribe:      Transcription (youtube-transcript-api wrapper)
+  - Painter:     Visual Archival (Intelligent keyframe extraction)
+  - Tracker:     Velocity Monitoring (3-Zone Defense strategy)
+  - Janitor:     Tiered storage cleanup
 
 Core Principles:
     - Stateless: All state persists in Atlas
     - Repository Pattern: Database access via atlas.repositories.*
+    - Strategy Pattern: YouTube Data API access via YouTubeSearchStrategy
+    - Producer-Consumer: No direct coupling between discovery and processing
     - Resiliency Strategy: Rate limit = immediate container suicide for IP rotation
 """
 

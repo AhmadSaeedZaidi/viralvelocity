@@ -1,25 +1,21 @@
-"""Maia Archeologist: Historical video discovery agent."""
+"""Maia Archeologist: Historical video discovery agent.
+
+Producer in the Producer-Consumer pipeline. Sole responsibility is to
+discover historical video IDs from past years and push them to the
+video table (the work queue for downstream consumers).
+"""
 
 import argparse
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Union, cast
+from typing import Any, Dict
 
-import aiohttp
 from atlas.repositories import VideoRepository
-from atlas.utils import KeyRing, ResiliencyExecutor
 from prefect import flow, get_run_logger, task
-from tenacity import (
-    RetryError,
-    before_sleep_log,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from maia.hunter.flow import enrich_channels_task
+from maia.strategies import YouTubeSearchStrategy
 from maia.utils import RateLimitError
 
 logger = logging.getLogger(__name__)
@@ -27,32 +23,10 @@ logger = logging.getLogger(__name__)
 TARGET_CATEGORIES = ["10", "20", "24", "28", "27"]
 
 
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=2, min=4, max=60),
-    retry=retry_if_exception_type(RateLimitError),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-async def _fetch_with_backoff(
-    session: aiohttp.ClientSession, url: str, params: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Make HTTP request with automatic retry on rate limits."""
-    async with session.get(url, params=params) as resp:
-        if resp.status == 200:
-            return cast(Dict[str, Any], await resp.json())
-        elif resp.status == 429:
-            logger.warning("Rate limit hit (429). Retrying with exponential backoff...")
-            raise RateLimitError("YouTube API rate limit exceeded")
-        elif resp.status == 403:
-            logger.warning("API key burned (403). Key rotation required.")
-            raise Exception("API key exhausted")
-        else:
-            logger.error(f"HTTP {resp.status} for historical search")
-            raise Exception(f"HTTP error {resp.status}")
-
-
 @task(name="hunt_history")
-async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
+async def hunt_history_task(
+    year: int, month: int, strategy: YouTubeSearchStrategy
+) -> None:
     """Search for top videos in target categories for a specific month in history."""
     run_logger = get_run_logger()
     video_repo = VideoRepository()
@@ -68,10 +42,8 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
 
     run_logger.info(f"Archeologist digging in: {start_str} to {end_str}")
 
-    base_url = "https://www.googleapis.com/youtube/v3/search"
-
     for category in TARGET_CATEGORIES:
-        params: Dict[str, Union[str, int]] = {
+        params: Dict[str, Any] = {
             "part": "snippet",
             "type": "video",
             "order": "viewCount",
@@ -81,64 +53,60 @@ async def hunt_history_task(year: int, month: int, keys: KeyRing) -> None:
             "maxResults": 50,
         }
 
-        max_retries = keys.size
-        for attempt in range(max_retries):
-            key = keys.next_key()
-            params["key"] = key
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    data = await _fetch_with_backoff(session, base_url, params)
-                    items = data.get("items", [])
-
-                    ingest_tasks = [
-                        video_repo.ingest_video_metadata(item, priority_override=100)
-                        for item in items
-                    ]
-                    await asyncio.gather(*ingest_tasks)
-
-                    channel_ids = [
-                        it.get("snippet", {}).get("channelId")
-                        for it in items
-                        if it.get("snippet", {}).get("channelId")
-                    ]
-                    if channel_ids:
-                        enrich_ex = ResiliencyExecutor(
-                            KeyRing("hunting"), agent_name="archeologist_enrich"
-                        )
-                        try:
-                            n = await enrich_channels_task(channel_ids, enrich_ex)
-                            run_logger.info(
-                                f"Enriched {n} channel(s) for recovered relics (Cat: {category})"
-                            )
-                        except RateLimitError:
-                            raise
-                        except Exception as e:
-                            run_logger.warning(
-                                f"Channel enrichment after archeology ingest (non-fatal): {e}"
-                            )
-
-                    run_logger.info(
-                        f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
-                    )
-                    break
-
-            except RetryError:
-                if attempt == max_retries - 1:
-                    run_logger.critical("All retry attempts exhausted. Aborting Archeologist.")
-                    raise RateLimitError("429 Rate Limit - Archeologist")
+        try:
+            data = await strategy.search(params)
+            if not data:
+                run_logger.warning(
+                    f"No data returned for {year}-{month} (Cat: {category})"
+                )
                 continue
 
-            except Exception as e:
-                if isinstance(e, RateLimitError):
+            items = data.get("items", [])
+
+            ingest_tasks = [
+                video_repo.ingest_video_metadata(item, priority_override=100)
+                for item in items
+            ]
+            await asyncio.gather(*ingest_tasks)
+
+            channel_ids = [
+                it.get("snippet", {}).get("channelId")
+                for it in items
+                if it.get("snippet", {}).get("channelId")
+            ]
+            if channel_ids:
+                try:
+                    n = await enrich_channels_task(channel_ids, strategy)
+                    run_logger.info(
+                        f"Enriched {n} channel(s) for recovered relics (Cat: {category})"
+                    )
+                except RateLimitError:
                     raise
-                run_logger.error(f"Network error in Archeologist: {e}")
-                if attempt == max_retries - 1:
-                    break
+                except Exception as e:
+                    run_logger.warning(
+                        f"Channel enrichment after archeology ingest (non-fatal): {e}"
+                    )
+
+            run_logger.info(
+                f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
+            )
+
+        except RateLimitError:
+            run_logger.critical(
+                f"Archeologist rate-limited on {year}-{month} (Cat: {category})"
+            )
+            raise
+        except Exception as e:
+            run_logger.error(
+                f"Archeologist error on {year}-{month} (Cat: {category}): {e}"
+            )
+            continue
 
 
 @flow(name="run_archeology_campaign")
-async def archeology_flow(start_year: int, end_year: int, keys: KeyRing) -> Dict[str, Any]:
+async def archeology_flow(
+    start_year: int, end_year: int, strategy: YouTubeSearchStrategy
+) -> Dict[str, Any]:
     """
     Execute an archeology campaign to discover historical videos.
 
@@ -147,7 +115,7 @@ async def archeology_flow(start_year: int, end_year: int, keys: KeyRing) -> Dict
     Args:
         start_year: Start year for historical campaign
         end_year: End year for historical campaign
-        keys: KeyRing for API key rotation
+        strategy: YouTubeSearchStrategy for API access
 
     Returns:
         Dictionary with campaign statistics
@@ -163,7 +131,7 @@ async def archeology_flow(start_year: int, end_year: int, keys: KeyRing) -> Dict
 
     for year in range(start_year, end_year + 1):
         for month in range(1, 13):
-            await hunt_history_task(year, month, keys)
+            await hunt_history_task(year, month, strategy)
             stats["months_processed"] += 1
         stats["years_processed"] += 1
 
@@ -182,7 +150,7 @@ class ArcheologistAgent:
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(self.name)
-        self.keys = KeyRing("archeology")
+        self.strategy = YouTubeSearchStrategy("archeology", agent_name="archeologist")
 
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None:
@@ -203,7 +171,7 @@ class ArcheologistAgent:
         self, start_year: int = 2005, end_year: int = 2024, **kwargs: Any
     ) -> Dict[str, Any]:
         result: Dict[str, Any] = await archeology_flow(
-            start_year=start_year, end_year=end_year, keys=self.keys
+            start_year=start_year, end_year=end_year, strategy=self.strategy
         )
         return result
 
@@ -216,8 +184,8 @@ async def run_archeology_campaign(start_year: int = 2005, end_year: int = 2024) 
 
 @task(name="hunt_history")
 async def hunt_history(year: int, month: int) -> None:
-    keys = KeyRing("archeology")
-    await hunt_history_task(year, month, keys)
+    agent = ArcheologistAgent()
+    await hunt_history_task(year, month, agent.strategy)
 
 
 if __name__ == "__main__":

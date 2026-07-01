@@ -168,7 +168,7 @@ async def _run_tracker(video_id: str) -> None:
     skipped. Instead we call :func:`update_stats_task`` for exactly ``video_id``.
     """
     from atlas.repositories import VideoRepository
-    from atlas.utils import KeyRing, ResiliencyExecutor
+    from maia.strategies import YouTubeSearchStrategy
     from maia.tracker.flow import update_stats_task
 
     video_repo = VideoRepository()
@@ -177,8 +177,7 @@ async def _run_tracker(video_id: str) -> None:
         logger.warning("Tracker step: no video row for %s", video_id)
         return
 
-    keys = KeyRing("tracking")
-    executor = ResiliencyExecutor(keys, agent_name="live_pipeline_tracker")
+    strategy = YouTubeSearchStrategy("tracking", agent_name="live_pipeline_tracker")
     n = await update_stats_task(
         [
             {
@@ -188,7 +187,7 @@ async def _run_tracker(video_id: str) -> None:
                 "last_updated_at": video.last_updated_at,
             }
         ],
-        executor,
+        strategy,
     )
     logger.info("Tracker step: update_stats_task wrote %s video(s)", n)
 

@@ -10,6 +10,13 @@ import pytest
 from maia.hunter.flow import fetch_batch_task, ingest_results_task
 
 
+@pytest.fixture
+def mock_strategy() -> MagicMock:
+    strategy = MagicMock()
+    strategy.search = AsyncMock()
+    return strategy
+
+
 @pytest.mark.asyncio
 async def test_fetch_batch_empty_queue():
     """Test fetch_batch when queue is empty."""
@@ -26,9 +33,13 @@ async def test_fetch_batch_empty_queue():
 @pytest.mark.asyncio
 async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
     """Test fetch_batch with items in queue."""
+    from atlas.models import SearchQueueItem
+
+    queue_item = SearchQueueItem(**mock_search_queue_item)
+
     with patch("maia.hunter.flow.SearchQueueRepository") as MockRepo:
         mock_repo = MockRepo.return_value
-        mock_repo.fetch_batch = AsyncMock(return_value=[mock_search_queue_item])
+        mock_repo.fetch_batch = AsyncMock(return_value=[queue_item])
 
         result = await fetch_batch_task.fn(batch_size=10)
 
@@ -38,7 +49,9 @@ async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
 
 @pytest.mark.asyncio
 async def test_ingest_results_with_snowball(
-    mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
+    mock_strategy: MagicMock,
+    mock_search_queue_item: Dict[str, Any],
+    mock_youtube_search_response: Dict[str, Any],
 ):
     """Test ingest_results implements Snowball effect."""
     with (
@@ -55,7 +68,9 @@ async def test_ingest_results_with_snowball(
         mock_search.update_state = AsyncMock()
         mock_vault.store_metadata = MagicMock()
 
-        await ingest_results_task.fn(mock_search_queue_item, mock_youtube_search_response)
+        await ingest_results_task.fn(
+            mock_search_queue_item, mock_youtube_search_response, mock_strategy
+        )
 
         assert mock_video.ingest_video_metadata.call_count == 1
 
@@ -70,7 +85,9 @@ async def test_ingest_results_with_snowball(
 
 @pytest.mark.asyncio
 async def test_ingest_results_handles_vault_failure(
-    mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
+    mock_strategy: MagicMock,
+    mock_search_queue_item: Dict[str, Any],
+    mock_youtube_search_response: Dict[str, Any],
 ):
     """Test ingest_results continues even if vault storage fails."""
     with (
@@ -87,6 +104,8 @@ async def test_ingest_results_handles_vault_failure(
         mock_search.update_state = AsyncMock()
         mock_vault.store_metadata = MagicMock(side_effect=Exception("Vault error"))
 
-        await ingest_results_task.fn(mock_search_queue_item, mock_youtube_search_response)
+        await ingest_results_task.fn(
+            mock_search_queue_item, mock_youtube_search_response, mock_strategy
+        )
 
         assert mock_video.ingest_video_metadata.call_count == 1

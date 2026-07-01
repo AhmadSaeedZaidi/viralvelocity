@@ -51,13 +51,6 @@ for v in videos:
     await repo.mark_transcript_safe(v.id)
 ```
 
-## TODO (Phases 4-5)
-
-- **PHASE-4:** Fix database bypass violations — `setup.py`, `events.py` (done), test fixtures directly importing `db`
-- **PHASE-5:** Migrate all Maia agents from deprecated `MaiaDAO` to individual repositories
-
-See `TODO` comments in `maia/`, `tools/`, `alkyone/` for exact locations.
-
 ## Configuration
 
 See [ENV.example](ENV.example) for all options.
