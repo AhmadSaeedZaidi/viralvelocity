@@ -20,12 +20,12 @@ async def test_fetch_scribe_targets_empty():
     """Test fetch_scribe_targets returns empty list when no videos need transcripts."""
     with patch("maia.scribe.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
-        mock_repo.fetch_scribe_batch = AsyncMock(return_value=[])
+        mock_repo.claim_scribe_batch = AsyncMock(return_value=[])
 
         result = await fetch_scribe_targets_task.fn(batch_size=10)
 
         assert result == []
-        mock_repo.fetch_scribe_batch.assert_called_once_with(10)
+        mock_repo.claim_scribe_batch.assert_called_once_with(10)
 
 
 @pytest.mark.asyncio
@@ -40,13 +40,13 @@ async def test_fetch_scribe_targets_with_videos():
 
     with patch("maia.scribe.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
-        mock_repo.fetch_scribe_batch = AsyncMock(return_value=mock_videos)
+        mock_repo.claim_scribe_batch = AsyncMock(return_value=mock_videos)
 
         result = await fetch_scribe_targets_task.fn(batch_size=10)
 
         assert len(result) == 2
         assert result[0].id == "VIDEO_001"
-        mock_repo.fetch_scribe_batch.assert_called_once_with(10)
+        mock_repo.claim_scribe_batch.assert_called_once_with(10)
 
 
 @pytest.mark.asyncio

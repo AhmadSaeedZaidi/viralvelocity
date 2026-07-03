@@ -32,7 +32,7 @@ MAX_CONCURRENT_VIDEOS = 5
 async def fetch_painter_targets_task(batch_size: int) -> List[Video]:
     """Fetch videos that need visual processing."""
     video_repo = VideoRepository()
-    targets = await video_repo.fetch_painter_batch(batch_size)
+    targets = await video_repo.claim_painter_batch(batch_size)
     return targets
 
 

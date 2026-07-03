@@ -50,7 +50,7 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
 async def fetch_scribe_targets_task(batch_size: int) -> List[Video]:
     """Fetch videos that need transcripts."""
     video_repo = VideoRepository()
-    targets = await video_repo.fetch_scribe_batch(batch_size)
+    targets = await video_repo.claim_scribe_batch(batch_size)
     if targets:
         get_run_logger().info(f"Fetched {len(targets)} videos needing transcripts.")
     return targets

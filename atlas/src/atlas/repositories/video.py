@@ -11,6 +11,8 @@ logger = logging.getLogger("atlas.repositories.video")
 
 _CHANNEL_TITLE_PENDING = "Pending channel index"
 
+ARCHIVAL_BATCH_SIZE = 100
+
 
 class VideoRepository(DatabaseAdapter):
     async def save(self, video: Video) -> None:
@@ -147,40 +149,54 @@ class VideoRepository(DatabaseAdapter):
                     ),
                 )
 
-    async def fetch_scribe_batch(self, batch_size: int = 10) -> list[Video]:
+    # ── State Machine: Claim methods (atomic PENDING → PROCESSING) ────────
+
+    async def claim_scribe_batch(self, batch_size: int = 10) -> list[Video]:
         rows = await self._fetch_all(
             """
-            SELECT * FROM videos
-            WHERE status = 'PENDING'
-              AND has_transcript = FALSE
-            ORDER BY discovered_at ASC
-            LIMIT %s
-            FOR UPDATE SKIP LOCKED
+            UPDATE videos SET status = 'PROCESSING'
+            WHERE id IN (
+                SELECT id FROM videos
+                WHERE status IN ('PENDING', 'PROCESSING')
+                  AND has_transcript = FALSE
+                ORDER BY discovered_at ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
             """,
             (batch_size,),
         )
         return [Video.model_validate(r) for r in rows]
 
-    async def fetch_painter_batch(self, batch_size: int = 5) -> list[Video]:
+    async def claim_painter_batch(self, batch_size: int = 5) -> list[Video]:
         rows = await self._fetch_all(
             """
-            SELECT * FROM videos
-            WHERE status = 'PENDING'
-              AND has_visuals = FALSE
-            ORDER BY discovered_at ASC
-            LIMIT %s
-            FOR UPDATE SKIP LOCKED
+            UPDATE videos SET status = 'PROCESSING'
+            WHERE id IN (
+                SELECT id FROM videos
+                WHERE status IN ('PENDING', 'PROCESSING')
+                  AND has_visuals = FALSE
+                ORDER BY discovered_at ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *
             """,
             (batch_size,),
         )
         return [Video.model_validate(r) for r in rows]
+
+    # ── State Machine: Transition helpers ─────────────────────────────────
 
     async def mark_transcript_safe(self, video_id: str) -> None:
         now = datetime.now(timezone.utc)
         await self._execute(
             """
             UPDATE videos
-            SET has_transcript = TRUE, last_updated_at = %s
+            SET has_transcript = TRUE,
+                last_updated_at = %s,
+                status = CASE WHEN has_visuals THEN 'PROCESSED' ELSE status END
             WHERE id = %s
             """,
             (now, video_id),
@@ -191,7 +207,9 @@ class VideoRepository(DatabaseAdapter):
         await self._execute(
             """
             UPDATE videos
-            SET has_visuals = TRUE, last_updated_at = %s
+            SET has_visuals = TRUE,
+                last_updated_at = %s,
+                status = CASE WHEN has_transcript THEN 'PROCESSED' ELSE status END
             WHERE id = %s
             """,
             (now, video_id),
@@ -202,7 +220,7 @@ class VideoRepository(DatabaseAdapter):
         await self._execute(
             """
             UPDATE videos
-            SET status = 'DONE', last_updated_at = %s
+            SET status = 'PROCESSED', last_updated_at = %s
             WHERE id = %s
             """,
             (now, video_id),
@@ -218,6 +236,158 @@ class VideoRepository(DatabaseAdapter):
             """,
             (now, video_id),
         )
+
+    async def mark_archived(self, video_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        await self._execute(
+            """
+            UPDATE videos
+            SET status = 'ARCHIVED', archived_at = %s
+            WHERE id = %s
+            """,
+            (now, video_id),
+        )
+
+    # ── Janitor: Sweep Phase ──────────────────────────────────────────────
+
+    async def sweep_archivable(self, batch_size: int = ARCHIVAL_BATCH_SIZE) -> list[Video]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
+        rows = await self._fetch_all(
+            """
+            SELECT * FROM videos
+            WHERE status = 'PROCESSED'
+              AND last_updated_at < %s
+            ORDER BY last_updated_at ASC
+            LIMIT %s
+            FOR UPDATE SKIP LOCKED
+            """,
+            (cutoff, batch_size),
+        )
+        return [Video.model_validate(r) for r in rows]
+
+    async def count_archivable(self) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
+        row = await self._fetch_one(
+            """
+            SELECT COUNT(*) as total FROM videos
+            WHERE status = 'PROCESSED'
+              AND last_updated_at < %s
+            """,
+            (cutoff,),
+        )
+        return row["total"] if row else 0
+
+    # ── Janitor: Hand-off Phase (serialize + vault + verify + purge) ──────
+
+    async def archive_video_batch(
+        self, videos: list[Video], dry_run: bool = False
+    ) -> dict[str, Any]:
+        """Serialize video metadata + stats to vault, then mark ARCHIVED and purge.
+
+        Vault operations are offloaded to a thread-pool via ``asyncio.to_thread``
+        since the vault adapter is synchronous (HF/GCS SDK).
+
+        On vault failure: emits a ``janitor.archive_failed`` event, logs the error,
+        and **leaves the hot DB record untouched** (rollback by omission).
+        """
+        import asyncio
+
+        from atlas.events import events
+        from atlas.vault import get_vault
+
+        if not videos:
+            return {"archived": 0, "failed": 0}
+
+        if dry_run:
+            return {
+                "archived": 0,
+                "dry_run": True,
+                "would_archive": len(videos),
+                "video_ids": [v.id for v in videos],
+            }
+
+        v = get_vault()
+        archived_count = 0
+        failed_count = 0
+        failed_ids: list[str] = []
+
+        for video in videos:
+            try:
+                metadata: dict[str, Any] = {
+                    "id": video.id,
+                    "channel_id": video.channel_id,
+                    "title": video.title,
+                    "published_at": video.published_at.isoformat() if video.published_at else None,
+                    "duration": video.duration,
+                    "tags": video.tags,
+                    "category_id": video.category_id,
+                    "discovered_at": video.discovered_at.isoformat() if video.discovered_at else None,
+                    "last_updated_at": video.last_updated_at.isoformat() if video.last_updated_at else None,
+                    "has_transcript": video.has_transcript,
+                    "has_visuals": video.has_visuals,
+                }
+
+                latest_stats = await self.get_latest_stats(video.id)
+                if latest_stats:
+                    metadata["stats"] = {
+                        "views": latest_stats.views,
+                        "likes": latest_stats.likes,
+                        "comment_count": latest_stats.comment_count,
+                        "last_tracked_at": latest_stats.timestamp.isoformat()
+                        if latest_stats.timestamp
+                        else None,
+                    }
+
+                date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+                # Hand-off: write metadata to vault (synchronous → thread)
+                await asyncio.to_thread(v.store_metadata, video.id, metadata, date_key)
+
+                # Verification interlock
+                if settings.JANITOR_SAFETY_CHECK:
+                    verified = await asyncio.to_thread(v.fetch_metadata, video.id, date_key)
+                    if not verified:
+                        raise RuntimeError(
+                            f"Vault verification failed for {video.id} — "
+                            "metadata not found after write"
+                        )
+
+                # Mark as ARCHIVED
+                await self.mark_archived(video.id)
+
+                # Purge stats + transcript rows from hot tier
+                await self._execute(
+                    "DELETE FROM video_stats_log WHERE video_id = %s", (video.id,)
+                )
+                await self._execute(
+                    "DELETE FROM transcripts WHERE video_id = %s", (video.id,)
+                )
+
+                archived_count += 1
+
+            except Exception as exc:
+                failed_count += 1
+                failed_ids.append(video.id)
+                logger.error(f"Archival failed for {video.id}: {exc}")
+                await events.emit(
+                    "janitor.archive_failed",
+                    video.id,
+                    {"error": str(exc), "retention_days": settings.JANITOR_RETENTION_DAYS},
+                )
+
+        return {
+            "archived": archived_count,
+            "failed": failed_count,
+            "failed_ids": failed_ids,
+        }
+
+    # ── Legacy legacy (stats archival, old janitor) ───────────────────────
+
+    async def fetch_scribe_batch(self, batch_size: int = 10) -> list[Video]:
+        return await self.claim_scribe_batch(batch_size)
+
+    async def fetch_painter_batch(self, batch_size: int = 5) -> list[Video]:
+        return await self.claim_painter_batch(batch_size)
 
     async def ingest_video_metadata(
         self, video_data: dict[str, Any], priority_override: Optional[int] = None
@@ -355,7 +525,7 @@ class VideoRepository(DatabaseAdapter):
             SELECT COUNT(*) as total
             FROM videos
             WHERE discovered_at < %s
-              AND status = 'DONE'
+              AND status IN ('PROCESSED', 'DONE')
               {safety_clause}
             """,
             (cutoff_date,),
@@ -372,7 +542,7 @@ class VideoRepository(DatabaseAdapter):
             f"""
             DELETE FROM videos
             WHERE discovered_at < %s
-              AND status = 'DONE'
+              AND status IN ('PROCESSED', 'DONE')
               {safety_clause}
             """,
             (cutoff_date,),

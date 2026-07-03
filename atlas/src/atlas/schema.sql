@@ -41,10 +41,14 @@ CREATE TABLE IF NOT EXISTS videos (
     wiki_topics TEXT[],
     discovered_at TIMESTAMP DEFAULT NOW(),
     last_updated_at TIMESTAMP,
+    archived_at TIMESTAMP,
     status VARCHAR(20) DEFAULT 'PENDING',
     has_transcript BOOLEAN DEFAULT FALSE,
     has_visuals BOOLEAN DEFAULT FALSE
 );
+
+COMMENT ON COLUMN videos.status IS
+'Lifecycle state machine: PENDING → PROCESSING → PROCESSED → ARCHIVED | FAILED';
 
 CREATE TABLE IF NOT EXISTS video_stats_log (
     video_id VARCHAR(20) REFERENCES videos(id) ON DELETE CASCADE,

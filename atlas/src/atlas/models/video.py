@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
+
+VideoStatus = Literal["PENDING", "PROCESSING", "PROCESSED", "ARCHIVED", "FAILED"]
 
 
 class Video(BaseModel):
@@ -16,6 +18,7 @@ class Video(BaseModel):
     wiki_topics: Optional[list[str]] = None
     discovered_at: Optional[datetime] = None
     last_updated_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
     status: Optional[str] = "PENDING"
     has_transcript: bool = False
     has_visuals: bool = False

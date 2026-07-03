@@ -22,12 +22,12 @@ async def test_fetch_painter_targets_empty():
     """Test fetch_painter_targets returns empty list when no videos need visual processing."""
     with patch("maia.painter.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
-        mock_repo.fetch_painter_batch = AsyncMock(return_value=[])
+        mock_repo.claim_painter_batch = AsyncMock(return_value=[])
 
         result = await fetch_painter_targets_task.fn(batch_size=5)
 
         assert result == []
-        mock_repo.fetch_painter_batch.assert_called_once_with(5)
+        mock_repo.claim_painter_batch.assert_called_once_with(5)
 
 
 @pytest.mark.asyncio
@@ -42,13 +42,13 @@ async def test_fetch_painter_targets_with_videos():
 
     with patch("maia.painter.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
-        mock_repo.fetch_painter_batch = AsyncMock(return_value=mock_videos)
+        mock_repo.claim_painter_batch = AsyncMock(return_value=mock_videos)
 
         result = await fetch_painter_targets_task.fn(batch_size=5)
 
         assert len(result) == 2
         assert result[0].id == "VIDEO_001"
-        mock_repo.fetch_painter_batch.assert_called_once_with(5)
+        mock_repo.claim_painter_batch.assert_called_once_with(5)
 
 
 def test_video_streamer_extract_heatmap_peaks():

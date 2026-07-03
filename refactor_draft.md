@@ -1,8 +1,25 @@
-# The Atlas Refactor: From Monolithic DAO to Repository Pattern
+# Refactor 1: Moving Atlas from Monolithic DAO to Repository Pattern
 
 this document is my post-mortem on the `atlas` module refactor. I moved from a single `MaiaDAO` class that owned every database operation, to a set of small `Repository` classes that each own one entity. I'll explain why I did it, what the patterns mean, and what the end state looks like.
 
-**disclaimer:** Claude Opus 4.8 was used to assist with the mechanical parts of this refactor — the actual editing of 40+ files. However the analysis of why this was needed, the pattern choices, and the design are my own.
+**disclaimer:** Deepseek v4 Flash (provided by opencode zen/free) was used to assist with the mechanical parts of this refactor, the actual editing of 40+ files.
+
+## What is Pleiades?
+
+Initially named: Youtube-ML-Pipeline, it was a semester project with some ridiculous requirements. I was a student, and the project was a solo effort. I had to learn async Python, Prefect, Postgres, SQLAlchemy, and HuggingFace in 3 weeks. A live data ingestion -> Training -> Inference -> Visualization pipeline was the goal. Seeing this, I decided "hey youtube has multi-modal data and LLMs research has been exploring vision language models!". It seems that a google engineer also had the same idea- because the "ask" feature on youtube is a polished, and genuinely amazing implementation of parsing youtube using an LLM. This is actually why I had abandoned this repository, as it felt redundant, but now it acts as my playground for "what doesn't work and how do i fix it?"
+
+
+this repository is quite old now. As time was short at the time, and I was unfamiliar with the technologies listed, not to mention it was a solo project; I "vibe-coded" the project. Then I kept adding to the technical debt, when a new model came out with a free tier, I'd throw it at "Pleades", hoping it was good enough. And finally, I have now grown enough as a developer, to sit down, and design a maintainable refactor.
+
+this isn't to say no thought went into the architecture. But, at the time, I wasn't a good software designer. I knew basic patterns, singleton, dao, and made a model blindly implement what looked good from a deep learning perspective. All I cared about was that the right kind of data, was being stored in a way somewhat familiar to me.
+
+## Why Pleiades?
+
+The naming scheme was so that the project would be cool and memorable. I wanted to make 7 modules. One named after each of the 7 stars in the Pleiades star cluster. This would make the codebase easeier to navigate, since I could asociate each module with a concept, a greek goddess and her story.
+
+## What is Atlas?
+
+Atlas isn't even a pleiades. But he's their dad! And so, in the repository, he is the father of the modules, holding up the database access, just like he holds up the sky in greek mythology. The `atlas` module is the database access layer for the entire pipeline. It contains adapters, DAOs, and now repositories.
 
 ## Before: What Atlas Used To Be
 
@@ -19,7 +36,7 @@ class MaiaDAO:
     # ... 30+ more methods
 ```
 
-every agent — hunter, tracker, scribe, painter, janitor, archeologist — imported `MaiaDAO` and used it for everything. Here is what the tracker agent used to look like at the call site:
+every agent: hunter, tracker, scribe, painter, janitor, archeologist, imported `MaiaDAO` and used it for everything. Here is what the tracker agent used to look like at the call site:
 
 ```python
 from atlas.adapters.maia import MaiaDAO
@@ -71,9 +88,9 @@ if a consumer file renamed its import or changed which method it called, the tes
 
 this made it impossible to reason about where data lived. the DAO was a god object — it knew everything about the database schema, and every consumer knew everything about the DAO.
 
-## DAO vs Repository: What These Patterns Actually Mean
+## DAO vs Repository: What These Patterns Mean
 
-I want to be precise about these two patterns because they get conflated constantly.
+I want to be precise about these two patterns because they were quite confusing to me at first. A good resource is [cosmic python's chapter](https://www.cosmicpython.com/book/preface)
 
 ### DAO (Data Access Object)
 
@@ -139,7 +156,7 @@ DatabaseAdapter (DAO)
 Postgres / Neon
 ```
 
-## The Post-Refactor Repo: What It Looks Like Now
+## Post-Refactor: (What the repo looks like now)
 
 there are five repositories, each in its own file under `atlas/repositories/`:
 
