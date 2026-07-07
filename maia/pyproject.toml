@@ -75,7 +75,6 @@ module = [
     "pandas.*",
     "huggingface_hub.*",
     "yt_dlp.*",
-    "cv2.*",
     "youtube_transcript_api.*",
     "youtube_transcript_api._errors.*",
     "prefect.*",
@@ -102,8 +101,6 @@ addopts = [
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:prefect.*",
-    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
-    "ignore::sqlalchemy.exc.SAWarning",
 ]
 env = [
     "DATABASE_URL=postgresql://test:test@localhost:5432/test",

@@ -85,7 +85,7 @@ async def handoff_phase_task(videos_data: list[dict[str, Any]], dry_run: bool) -
     run_logger.info(
         f"Hand-off: {result.get('archived', 0)} archived, {result.get('failed', 0)} failed"
     )
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 @task(name="janitor_archive_stats")

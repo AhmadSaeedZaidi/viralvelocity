@@ -53,7 +53,7 @@ async def fetch_scribe_targets_task(batch_size: int) -> list[Video]:
     targets = await video_repo.claim_scribe_batch(batch_size)
     if targets:
         get_run_logger().info(f"Fetched {len(targets)} videos needing transcripts.")
-    return targets
+    return targets  # type: ignore[no-any-return]
 
 
 @task(name="process_transcript")

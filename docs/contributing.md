@@ -73,17 +73,15 @@ pytest --cov=atlas --cov=maia --cov-report=term
 ### 4. Format & Lint
 
 ```bash
-# Format code
-cd atlas && make format
-cd maia && make format
+# Auto-fix lint issues and format all packages
+make lint-fix
 
-# Check lint
-cd atlas && make lint
-cd maia && make lint
+# Readonly lint check (what CI runs)
+make lint
 
-# Type check
-cd atlas && make type-check
-cd maia && make type-check
+# Or per-package:
+cd atlas && make lint-local
+cd maia && make lint-local
 ```
 
 ### 5. Commit Changes
@@ -125,17 +123,17 @@ Then create a Pull Request on GitHub.
 
 ### Python Style
 
-We use **Black** for formatting and **isort** for import sorting:
+We use **Ruff** for both linting and formatting (replacing Black + isort):
 
 ```bash
-# Auto-format
-black src/ tests/
+# Auto-fix lint issues and format
+make lint-fix
 
-# Sort imports
-isort src/ tests/
+# Readonly check (CI)
+make lint
 
-# Or use Makefile
-make format
+# Or use pre-commit hooks (installed with `make pre-commit-install`)
+pre-commit run --all-files
 ```
 
 ### Type Hints
@@ -575,7 +573,7 @@ We are committed to providing a welcoming and inclusive environment.
 
 Contributing to Pleiades:
 
-- ✅ Follow coding standards (Black, isort, type hints)
+- ✅ Follow coding standards (Ruff, type hints)
 - ✅ Write tests (unit + integration)
 - ✅ Maintain coverage (70%+)
 - ✅ Update documentation

@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from atlas.adapters import DatabaseAdapter
 from atlas.config import settings
@@ -275,7 +275,7 @@ class VideoRepository(DatabaseAdapter):
             """,
             (cutoff,),
         )
-        return row["total"] if row else 0
+        return cast(int, row["total"]) if row else 0
 
     # ── Janitor: Hand-off Phase (serialize + vault + verify + purge) ──────
 

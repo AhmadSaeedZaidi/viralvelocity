@@ -9,7 +9,7 @@ logger = logging.getLogger("atlas.adapters")
 
 
 class ConnectionProvider(Protocol):
-    @asynccontextmanager
+    @asynccontextmanager  # type: ignore[arg-type]
     async def get_connection(self) -> AsyncIterator[AsyncConnection]: ...
 
 
@@ -26,19 +26,21 @@ class DatabaseAdapterProtocol(Protocol):
 class DatabaseAdapter:
     def __init__(self, db_pool: ConnectionProvider | None = None) -> None:
         if db_pool is None:
-            from atlas.db import db
+            from atlas.db import db  # type: ignore[assignment]
 
-            db_pool = db
+            db_pool = db  # type: ignore[assignment]
         self._db = db_pool
 
     @asynccontextmanager
     async def _connection(self) -> AsyncIterator[AsyncConnection]:
-        async with self._db.get_connection() as conn:
+        assert self._db is not None
+        async with self._db.get_connection() as conn:  # type: ignore[var-annotated]
             yield conn
 
     @asynccontextmanager
     async def _cursor(self) -> AsyncIterator[Any]:
-        async with self._db.get_connection() as conn:
+        assert self._db is not None
+        async with self._db.get_connection() as conn:  # type: ignore[var-annotated]
             async with conn.cursor() as cur:
                 yield cur
 

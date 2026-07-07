@@ -33,7 +33,7 @@ async def fetch_painter_targets_task(batch_size: int) -> list[Video]:
     """Fetch videos that need visual processing."""
     video_repo = VideoRepository()
     targets = await video_repo.claim_painter_batch(batch_size)
-    return targets
+    return targets  # type: ignore[no-any-return]
 
 
 def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> bytes | None:

@@ -86,23 +86,24 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 warn_redundant_casts = false
 disallow_untyped_decorators = false
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = false
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [[tool.mypy.overrides]]
 module = [
     "google.cloud.*",
     "pandas.*",
     "huggingface_hub.*",
-    "yt_dlp.*",
-    "cv2.*",
-    "youtube_transcript_api.*",
     "pydantic.*",
     "pydantic_settings.*",
     "aiohttp.*",
     "psycopg.*",
     "psycopg_pool.*",
     "orjson.*",
-    "prefect.*",
-    "tenacity.*"
 ]
 ignore_missing_imports = true
 
@@ -118,10 +119,7 @@ addopts = [
     "--tb=short",
     "--disable-warnings",
 ]
-filterwarnings = [
-    "ignore::DeprecationWarning:prefect.*",
-    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
-]
+filterwarnings = []
 env = [
     "DATABASE_URL=postgresql://test:test@localhost:5432/test",
     "YOUTUBE_API_KEY_POOL_JSON=[\"test_key_1\", \"test_key_2\", \"test_key_3\"]",

@@ -356,9 +356,8 @@ git checkout -b feature/your-feature
 # 3. Run tests
 pytest --cov=atlas --cov=maia
 
-# 4. Format code
-cd atlas && make format
-cd maia && make format
+# 4. Format code (install hooks first: `make pre-commit-install`)
+make lint-fix
 
 # 5. Commit and push
 git commit -m "feat: add feature description"
