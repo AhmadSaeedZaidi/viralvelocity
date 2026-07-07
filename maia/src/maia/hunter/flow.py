@@ -8,11 +8,10 @@ video table (the work queue for Scribe, Painter, Tracker).
 import argparse
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from atlas.repositories import ChannelRepository, SearchQueueRepository, VideoRepository
-from atlas.utils import KeyRing
 from atlas.vault import get_vault
 from atlas.youtube import lookup_channels
 from prefect import flow, get_run_logger, task
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 @task(name="fetch_batch")
-async def fetch_batch_task(batch_size: int) -> List[Dict[str, Any]]:
+async def fetch_batch_task(batch_size: int) -> list[dict[str, Any]]:
     """Fetch a batch of queries from the search queue."""
     repo = SearchQueueRepository()
     run_logger = get_run_logger()
@@ -35,19 +34,22 @@ async def fetch_batch_task(batch_size: int) -> List[Dict[str, Any]]:
         return []
 
     run_logger.info(f"Fetched {len(batch)} targets from queue.")
-    return [{
-        "id": item.id,
-        "query_term": item.query_term,
-        "next_page_token": item.next_page_token,
-        "last_searched_at": item.last_searched_at,
-        "priority": item.priority,
-    } for item in batch]
+    return [
+        {
+            "id": item.id,
+            "query_term": item.query_term,
+            "next_page_token": item.next_page_token,
+            "last_searched_at": item.last_searched_at,
+            "priority": item.priority,
+        }
+        for item in batch
+    ]
 
 
 @task(name="search_youtube")
 async def search_youtube_task(
-    topic: Dict[str, Any], strategy: YouTubeSearchStrategy
-) -> Optional[Dict[str, Any]]:
+    topic: dict[str, Any], strategy: YouTubeSearchStrategy
+) -> dict[str, Any] | None:
     """Search YouTube API for videos matching the topic query."""
     run_logger = get_run_logger()
     query = topic["query_term"]
@@ -56,15 +58,15 @@ async def search_youtube_task(
     last_searched = topic.get("last_searched_at")
     if last_searched:
         if last_searched.tzinfo is None:
-            last_searched = last_searched.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) - last_searched > timedelta(hours=12):
+            last_searched = last_searched.replace(tzinfo=UTC)
+        if datetime.now(UTC) - last_searched > timedelta(hours=12):
             run_logger.info(f"Topic '{query}' token is stale. Resetting.")
             page_token = None
 
-    yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
+    yesterday = datetime.now(UTC) - timedelta(hours=24)
     published_after = yesterday.isoformat()
 
-    params: Dict[str, Any] = {
+    params: dict[str, Any] = {
         "part": "snippet",
         "q": query,
         "type": "video",
@@ -85,7 +87,7 @@ async def search_youtube_task(
 
 
 @task(name="enrich_channels")
-async def enrich_channels_task(channel_ids: List[str], strategy: YouTubeSearchStrategy) -> int:
+async def enrich_channels_task(channel_ids: list[str], strategy: YouTubeSearchStrategy) -> int:
     """Resolve unindexed/stale channels via the YouTube Data API + log a stats snapshot.
 
     For every channel id passed in:
@@ -104,7 +106,7 @@ async def enrich_channels_task(channel_ids: List[str], strategy: YouTubeSearchSt
 
     unique = list({cid for cid in channel_ids if cid})
 
-    needs: List[str] = []
+    needs: list[str] = []
     for cid in unique:
         try:
             if await channel_repo.needs_refresh(cid):
@@ -140,9 +142,9 @@ async def enrich_channels_task(channel_ids: List[str], strategy: YouTubeSearchSt
 
 @task(name="ingest_results")
 async def ingest_results_task(
-    topic: Dict[str, Any],
-    response: Dict[str, Any],
-    strategy: Optional[YouTubeSearchStrategy] = None,
+    topic: dict[str, Any],
+    response: dict[str, Any],
+    strategy: YouTubeSearchStrategy | None = None,
 ) -> None:
     """
     Ingest video metadata and implement the Snowball Effect.
@@ -168,7 +170,7 @@ async def ingest_results_task(
     # 1. Store raw metadata to vault concurrently (best-effort, off event-loop)
     v = get_vault()
 
-    async def _vault_store(vid_id: str, data: Dict[str, Any]) -> None:
+    async def _vault_store(vid_id: str, data: dict[str, Any]) -> None:
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: v.store_metadata(vid_id, data))
@@ -182,7 +184,7 @@ async def ingest_results_task(
             vault_tasks.append(_vault_store(vid_id, item))
 
     # 2. Ingest structured metadata to database concurrently
-    async def _db_ingest(item: Dict[str, Any]) -> None:
+    async def _db_ingest(item: dict[str, Any]) -> None:
         vid_id = item.get("id", {}).get("videoId") or item.get("id")
         try:
             await video_repo.ingest_video_metadata(item)
@@ -209,7 +211,7 @@ async def ingest_results_task(
             run_logger.error(f"Channel enrichment failed (non-fatal): {e}")
 
     # 4. Extract snowball tags (pure computation — no I/O)
-    snowball_tags: List[str] = []
+    snowball_tags: list[str] = []
     for item in items:
         snippet = item.get("snippet", {})
         tags = snippet.get("tags", [])
@@ -244,7 +246,7 @@ async def ingest_results_task(
 
 
 @flow(name="run_hunter_cycle")
-async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> Dict[str, Any]:
+async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[str, Any]:
     """
     Execute a complete Hunter cycle: fetch queries, search YouTube, ingest results.
 
@@ -332,7 +334,7 @@ class HunterAgent:
             help="Number of queries to process per cycle (default: 10)",
         )
 
-    async def run(self, batch_size: int = 10, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, batch_size: int = 10, **kwargs: Any) -> dict[str, Any]:
         """
         Execute a complete Hunter cycle.
 
@@ -343,20 +345,18 @@ class HunterAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        result: Dict[str, Any] = await hunter_flow(
-            batch_size=batch_size, strategy=self.strategy
-        )
+        result: dict[str, Any] = await hunter_flow(batch_size=batch_size, strategy=self.strategy)
         return result
 
 
 @task(name="ingest_results")
-async def ingest_results(topic: Dict[str, Any], response: Dict[str, Any]) -> None:
+async def ingest_results(topic: dict[str, Any], response: dict[str, Any]) -> None:
     """Legacy Task wrapper — delegates to :func:`ingest_results_task`."""
     await ingest_results_task(topic, response)
 
 
 @flow(name="run_hunter_cycle")
-async def run_hunter_cycle(batch_size: int = 10) -> Dict[str, Any]:
+async def run_hunter_cycle(batch_size: int = 10) -> dict[str, Any]:
     """Legacy function wrapper for backward compatibility."""
     agent = HunterAgent()
     return await agent.run(batch_size=batch_size)

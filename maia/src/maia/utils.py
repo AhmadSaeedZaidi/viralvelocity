@@ -7,7 +7,8 @@ Centralises helpers that were previously duplicated across agent modules
 import asyncio
 import functools
 import logging
-from typing import Any, Callable, Coroutine, Optional, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 from atlas.utils import ResiliencyExecutor
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
@@ -30,8 +31,8 @@ class RateLimitError(Exception):
 async def execute_with_rate_limit(
     executor: ResiliencyExecutor,
     request_func: Callable[[str], Any],
-    error_classifier: Optional[Callable[[Exception], tuple[bool, bool]]] = None,
-) -> Optional[Any]:
+    error_classifier: Callable[[Exception], tuple[bool, bool]] | None = None,
+) -> Any | None:
     """Execute an async request via ResiliencyExecutor, converting SystemExit to RateLimitError.
 
     Atlas's ResiliencyExecutor calls ``sys.exit(0)`` when all API keys are

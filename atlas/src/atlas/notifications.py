@@ -1,7 +1,6 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Dict, Optional
 
 import aiohttp
 
@@ -40,7 +39,7 @@ class DiscordNotifier:
         description: str,
         channel: AlertChannel = AlertChannel.ALERTS,
         level: AlertLevel = AlertLevel.INFO,
-        fields: Optional[Dict[str, str]] = None,
+        fields: dict[str, str] | None = None,
     ) -> None:
         secret = self.hooks.get(channel)
 
@@ -58,7 +57,7 @@ class DiscordNotifier:
             "title": f"[{self.env_tag}] {title}",
             "description": description,
             "color": level.value,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "footer": {"text": "Pleiades Atlas"},
             "fields": (
                 [{"name": k, "value": str(v), "inline": True} for k, v in fields.items()]

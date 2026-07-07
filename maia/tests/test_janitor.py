@@ -2,11 +2,10 @@
 Tests for Maia Janitor module — State Machine cleanup cycle.
 """
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
-
 from maia.janitor.flow import (
     handoff_phase_task,
     janitor_flow,
@@ -29,7 +28,7 @@ def _make_video(video_id: str, **overrides: Any) -> Any:
     )
 
 
-def _make_video_dict(video_id: str, **overrides: Any) -> Dict[str, Any]:
+def _make_video_dict(video_id: str, **overrides: Any) -> dict[str, Any]:
     return _make_video(video_id, **overrides).model_dump()
 
 
@@ -241,6 +240,4 @@ async def test_archive_video_batch_delegates_to_repo():
         result = await handoff_phase_task.fn(videos, dry_run=False)
 
         assert result["archived"] == 1
-        mock_repo.archive_video_batch.assert_called_once_with(
-            ANY, dry_run=False
-        )
+        mock_repo.archive_video_batch.assert_called_once_with(ANY, dry_run=False)

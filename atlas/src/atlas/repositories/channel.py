@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from atlas.adapters import DatabaseAdapter
 from atlas.models.channel import Channel, ChannelStats
@@ -10,8 +10,8 @@ logger = logging.getLogger("atlas.repositories.channel")
 
 class ChannelRepository(DatabaseAdapter):
     async def save(self, channel: Channel) -> None:
-        query = """
-            INSERT INTO channels (id, title, country, custom_url, created_at, is_verified, last_scraped_at)
+        query = """INSERT INTO channels
+            (id, title, country, custom_url, created_at, is_verified, last_scraped_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 title = EXCLUDED.title,
@@ -30,15 +30,15 @@ class ChannelRepository(DatabaseAdapter):
                 channel.custom_url,
                 channel.created_at,
                 channel.is_verified,
-                channel.last_scraped_at or datetime.now(timezone.utc),
+                channel.last_scraped_at or datetime.now(UTC),
             ),
         )
 
-    async def get_by_id(self, channel_id: str) -> Optional[Channel]:
+    async def get_by_id(self, channel_id: str) -> Channel | None:
         row = await self._fetch_one("SELECT * FROM channels WHERE id = %s", (channel_id,))
         return Channel.model_validate(row) if row else None
 
-    async def get_latest_stats(self, channel_id: str) -> Optional[ChannelStats]:
+    async def get_latest_stats(self, channel_id: str) -> ChannelStats | None:
         row = await self._fetch_one(
             """
             SELECT channel_id, subscriber_count, view_count, video_count, timestamp
@@ -52,7 +52,7 @@ class ChannelRepository(DatabaseAdapter):
         return ChannelStats.model_validate(row) if row else None
 
     async def needs_refresh(self, channel_id: str, max_age_hours: int = 24) -> bool:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
         row = await self._fetch_one(
             """
             SELECT 1 FROM channel_stats_log
@@ -65,8 +65,8 @@ class ChannelRepository(DatabaseAdapter):
         return row is None
 
     async def log_stats(self, stats: ChannelStats) -> None:
-        query = """
-            INSERT INTO channel_stats_log (channel_id, timestamp, view_count, subscriber_count, video_count)
+        query = """INSERT INTO channel_stats_log
+            (channel_id, timestamp, view_count, subscriber_count, video_count)
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (channel_id, timestamp) DO NOTHING
         """
@@ -95,7 +95,7 @@ class ChannelRepository(DatabaseAdapter):
         custom_url = snippet.get("customUrl")
         created_at = snippet.get("publishedAt")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         upsert_query = """
             INSERT INTO channels (id, title, country, custom_url, created_at, last_scraped_at)
@@ -109,7 +109,7 @@ class ChannelRepository(DatabaseAdapter):
         """
         await self._execute(upsert_query, (ch_id, title, country, custom_url, created_at, now))
 
-        def _to_int(v: Any) -> Optional[int]:
+        def _to_int(v: Any) -> int | None:
             if v is None:
                 return None
             try:
@@ -125,8 +125,8 @@ class ChannelRepository(DatabaseAdapter):
             logger.info(f"Channel {ch_id} upserted; no statistics provided to log")
             return
 
-        log_query = """
-            INSERT INTO channel_stats_log (channel_id, timestamp, view_count, subscriber_count, video_count)
+        log_query = """INSERT INTO channel_stats_log
+            (channel_id, timestamp, view_count, subscriber_count, video_count)
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (channel_id, timestamp) DO NOTHING
         """

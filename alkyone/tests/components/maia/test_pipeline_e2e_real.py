@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -69,19 +69,17 @@ async def channel_repo(fresh_db):
 
 async def _resolve_via_api(
     video_id: str,
-) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Resolve video + channel metadata via YouTube Data API."""
     from atlas.youtube import lookup_channels, lookup_videos
 
     videos = await lookup_videos([video_id])
     if not videos:
-        pytest.skip(
-            f"YouTube videos.list returned 0 items for {video_id} (deleted/private?)"
-        )
+        pytest.skip(f"YouTube videos.list returned 0 items for {video_id} (deleted/private?)")
     video = videos[0]
 
     channel_id = video.get("snippet", {}).get("channelId")
-    channel: Optional[Dict[str, Any]] = None
+    channel: dict[str, Any] | None = None
     if channel_id:
         channels = await lookup_channels([channel_id])
         if channels:
@@ -109,9 +107,7 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
     assert channel_id, f"video {VIDEO_ID} has no channelId in API response"
     assert channel_item, f"channels.list returned 0 items for channel {channel_id}"
     channel_title = channel_item.get("snippet", {}).get("title")
-    print(
-        f"[e2e]   resolved video='{title}' channel='{channel_title}' (id={channel_id})"
-    )
+    print(f"[e2e]   resolved video='{title}' channel='{channel_title}' (id={channel_id})")
 
     print("[e2e] step 2/5 — seeding DB (channel snapshot + video metadata)…")
     await channel_repo.ingest_channel_snapshot(channel_item)
@@ -135,30 +131,20 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
     seeded_ch_stats = await channel_repo.get_latest_stats(channel_id)
 
     assert seeded_video is not None, "video row missing after ingest"
-    assert (
-        seeded_channel is not None
-    ), "channel row missing after ingest_channel_snapshot"
-    assert (
-        seeded_channel.title == channel_title
-    ), f"channel title mismatch: db={seeded_channel.title!r} api={channel_title!r}"
-    assert (
-        seeded_ch_stats is not None
-    ), "channel_stats_log row missing — ingest_channel_snapshot didn't log stats"
+    assert seeded_channel is not None, "channel row missing after ingest_channel_snapshot"
+    assert seeded_channel.title == channel_title, (
+        f"channel title mismatch: db={seeded_channel.title!r} api={channel_title!r}"
+    )
+    assert seeded_ch_stats is not None, (
+        "channel_stats_log row missing — ingest_channel_snapshot didn't log stats"
+    )
     subs = seeded_ch_stats.subscriber_count
     views = seeded_ch_stats.view_count
     vcount = seeded_ch_stats.video_count
-    assert (
-        subs is not None and subs > 0
-    ), f"channel subscriber_count not logged correctly: {subs}"
-    assert (
-        views is not None and views > 0
-    ), f"channel view_count not logged correctly: {views}"
-    assert (
-        vcount is not None and vcount > 0
-    ), f"channel video_count not logged correctly: {vcount}"
-    print(
-        f"[e2e]   channel_stats_log row OK — subs={subs} views={views} videos={vcount}"
-    )
+    assert subs is not None and subs > 0, f"channel subscriber_count not logged correctly: {subs}"
+    assert views is not None and views > 0, f"channel view_count not logged correctly: {views}"
+    assert vcount is not None and vcount > 0, f"channel video_count not logged correctly: {vcount}"
+    print(f"[e2e]   channel_stats_log row OK — subs={subs} views={views} videos={vcount}")
 
     print("[e2e] step 3/5 — running Painter cycle (yt-dlp + ffmpeg)…")
     from maia.painter.flow import run_painter_cycle
@@ -208,9 +194,9 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
 
     vstats = await video_repo.get_latest_stats(VIDEO_ID)
     assert vstats is not None, "Tracker did not insert any video_stats_log row"
-    assert (
-        vstats.views is not None and vstats.views > 0
-    ), f"video_stats_log views not logged correctly: {vstats}"
+    assert vstats.views is not None and vstats.views > 0, (
+        f"video_stats_log views not logged correctly: {vstats}"
+    )
     print(
         f"[e2e]   video_stats_log row OK — views={vstats.views} "
         f"likes={vstats.likes} comments={vstats.comment_count}"
@@ -224,9 +210,7 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
     if settings.VAULT_PROVIDER == "huggingface":
         hf_token = os.getenv("HF_TOKEN")
         hf_dataset = os.getenv("HF_DATASET_ID")
-        assert (
-            hf_token and hf_dataset
-        ), "HF_TOKEN/HF_DATASET_ID must be set to verify vault writes"
+        assert hf_token and hf_dataset, "HF_TOKEN/HF_DATASET_ID must be set to verify vault writes"
 
         api = HfApi(token=hf_token)
         files = api.list_repo_files(repo_id=hf_dataset, repo_type="dataset")
@@ -234,12 +218,10 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
         transcripts = [f for f in files if f == f"transcripts/{VIDEO_ID}.json"]
 
         assert len(frames) > 0, (
-            f"No frames in vault {hf_dataset!r} for {VIDEO_ID}. "
-            f"Painter ran but did not upload."
+            f"No frames in vault {hf_dataset!r} for {VIDEO_ID}. Painter ran but did not upload."
         )
         assert len(transcripts) == 1, (
-            f"Transcript not in vault {hf_dataset!r} for {VIDEO_ID}. "
-            f"Got: {transcripts}"
+            f"Transcript not in vault {hf_dataset!r} for {VIDEO_ID}. Got: {transcripts}"
         )
 
         from alkyone.fixtures import track_hf_upload
@@ -254,9 +236,7 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
         assert len(v.list_files(f"frames/{VIDEO_ID}/")) > 0
         assert len(v.list_files(f"transcripts/{VIDEO_ID}.json")) == 1
 
-    print(
-        "[e2e] ALL CHECKS PASSED — full pipeline produced real artifacts on real infra."
-    )
+    print("[e2e] ALL CHECKS PASSED — full pipeline produced real artifacts on real infra.")
 
 
 @pytest.mark.integration
@@ -279,9 +259,9 @@ async def test_channel_auto_discovery_from_search_item(video_repo, channel_repo)
 
     pre_channel = await channel_repo.get_by_id(blender_guru_id)
     pre_stats = await channel_repo.get_latest_stats(blender_guru_id)
-    assert (
-        pre_channel is None and pre_stats is None
-    ), "fresh_db should have wiped channel data — got pre-existing rows"
+    assert pre_channel is None and pre_stats is None, (
+        "fresh_db should have wiped channel data — got pre-existing rows"
+    )
 
     keys = KeyRing("hunting")
     executor = ResiliencyExecutor(keys, agent_name="hunter_enrich_test")
@@ -292,20 +272,17 @@ async def test_channel_auto_discovery_from_search_item(video_repo, channel_repo)
     post_channel = await channel_repo.get_by_id(blender_guru_id)
     assert post_channel is not None, "channels row not created"
     assert post_channel.title, "channels.title is empty"
-    assert (
-        post_channel.title != blender_guru_id
-    ), "channels.title was not enriched with the real channel name"
+    assert post_channel.title != blender_guru_id, (
+        "channels.title was not enriched with the real channel name"
+    )
 
     post_stats = await channel_repo.get_latest_stats(blender_guru_id)
     assert post_stats is not None, "channel_stats_log row not created"
-    assert (
-        post_stats.subscriber_count or 0
-    ) > 0, "subscriber_count must be >0 from real API"
+    assert (post_stats.subscriber_count or 0) > 0, "subscriber_count must be >0 from real API"
     assert (post_stats.view_count or 0) > 0
     assert (post_stats.video_count or 0) > 0
 
     again = await enrich_channels_task([blender_guru_id], executor)
     assert again == 0, (
-        "enrich_channels_task should be a no-op when stats are <24h old; "
-        f"got {again} re-fetches"
+        f"enrich_channels_task should be a no-op when stats are <24h old; got {again} re-fetches"
     )

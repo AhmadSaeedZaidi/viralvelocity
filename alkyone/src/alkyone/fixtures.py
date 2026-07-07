@@ -28,13 +28,14 @@ _USE_PROD_VAULT = os.getenv("PLEIADES_USE_PRODUCTION_VAULT", "").lower() in (
 if not _USE_PROD_VAULT:
     os.environ["HF_DATASET_ID"] = os.getenv("HF_DATASET_ID_TEST", _TEST_VAULT_DEFAULT)
 
-import asyncio  # noqa: E402
 import logging  # noqa: E402
-from typing import Any, AsyncGenerator, Dict, List  # noqa: E402
+from collections.abc import AsyncGenerator  # noqa: E402
+from typing import Any  # noqa: E402
 
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from atlas.config import settings  # noqa: E402
+
 from atlas import db  # noqa: E402
 
 logger = logging.getLogger("alkyone.fixtures")
@@ -95,7 +96,7 @@ if not os.getenv("YOUTUBE_API_KEY_POOL_JSON"):
     )
     os.environ["YOUTUBE_API_KEY_POOL_JSON"] = '["DUMMY_KEY_FOR_UNIT_TESTS_ONLY"]'
 
-_uploaded_files: List[str] = []
+_uploaded_files: list[str] = []
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -202,7 +203,7 @@ async def _cleanup_hf_uploads() -> None:
 
 
 @pytest.fixture
-def mock_search_queue_item() -> Dict[str, Any]:
+def mock_search_queue_item() -> dict[str, Any]:
     """Mock search queue item for Hunter tests."""
     return {
         "id": 1,
@@ -214,7 +215,7 @@ def mock_search_queue_item() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mock_youtube_search_response() -> Dict[str, Any]:
+def mock_youtube_search_response() -> dict[str, Any]:
     """Mock YouTube search API response."""
     return {
         "items": [
@@ -235,7 +236,7 @@ def mock_youtube_search_response() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mock_tracker_target() -> Dict[str, Any]:
+def mock_tracker_target() -> dict[str, Any]:
     """Mock tracker target video."""
     return {
         "id": "TEST123",
@@ -246,7 +247,7 @@ def mock_tracker_target() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mock_youtube_stats_response() -> Dict[str, Any]:
+def mock_youtube_stats_response() -> dict[str, Any]:
     """Mock YouTube statistics API response."""
     return {
         "items": [

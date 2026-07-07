@@ -22,7 +22,7 @@ On vault failure: log to EventRepository, leave hot DB untouched.
 import argparse
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from atlas.events import events
 from atlas.repositories import VideoRepository
@@ -38,7 +38,7 @@ DEFAULT_BATCH_SIZE = 50
 
 
 @task(name="janitor_sweep")
-async def sweep_phase_task(batch_size: int) -> List[Dict[str, Any]]:
+async def sweep_phase_task(batch_size: int) -> list[dict[str, Any]]:
     """Phase 1: Sweep — find PROCESSED videos eligible for archival."""
     video_repo = VideoRepository()
     run_logger = get_run_logger()
@@ -55,7 +55,7 @@ async def sweep_phase_task(batch_size: int) -> List[Dict[str, Any]]:
 
 
 @task(name="janitor_archive_batch")
-async def handoff_phase_task(videos_data: List[Dict[str, Any]], dry_run: bool) -> Dict[str, Any]:
+async def handoff_phase_task(videos_data: list[dict[str, Any]], dry_run: bool) -> dict[str, Any]:
     """Phase 3: Hand-off — serialize each video, vault it, verify, then purge."""
     from atlas.models import Video
 
@@ -65,8 +65,7 @@ async def handoff_phase_task(videos_data: List[Dict[str, Any]], dry_run: bool) -
     videos = [Video(**v) for v in videos_data]
 
     run_logger.info(
-        f"Hand-off: archiving {len(videos)} videos "
-        f"(safety_check={dry_run}, dry_run={dry_run})"
+        f"Hand-off: archiving {len(videos)} videos (safety_check={dry_run}, dry_run={dry_run})"
     )
 
     result = await video_repo.archive_video_batch(videos, dry_run=dry_run)
@@ -90,7 +89,7 @@ async def handoff_phase_task(videos_data: List[Dict[str, Any]], dry_run: bool) -
 
 
 @task(name="janitor_archive_stats")
-async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, int]:
+async def archive_cold_stats_task(retention_days: int = 7) -> dict[str, int]:
     """Archive stats_log rows older than retention_days from hot tier to vault."""
     video_repo = VideoRepository()
     run_logger = get_run_logger()
@@ -110,22 +109,18 @@ async def archive_cold_stats_task(retention_days: int = 7) -> Dict[str, int]:
 
             total_archived += archived
             batch_count += 1
-            run_logger.info(
-                f"Stats batch {batch_count}: {archived} rows (total: {total_archived})"
-            )
+            run_logger.info(f"Stats batch {batch_count}: {archived} rows (total: {total_archived})")
             await asyncio.sleep(1)
         except Exception as e:
             run_logger.error(f"Stats archival batch failed: {e}")
             raise
 
-    run_logger.info(
-        f"Stats archival complete: {total_archived} rows in {batch_count} batches"
-    )
+    run_logger.info(f"Stats archival complete: {total_archived} rows in {batch_count} batches")
     return {"archived": total_archived, "batches": batch_count}
 
 
 @task(name="janitor_log_summary")
-async def log_summary_task(results: Dict[str, Any]) -> None:
+async def log_summary_task(results: dict[str, Any]) -> None:
     """Emit final summary event for the janitor cycle."""
     run_logger = get_run_logger()
     run_logger.info("=" * 60)
@@ -156,7 +151,7 @@ async def janitor_flow(
     dry_run: bool = False,
     archive_stats: bool = True,
     batch_size: int = DEFAULT_BATCH_SIZE,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute the Janitor cleanup cycle — a strict transactional state machine.
 
@@ -180,7 +175,7 @@ async def janitor_flow(
     run_logger.info(f"  dry_run={dry_run}, archive_stats={archive_stats}")
     run_logger.info("=" * 60)
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "stats_archived": 0,
         "videos_archived": 0,
         "videos_failed": 0,
@@ -201,7 +196,7 @@ async def janitor_flow(
 
     # ── Phase 2: Sweep ────────────────────────────────────────────────────
     run_logger.info("Phase 2/3: Sweeping for PROCESSED videos...")
-    all_archivable: List[Dict[str, Any]] = []
+    all_archivable: list[dict[str, Any]] = []
     page = await sweep_phase_task.fn(batch_size)
     all_archivable.extend(page)
 
@@ -303,8 +298,8 @@ class JanitorAgent:
         archive_stats: bool = True,
         batch_size: int = DEFAULT_BATCH_SIZE,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = await janitor_flow(
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = await janitor_flow(
             dry_run=dry_run, archive_stats=archive_stats, batch_size=batch_size
         )
         return result
@@ -316,7 +311,7 @@ class JanitorAgent:
 @flow(name="janitor_cycle")
 async def janitor_cycle(
     dry_run: bool = False, archive_stats: bool = True, batch_size: int = DEFAULT_BATCH_SIZE
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Legacy function wrapper for backward compatibility."""
     agent = JanitorAgent()
     return await agent.run(dry_run=dry_run, archive_stats=archive_stats, batch_size=batch_size)

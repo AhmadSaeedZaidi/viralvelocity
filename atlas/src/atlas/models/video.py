@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -8,18 +8,18 @@ VideoStatus = Literal["PENDING", "PROCESSING", "PROCESSED", "ARCHIVED", "FAILED"
 
 class Video(BaseModel):
     id: str
-    channel_id: Optional[str] = None
+    channel_id: str | None = None
     title: str
-    published_at: Optional[datetime] = None
-    duration: Optional[int] = None
-    tags: Optional[list[str]] = None
-    category_id: Optional[str] = None
-    default_language: Optional[str] = None
-    wiki_topics: Optional[list[str]] = None
-    discovered_at: Optional[datetime] = None
-    last_updated_at: Optional[datetime] = None
-    archived_at: Optional[datetime] = None
-    status: Optional[str] = "PENDING"
+    published_at: datetime | None = None
+    duration: int | None = None
+    tags: list[str] | None = None
+    category_id: str | None = None
+    default_language: str | None = None
+    wiki_topics: list[str] | None = None
+    discovered_at: datetime | None = None
+    last_updated_at: datetime | None = None
+    archived_at: datetime | None = None
+    status: str | None = "PENDING"
     has_transcript: bool = False
     has_visuals: bool = False
 
@@ -29,8 +29,8 @@ class Video(BaseModel):
 class VideoStats(BaseModel):
     video_id: str
     timestamp: datetime
-    views: Optional[int] = None
-    likes: Optional[int] = None
-    comment_count: Optional[int] = None
+    views: int | None = None
+    likes: int | None = None
+    comment_count: int | None = None
 
     model_config = ConfigDict(from_attributes=True)

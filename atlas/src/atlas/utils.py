@@ -5,7 +5,8 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 logger = logging.getLogger("atlas.utils")
 
@@ -25,7 +26,7 @@ def retry_async(
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             current_delay = delay
-            last_exception: Optional[BaseException] = None
+            last_exception: BaseException | None = None
 
             for attempt in range(max_attempts):
                 try:
@@ -135,7 +136,7 @@ class KeyRing:
         self._iterator = itertools.cycle(self.keys)
 
         # Session tracking for exhaustible rotation
-        self._current_session_attempts: Dict[int, int] = {}
+        self._current_session_attempts: dict[int, int] = {}
 
         logger.info(f"KeyRing: Initialized '{pool_name}' with {len(self.keys)} keys.")
 
@@ -143,7 +144,7 @@ class KeyRing:
         """Get next key from the infinite cycle (original behavior)."""
         return next(self._iterator)
 
-    def start_session(self, session_id: Optional[int] = None) -> int:
+    def start_session(self, session_id: int | None = None) -> int:
         """
         Start a new exhaustible rotation session.
 
@@ -198,7 +199,8 @@ class KeyRing:
             )
         else:
             logger.critical(
-                f"KeyRing '{self.pool_name}': All {len(self.keys)} keys exhausted for session {session_id}"
+                f"KeyRing '{self.pool_name}': All {len(self.keys)} keys exhausted"
+                f" for session {session_id}"
             )
 
         return has_more
@@ -231,8 +233,8 @@ class ResiliencyExecutor:
     async def execute_async(
         self,
         request_func: Callable[[str], Any],
-        error_classifier: Optional[Callable[[Exception], tuple[bool, bool]]] = None,
-    ) -> Optional[Any]:
+        error_classifier: Callable[[Exception], tuple[bool, bool]] | None = None,
+    ) -> Any | None:
         """
         Execute an async API request with key rotation and Resiliency Strategy termination.
 
@@ -277,7 +279,7 @@ class ResiliencyExecutor:
                         else:
                             # All keys exhausted - Resiliency Strategy: Clean Death
                             self.logger.critical(
-                                f"🔥 RESILIENCY STRATEGY: All keys exhausted for {self.agent_name}. "
+                                f"RESILIENCY: All keys exhausted for {self.agent_name}. "
                                 f"Initiating clean container termination (exit 0)."
                             )
                             sys.exit(0)  # Clean death - container will restart
@@ -319,7 +321,7 @@ async def execute_youtube_request_async(
     key_ring: KeyRing,
     request_func: Callable[[str], Any],
     agent_name: str = "youtube_api",
-) -> Optional[Any]:
+) -> Any | None:
     """
     Convenience function for executing YouTube API requests with Resiliency Strategy.
 

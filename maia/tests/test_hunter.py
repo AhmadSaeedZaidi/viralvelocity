@@ -2,11 +2,10 @@
 Tests for Maia Hunter module.
 """
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from maia.hunter.flow import fetch_batch_task, ingest_results_task
 
 
@@ -31,7 +30,7 @@ async def test_fetch_batch_empty_queue():
 
 
 @pytest.mark.asyncio
-async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
+async def test_fetch_batch_with_items(mock_search_queue_item: dict[str, Any]):
     """Test fetch_batch with items in queue."""
     from atlas.models import SearchQueueItem
 
@@ -50,8 +49,8 @@ async def test_fetch_batch_with_items(mock_search_queue_item: Dict[str, Any]):
 @pytest.mark.asyncio
 async def test_ingest_results_with_snowball(
     mock_strategy: MagicMock,
-    mock_search_queue_item: Dict[str, Any],
-    mock_youtube_search_response: Dict[str, Any],
+    mock_search_queue_item: dict[str, Any],
+    mock_youtube_search_response: dict[str, Any],
 ):
     """Test ingest_results implements Snowball effect."""
     with (
@@ -86,8 +85,8 @@ async def test_ingest_results_with_snowball(
 @pytest.mark.asyncio
 async def test_ingest_results_handles_vault_failure(
     mock_strategy: MagicMock,
-    mock_search_queue_item: Dict[str, Any],
-    mock_youtube_search_response: Dict[str, Any],
+    mock_search_queue_item: dict[str, Any],
+    mock_youtube_search_response: dict[str, Any],
 ):
     """Test ingest_results continues even if vault storage fails."""
     with (

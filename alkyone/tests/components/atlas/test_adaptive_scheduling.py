@@ -3,12 +3,10 @@
 Real Integration Testing: Uses real HuggingFace vault for metrics storage.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from atlas.models import WatchlistItem
 
 
 @pytest.mark.integration
@@ -28,9 +26,7 @@ class TestAdaptiveScheduling:
         watchlist = await watchlist_repo._fetch_all(
             "SELECT video_id FROM watchlist WHERE video_id = ANY(%s)", (video_ids,)
         )
-        assert (
-            len(watchlist) == 3
-        ), f"Expected 3 videos in watchlist, got {len(watchlist)}"
+        assert len(watchlist) == 3, f"Expected 3 videos in watchlist, got {len(watchlist)}"
 
     @pytest.mark.asyncio
     async def test_fetch_tracking_batch(self, watchlist_repo):
@@ -40,7 +36,7 @@ class TestAdaptiveScheduling:
             {
                 "video_id": f"VIDEO_{i:03d}",
                 "tier": "HOURLY",
-                "next_track_at": datetime.now(timezone.utc) - timedelta(hours=1),
+                "next_track_at": datetime.now(UTC) - timedelta(hours=1),
             }
             for i in range(5)
         ]
@@ -66,7 +62,7 @@ class TestAdaptiveScheduling:
     @pytest.mark.asyncio
     async def test_update_watchlist_schedule(self, watchlist_repo):
         """Test batch updating watchlist schedules."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         updates = [
             {
@@ -92,41 +88,37 @@ class TestAdaptiveScheduling:
     @pytest.mark.asyncio
     async def test_calculate_next_track_time(self, watchlist_repo):
         """Test adaptive tier calculation based on video age."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Test HOURLY tier (< 24h old)
         published_recent = now - timedelta(hours=12)
         tier, next_time = watchlist_repo.calculate_next_track_time(published_recent)
         assert tier == "HOURLY", f"Expected HOURLY tier for 12h-old video, got {tier}"
         assert next_time > now, "next_track_at should be in the future"
-        assert next_time <= now + timedelta(
-            hours=1, minutes=1
-        ), f"HOURLY next_track_at too far: {next_time}"
+        assert next_time <= now + timedelta(hours=1, minutes=1), (
+            f"HOURLY next_track_at too far: {next_time}"
+        )
 
         # Test DAILY tier (1-7 days old)
         published_medium = now - timedelta(days=3)
         tier, next_time = watchlist_repo.calculate_next_track_time(published_medium)
         assert tier == "DAILY", f"Expected DAILY tier for 3-day-old video, got {tier}"
         assert next_time > now, "next_track_at should be in the future"
-        assert next_time <= now + timedelta(
-            days=1, hours=1
-        ), f"DAILY next_track_at too far: {next_time}"
+        assert next_time <= now + timedelta(days=1, hours=1), (
+            f"DAILY next_track_at too far: {next_time}"
+        )
 
         # Test WEEKLY tier (> 7 days old)
         published_old = now - timedelta(days=30)
         tier, next_time = watchlist_repo.calculate_next_track_time(published_old)
-        assert (
-            tier == "WEEKLY"
-        ), f"Expected WEEKLY tier for 30-day-old video, got {tier}"
+        assert tier == "WEEKLY", f"Expected WEEKLY tier for 30-day-old video, got {tier}"
         assert next_time > now, "next_track_at should be in the future"
-        assert next_time <= now + timedelta(
-            days=7, hours=1
-        ), f"WEEKLY next_track_at too far: {next_time}"
+        assert next_time <= now + timedelta(days=7, hours=1), (
+            f"WEEKLY next_track_at too far: {next_time}"
+        )
 
     @pytest.mark.asyncio
-    async def test_adaptive_scheduling_survives_janitor(
-        self, video_repo, watchlist_repo
-    ):
+    async def test_adaptive_scheduling_survives_janitor(self, video_repo, watchlist_repo):
         """Test that watchlist persists after video cleanup (Adaptive Scheduling)."""
         video_id = "VIDEO_PERSISTENT"
 
@@ -153,12 +145,12 @@ class TestAdaptiveScheduling:
         )
 
         # Adaptive Scheduling means video stays in watchlist
-        assert (
-            watchlist_entry is not None
-        ), f"Watchlist entry for {video_id} missing after video cleanup"
-        assert (
-            watchlist_entry["video_id"] == video_id
-        ), f"Watchlist video_id mismatch: {watchlist_entry['video_id']}"
+        assert watchlist_entry is not None, (
+            f"Watchlist entry for {video_id} missing after video cleanup"
+        )
+        assert watchlist_entry["video_id"] == video_id, (
+            f"Watchlist video_id mismatch: {watchlist_entry['video_id']}"
+        )
 
     @pytest.mark.asyncio
     async def test_vault_metrics_storage(self):
@@ -173,19 +165,19 @@ class TestAdaptiveScheduling:
                 "views": 10000,
                 "likes": 500,
                 "comment_count": 50,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
             {
                 "video_id": "VIDEO_METRICS_002",
                 "views": 5000,
                 "likes": 250,
                 "comment_count": 25,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         ]
 
         # Append to real Vault (HuggingFace)
-        test_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        test_date = datetime.now(UTC).strftime("%Y-%m-%d")
         vault.append_metrics(metrics_data, date=test_date)
 
         # Verify by attempting to list files (validates upload succeeded)

@@ -5,7 +5,7 @@ These tests verify Hunter and Tracker cycle logic using fully-mocked
 DAO and HTTP layers — no real infrastructure required.
 """
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,7 +16,7 @@ from maia.utils import RateLimitError
 
 @pytest.mark.asyncio
 async def test_hunter_cycle_complete_flow(
-    mock_search_queue_item: Dict[str, Any], mock_youtube_search_response: Dict[str, Any]
+    mock_search_queue_item: dict[str, Any], mock_youtube_search_response: dict[str, Any]
 ):
     """Test complete Hunter cycle from fetch to ingest with real vault storage."""
     with (
@@ -24,7 +24,6 @@ async def test_hunter_cycle_complete_flow(
         patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
         patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
     ):
-
         # Setup mocks
         mock_search_repo = MockSearchRepo.return_value
         mock_video_repo = MockVideoRepo.return_value
@@ -55,15 +54,9 @@ async def test_hunter_cycle_complete_flow(
         stats = await run_hunter_cycle(batch_size=1)
 
         # Assertions
-        assert (
-            stats["queries_processed"] == 1
-        ), f"Expected 1 query processed, got {stats}"
-        assert (
-            stats["videos_discovered"] == 1
-        ), f"Expected 1 video discovered, got {stats}"
-        assert (
-            stats["searches_successful"] == 1
-        ), f"Expected 1 successful search, got {stats}"
+        assert stats["queries_processed"] == 1, f"Expected 1 query processed, got {stats}"
+        assert stats["videos_discovered"] == 1, f"Expected 1 video discovered, got {stats}"
+        assert stats["searches_successful"] == 1, f"Expected 1 successful search, got {stats}"
         assert stats["searches_failed"] == 0, f"Expected 0 failed searches, got {stats}"
 
         # Verify DAO calls
@@ -75,7 +68,7 @@ async def test_hunter_cycle_complete_flow(
 
 @pytest.mark.asyncio
 async def test_tracker_cycle_complete_flow(
-    mock_tracker_target: Dict[str, Any], mock_youtube_stats_response: Dict[str, Any]
+    mock_tracker_target: dict[str, Any], mock_youtube_stats_response: dict[str, Any]
 ):
     """Test complete Tracker cycle from fetch to update."""
     with (
@@ -207,12 +200,8 @@ async def test_hunter_empty_queue_returns_idle():
 
         stats = await run_hunter_cycle(batch_size=10)
 
-        assert (
-            stats["queries_processed"] == 0
-        ), f"Expected idle cycle (0 queries), got {stats}"
-        assert (
-            stats["videos_discovered"] == 0
-        ), f"Expected 0 videos on empty queue, got {stats}"
+        assert stats["queries_processed"] == 0, f"Expected idle cycle (0 queries), got {stats}"
+        assert stats["videos_discovered"] == 0, f"Expected 0 videos on empty queue, got {stats}"
 
 
 @pytest.mark.asyncio
@@ -224,12 +213,8 @@ async def test_tracker_no_stale_videos_returns_idle():
 
         stats = await run_tracker_cycle(batch_size=50)
 
-        assert (
-            stats["videos_fetched"] == 0
-        ), f"Expected idle cycle (0 fetched), got {stats}"
-        assert (
-            stats["videos_updated"] == 0
-        ), f"Expected 0 updates on idle cycle, got {stats}"
+        assert stats["videos_fetched"] == 0, f"Expected idle cycle (0 fetched), got {stats}"
+        assert stats["videos_updated"] == 0, f"Expected 0 updates on idle cycle, got {stats}"
 
 
 @pytest.mark.asyncio
@@ -240,7 +225,7 @@ async def test_tracker_enforces_batch_size_limit():
         mock_video_repo.fetch_tracker_targets = AsyncMock(return_value=[])
 
         # Request 100 but should cap at 50
-        stats = await run_tracker_cycle(batch_size=100)
+        await run_tracker_cycle(batch_size=100)
 
         # Verify batch_size was capped at 50
         mock_video_repo.fetch_tracker_targets.assert_called_once_with(50)

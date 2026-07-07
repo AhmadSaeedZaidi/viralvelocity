@@ -2,11 +2,9 @@
 Tests for Maia Scribe module.
 """
 
-from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from maia.scribe.flow import (
     fetch_scribe_targets_task,
     process_transcript_task,
@@ -64,9 +62,7 @@ async def test_process_transcript_successful():
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
         patch("maia.scribe.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
@@ -94,9 +90,7 @@ async def test_process_transcript_unavailable():
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
         patch("maia.scribe.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
@@ -124,14 +118,13 @@ async def test_process_transcript_handles_vault_failure_with_retry(mock_sleep):
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.get_vault") as mock_get_vault,
+        patch("maia.scribe.flow.get_vault"),
         patch(
             "maia.scribe.flow.vault_op_with_retry",
             new_callable=AsyncMock,
             side_effect=Exception("Vault connection error"),
         ),
     ):
-        mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
         mock_repo.mark_failed = AsyncMock()
         mock_loader_instance = MockLoader.return_value
@@ -171,14 +164,11 @@ async def test_process_transcript_propagates_resiliency_strategy():
     video = Video(id="VIDEO_001", title="Test Video")
 
     with (
-        patch("maia.scribe.flow.VideoRepository") as MockRepo,
+        patch("maia.scribe.flow.VideoRepository"),
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
     ):
-        mock_repo = MockRepo.return_value
         mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(
-            side_effect=RateLimitError("429 Rate Limit")
-        )
+        mock_loader_instance.fetch = MagicMock(side_effect=RateLimitError("429 Rate Limit"))
 
         with pytest.raises(RateLimitError):
             await process_transcript_task.fn(video)
@@ -187,9 +177,7 @@ async def test_process_transcript_propagates_resiliency_strategy():
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_empty_queue():
     """Test run_scribe_cycle handles empty queue gracefully."""
-    with patch(
-        "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
-    ) as mock_fetch:
+    with patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = []
 
         await scribe_flow.fn(batch_size=10)
@@ -209,12 +197,8 @@ async def test_run_scribe_cycle_processes_batch():
     ]
 
     with (
-        patch(
-            "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
-        patch(
-            "maia.scribe.flow.process_transcript_task", new_callable=AsyncMock
-        ) as mock_process,
+        patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch,
+        patch("maia.scribe.flow.process_transcript_task", new_callable=AsyncMock) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.return_value = None
@@ -245,12 +229,8 @@ async def test_run_scribe_cycle_continues_on_individual_failures():
         return None
 
     with (
-        patch(
-            "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
-        patch(
-            "maia.scribe.flow.process_transcript_task", new_callable=AsyncMock
-        ) as mock_process,
+        patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch,
+        patch("maia.scribe.flow.process_transcript_task", new_callable=AsyncMock) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.side_effect = mock_process_side_effect
@@ -272,9 +252,7 @@ async def test_transcript_loader_retry_logic(mock_sleep):
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
         patch("maia.scribe.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value

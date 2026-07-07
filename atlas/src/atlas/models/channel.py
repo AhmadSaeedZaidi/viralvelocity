@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -7,11 +6,11 @@ from pydantic import BaseModel, ConfigDict
 class Channel(BaseModel):
     id: str
     title: str
-    country: Optional[str] = None
-    custom_url: Optional[str] = None
-    created_at: Optional[datetime] = None
+    country: str | None = None
+    custom_url: str | None = None
+    created_at: datetime | None = None
     is_verified: bool = False
-    last_scraped_at: Optional[datetime] = None
+    last_scraped_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -19,9 +18,9 @@ class Channel(BaseModel):
 class ChannelStats(BaseModel):
     channel_id: str
     timestamp: datetime
-    view_count: Optional[int] = None
-    subscriber_count: Optional[int] = None
-    video_count: Optional[int] = None
+    view_count: int | None = None
+    subscriber_count: int | None = None
+    video_count: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -29,9 +28,9 @@ class ChannelStats(BaseModel):
 class ChannelHistory(BaseModel):
     id: str
     channel_id: str
-    changed_at: Optional[datetime] = None
-    old_title: Optional[str] = None
-    new_title: Optional[str] = None
+    changed_at: datetime | None = None
+    old_title: str | None = None
+    new_title: str | None = None
     event_type: str
 
     model_config = ConfigDict(from_attributes=True)

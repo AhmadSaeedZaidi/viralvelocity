@@ -3,7 +3,7 @@ Pytest configuration and fixtures for Maia tests.
 """
 
 import logging
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,7 +57,7 @@ def mock_prefect_logger():
 
 
 @pytest.fixture
-def mock_youtube_search_response() -> Dict[str, Any]:
+def mock_youtube_search_response() -> dict[str, Any]:
     """Mock YouTube Search API response."""
     return {
         "kind": "youtube#searchListResponse",
@@ -83,7 +83,7 @@ def mock_youtube_search_response() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mock_youtube_stats_response() -> Dict[str, Any]:
+def mock_youtube_stats_response() -> dict[str, Any]:
     """Mock YouTube Videos API statistics response."""
     return {
         "kind": "youtube#videoListResponse",
@@ -104,7 +104,7 @@ def mock_youtube_stats_response() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mock_search_queue_item() -> Dict[str, Any]:
+def mock_search_queue_item() -> dict[str, Any]:
     """Mock search queue item from database."""
     return {
         "id": 1,
@@ -116,7 +116,7 @@ def mock_search_queue_item() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def mock_tracker_target() -> Dict[str, Any]:
+def mock_tracker_target() -> dict[str, Any]:
     """Mock tracker target video from database."""
     return {
         "id": "dQw4w9WgXcQ",

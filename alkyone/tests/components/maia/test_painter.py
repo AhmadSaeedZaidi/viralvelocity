@@ -73,16 +73,14 @@ async def test_painter_real_full_cycle_blender_tutorial(video_repo, channel_repo
         if not has_chapters and not has_heatmap:
             pytest.fail("Real video B0J27sf9N1Y no longer has required metadata.")
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.fail("Pre-flight check timed out after 180s - network or service issue")
     except yt_dlp.utils.DownloadError as e:
         error_str = str(e)
         if "429" in error_str:
             pytest.fail("YouTube Rate Limit (429) active during pre-flight check.")
         elif "Sign in" in error_str or "bot" in error_str:
-            pytest.fail(
-                "All extraction strategies blocked. " "YouTube anti-bot is active."
-            )
+            pytest.fail("All extraction strategies blocked. YouTube anti-bot is active.")
         raise
 
     # 2. Setup DB State
@@ -90,9 +88,7 @@ async def test_painter_real_full_cycle_blender_tutorial(video_repo, channel_repo
         "id": {"videoId": video_id},
         "snippet": {
             "channelId": info.get("channel_id", "unknown"),
-            "channelTitle": info.get("channel")
-            or info.get("uploader")
-            or "Test Channel",
+            "channelTitle": info.get("channel") or info.get("uploader") or "Test Channel",
             "title": info.get("title", "Test Video"),
             "publishedAt": "2023-11-16T00:00:00Z",
             "tags": ["blender"],
@@ -104,12 +100,8 @@ async def test_painter_real_full_cycle_blender_tutorial(video_repo, channel_repo
 
     ch_id = str(video_data["snippet"]["channelId"])
     ch_row = await channel_repo.get_by_id(ch_id)
-    assert (
-        ch_row is not None
-    ), "Channel should be indexed when a video is ingested (FK + title)"
-    assert (
-        ch_row.title or ""
-    ).strip(), "Channel title should be set (yt-dlp / snippet)"
+    assert ch_row is not None, "Channel should be indexed when a video is ingested (FK + title)"
+    assert (ch_row.title or "").strip(), "Channel title should be set (yt-dlp / snippet)"
 
     # Reset state from potential previous runs
     await video_repo._execute(
@@ -126,16 +118,10 @@ async def test_painter_real_full_cycle_blender_tutorial(video_repo, channel_repo
 
     # 4. Assertions - Database State
     print("[Test] Verifying Database State...")
-    video = await video_repo._fetch_one(
-        "SELECT * FROM videos WHERE id = %s", (video_id,)
-    )
+    video = await video_repo._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
 
-    assert (
-        video["status"] != "FAILED"
-    ), f"Video processing failed. Status: {video.get('status')}"
-    assert (
-        video["has_visuals"] is True
-    ), "Painter finished but 'has_visuals' is not True."
+    assert video["status"] != "FAILED", f"Video processing failed. Status: {video.get('status')}"
+    assert video["has_visuals"] is True, "Painter finished but 'has_visuals' is not True."
 
     # 5. CRITICAL: Verify REAL HuggingFace Upload
     print("[Test] Verifying REAL HuggingFace Upload...")
@@ -154,9 +140,7 @@ async def test_painter_real_full_cycle_blender_tutorial(video_repo, channel_repo
         # Check if visual evidence files exist in the REAL HuggingFace dataset
         try:
             files_in_repo = api.list_repo_files(repo_id=hf_dataset, repo_type="dataset")
-            visual_files = [
-                f for f in files_in_repo if f.startswith(f"frames/{video_id}/")
-            ]
+            visual_files = [f for f in files_in_repo if f.startswith(f"frames/{video_id}/")]
 
             assert len(visual_files) > 0, (
                 f"CRITICAL FAILURE: No files found in HuggingFace for video {video_id}! "
@@ -199,7 +183,5 @@ async def test_painter_handles_real_404_video(video_repo):
 
     await run_painter_cycle(batch_size=1)
 
-    video = await video_repo._fetch_one(
-        "SELECT * FROM videos WHERE id = %s", (fake_id,)
-    )
+    video = await video_repo._fetch_one("SELECT * FROM videos WHERE id = %s", (fake_id,))
     assert video["status"] == "FAILED", "Invalid video should be marked FAILED"

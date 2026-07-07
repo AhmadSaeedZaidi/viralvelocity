@@ -3,7 +3,6 @@ Basic usage examples for Atlas infrastructure library.
 """
 
 import asyncio
-from typing import List
 
 from atlas import AlertChannel, AlertLevel, db, events, notifier, settings, vault
 

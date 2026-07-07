@@ -2,11 +2,10 @@
 Tests for Maia Tracker module.
 """
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from maia.tracker.flow import fetch_targets_task, update_stats_task
 
 
@@ -31,15 +30,13 @@ async def test_fetch_targets_empty():
 
 
 @pytest.mark.asyncio
-async def test_fetch_targets_with_videos(mock_tracker_target: Dict[str, Any]):
+async def test_fetch_targets_with_videos(mock_tracker_target: dict[str, Any]):
     """Test fetch_targets returns videos needing updates."""
     from atlas.models import Video
 
     with patch("maia.tracker.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
-        mock_repo.fetch_tracker_targets = AsyncMock(
-            return_value=[Video(**mock_tracker_target)]
-        )
+        mock_repo.fetch_tracker_targets = AsyncMock(return_value=[Video(**mock_tracker_target)])
 
         result = await fetch_targets_task.fn(batch_size=50)
 
@@ -56,7 +53,7 @@ async def test_update_stats_empty_list(mock_strategy: MagicMock):
 
 @pytest.mark.asyncio
 async def test_update_stats_success(
-    mock_strategy: MagicMock, mock_youtube_stats_response: Dict[str, Any]
+    mock_strategy: MagicMock, mock_youtube_stats_response: dict[str, Any]
 ):
     """Test update_stats successfully fetches and persists statistics."""
     mock_strategy.fetch_videos.return_value = mock_youtube_stats_response
@@ -77,7 +74,7 @@ async def test_update_stats_success(
 
 @pytest.mark.asyncio
 async def test_update_stats_handles_api_errors(
-    mock_strategy: MagicMock, mock_tracker_target: Dict[str, Any]
+    mock_strategy: MagicMock, mock_tracker_target: dict[str, Any]
 ):
     """Test update_stats handles API errors gracefully."""
     mock_strategy.fetch_videos.side_effect = Exception("API Error")
@@ -94,7 +91,7 @@ async def test_update_stats_handles_api_errors(
 
 @pytest.mark.asyncio
 async def test_update_stats_propagates_rate_limit(
-    mock_strategy: MagicMock, mock_tracker_target: Dict[str, Any]
+    mock_strategy: MagicMock, mock_tracker_target: dict[str, Any]
 ):
     """Test update_stats propagates RateLimitError."""
     from maia.utils import RateLimitError

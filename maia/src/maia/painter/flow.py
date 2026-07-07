@@ -10,7 +10,7 @@ import asyncio
 import logging
 import random
 import subprocess
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import numpy as np
 from atlas.models import Video
@@ -29,14 +29,14 @@ MAX_CONCURRENT_VIDEOS = 5
 
 
 @task(name="fetch_painter_targets")
-async def fetch_painter_targets_task(batch_size: int) -> List[Video]:
+async def fetch_painter_targets_task(batch_size: int) -> list[Video]:
     """Fetch videos that need visual processing."""
     video_repo = VideoRepository()
     targets = await video_repo.claim_painter_batch(batch_size)
     return targets
 
 
-def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
+def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> bytes | None:
     """
     SURGICAL EXTRACTION: Uses FFmpeg to seek and grab a single frame.
 
@@ -91,15 +91,15 @@ def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> Optional[bytes]:
 
 
 def _extract_frames_surgical(
-    stream_url: str, target_timestamps: List[float], duration: float, run_logger: Any
-) -> List[Tuple[int, bytes]]:
+    stream_url: str, target_timestamps: list[float], duration: float, run_logger: Any
+) -> list[tuple[int, bytes]]:
     """
     Worker function using FFmpeg for surgical frame extraction.
 
     Executed in a thread pool to avoid blocking the asyncio event loop.
     Each frame is extracted independently via HTTP Range requests.
     """
-    frames_to_vault: List[Tuple[int, bytes]] = []
+    frames_to_vault: list[tuple[int, bytes]] = []
 
     fps = 30.0
 
@@ -140,7 +140,7 @@ async def process_frames_task(video: Video) -> None:
             await video_repo.mark_failed(vid_id)
             return
 
-        target_timestamps: Set[float] = set()
+        target_timestamps: set[float] = set()
 
         if chapters:
             run_logger.info(f"Adding {len(chapters)} chapter start points for {vid_id}")
@@ -189,7 +189,7 @@ async def process_frames_task(video: Video) -> None:
 
 
 @flow(name="run_painter_cycle")
-async def painter_flow(batch_size: int) -> Dict[str, Any]:
+async def painter_flow(batch_size: int) -> dict[str, Any]:
     """
     Execute a complete Painter cycle with PARALLEL processing.
 
@@ -239,8 +239,8 @@ class PainterAgent:
             help="Number of videos to process per cycle (default: 5)",
         )
 
-    async def run(self, batch_size: int = 5, **kwargs: Any) -> Dict[str, Any]:
-        result: Dict[str, Any] = await painter_flow(batch_size=batch_size)
+    async def run(self, batch_size: int = 5, **kwargs: Any) -> dict[str, Any]:
+        result: dict[str, Any] = await painter_flow(batch_size=batch_size)
         return result
 
 

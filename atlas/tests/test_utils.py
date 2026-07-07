@@ -1,7 +1,5 @@
 """Tests for utility functions."""
 
-import pytest
-
 from atlas.utils import validate_channel_id, validate_youtube_id
 
 

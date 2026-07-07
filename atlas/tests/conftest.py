@@ -1,14 +1,13 @@
 """Pytest configuration and fixtures for Atlas tests."""
 
 import os
-from typing import Any, AsyncGenerator, Dict
+from typing import Any
 
 import pytest
-import pytest_asyncio
 
 
 @pytest.fixture(scope="session")
-def test_env() -> Dict[str, str]:
+def test_env() -> dict[str, str]:
     """
     Provide test environment variables for reference.
 
@@ -56,7 +55,7 @@ def mock_vault(monkeypatch):
     Provides in-memory storage for testing vault operations
     without requiring real HuggingFace or GCS credentials.
     """
-    storage: Dict[str, Any] = {}
+    storage: dict[str, Any] = {}
 
     def mock_store(path: str, data: Any) -> None:
         storage[path] = data
@@ -90,13 +89,12 @@ def mock_key_ring(monkeypatch):
 
     Provides deterministic key rotation for testing.
     """
-    from atlas.utils import KeyRing
 
     class MockKeyRing:
         def __init__(self, pool_name: str):
             self.pool_name = pool_name
             self.keys = ["test_key_1", "test_key_2", "test_key_3"]
-            self._session_attempts: Dict[int, int] = {}
+            self._session_attempts: dict[int, int] = {}
 
         def start_session(self, session_id: int = None) -> int:
             if session_id is None:

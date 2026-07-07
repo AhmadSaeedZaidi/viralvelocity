@@ -1,7 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import orjson
 
@@ -14,7 +14,7 @@ logger = logging.getLogger("atlas.repositories.event")
 class EventRepository(DatabaseAdapter):
     async def emit(self, event_type: str, entity_id: str, payload: dict[str, Any]) -> None:
         event_id = str(uuid.uuid4())
-        created_at = datetime.now(timezone.utc)
+        created_at = datetime.now(UTC)
         payload_json = orjson.dumps(payload).decode("utf-8")
 
         try:

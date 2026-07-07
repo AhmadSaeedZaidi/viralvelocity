@@ -1,0 +1,82 @@
+---
+# Stage: commit — fast local formatting & linting
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff
+        name: ruff check (atlas)
+        args: [--fix, --exit-non-zero-on-fix, --config, pyproject.toml]
+        files: ^atlas/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+      - id: ruff
+        name: ruff check (maia)
+        args: [--fix, --exit-non-zero-on-fix, --config, pyproject.toml]
+        files: ^maia/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+      - id: ruff
+        name: ruff check (alkyone)
+        args: [--fix, --exit-non-zero-on-fix, --config, pyproject.toml]
+        files: ^alkyone/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff format (atlas)
+        args: [--config, pyproject.toml]
+        files: ^atlas/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff format (maia)
+        args: [--config, pyproject.toml]
+        files: ^maia/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff format (alkyone)
+        args: [--config, pyproject.toml]
+        files: ^alkyone/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+# Stage: pre-push — heavier gates (mypy, tests, full lint)
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: unit tests (atlas + maia)
+        entry: make test-unit
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+
+      - id: lint-check
+        name: lint check (readonly — no fix)
+        entry: make lint
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+
+      - id: type-check-atlas
+        name: mypy (atlas)
+        entry: mypy atlas/src/atlas --config-file atlas/pyproject.toml --no-error-summary
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true
+
+      - id: type-check-maia
+        name: mypy (maia)
+        entry: mypy maia/src/maia --config-file maia/pyproject.toml --no-error-summary
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        always_run: true

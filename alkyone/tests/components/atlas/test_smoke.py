@@ -4,8 +4,9 @@ Run with: pytest tests/test_smoke.py or make smoke-test
 """
 
 import pytest
-from atlas import db, settings
 from atlas.vault import get_vault
+
+from atlas import db, settings
 
 
 @pytest.fixture(autouse=True)
@@ -48,17 +49,18 @@ def test_vault_configuration():
         hf_token = os.getenv("HF_TOKEN")
         hf_dataset_id = os.getenv("HF_DATASET_ID")
 
-        assert (
-            hf_token is not None
-        ), "HF_TOKEN not set! Set it with: export HF_TOKEN='hf_xxxxxxxxxxxxx'"
+        assert hf_token is not None, (
+            "HF_TOKEN not set! Set it with: export HF_TOKEN='hf_xxxxxxxxxxxxx'"
+        )
         assert hf_token != "mock_token", "HF_TOKEN is 'mock_token'! Use a real token."
 
-        assert (
-            hf_dataset_id is not None
-        ), "HF_DATASET_ID not set! Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
-        assert (
-            hf_dataset_id != "mock/dataset"
-        ), "HF_DATASET_ID is 'mock/dataset'! Use a real dataset."
+        assert hf_dataset_id is not None, (
+            "HF_DATASET_ID not set! "
+            "Set it with: export HF_DATASET_ID='username/pleiades-test-vault'"
+        )
+        assert hf_dataset_id != "mock/dataset", (
+            "HF_DATASET_ID is 'mock/dataset'! Use a real dataset."
+        )
 
         # Validate settings
         assert settings.HF_DATASET_ID is not None, "HF_DATASET_ID not configured in settings"

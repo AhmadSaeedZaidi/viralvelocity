@@ -1,13 +1,16 @@
-.PHONY: help install lint test test-unit test-int clean
+.PHONY: help install lint lint-fix test test-unit test-int clean pre-commit-install pre-commit
 
 help:
 	@echo "Pleiades Monorepo Development Commands:"
-	@echo "  make install     - Install all dependencies"
-	@echo "  make lint        - Run linters on all modules"
-	@echo "  make test        - Run ALL tests (unit + integration)"
-	@echo "  make test-unit   - Run unit tests only (Atlas + Maia)"
-	@echo "  make test-int    - Run integration tests (Alkyone)"
-	@echo "  make clean       - Clean all artifacts"
+	@echo "  make install            - Install all dependencies"
+	@echo "  make pre-commit-install - Install pre-commit hook scripts"
+	@echo "  make pre-commit         - Run pre-commit on all files (commit stage)"
+	@echo "  make lint               - Run linters (readonly) on all modules"
+	@echo "  make lint-fix           - Auto-fix lint issues (ruff check --fix + format)"
+	@echo "  make test               - Run ALL tests (unit + integration)"
+	@echo "  make test-unit          - Run unit tests only (Atlas + Maia)"
+	@echo "  make test-int           - Run integration tests (Alkyone)"
+	@echo "  make clean              - Clean all artifacts"
 
 install:
 	$(MAKE) -C atlas install
@@ -23,6 +26,17 @@ lint:
 	$(MAKE) -C atlas lint
 	$(MAKE) -C maia lint
 	$(MAKE) -C alkyone lint
+
+pre-commit-install:
+	pre-commit install --hook-type pre-commit --hook-type pre-push
+
+pre-commit:
+	pre-commit run --all-files
+
+lint-fix:
+	$(MAKE) -C atlas lint-local
+	$(MAKE) -C maia lint-local
+	$(MAKE) -C alkyone lint-local
 
 test: test-unit test-int
 

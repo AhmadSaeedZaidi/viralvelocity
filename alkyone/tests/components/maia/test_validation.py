@@ -4,7 +4,6 @@ Validation tests for Maia components.
 Tests for input validation, error handling, and edge cases.
 """
 
-from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -88,9 +87,9 @@ async def test_ingest_results_handles_empty_tags():
         # Verify only valid tag was added
         args = mock_search_repo.add_terms.call_args[0][0]
         assert "valid_tag" in args, f"Expected 'valid_tag' in filtered tags, got {args}"
-        assert (
-            len(args) == 1
-        ), f"Expected exactly 1 valid tag after filtering, got {len(args)}: {args}"
+        assert len(args) == 1, (
+            f"Expected exactly 1 valid tag after filtering, got {len(args)}: {args}"
+        )
 
 
 @pytest.mark.asyncio
@@ -173,9 +172,7 @@ async def test_update_stats_handles_deleted_videos():
         result = await update_stats(videos)
 
         # Should return 0 updates (no videos found)
-        assert (
-            result == 0
-        ), f"Expected 0 updates for deleted/private videos, got {result}"
+        assert result == 0, f"Expected 0 updates for deleted/private videos, got {result}"
         mock_video_repo.update_stats_batch.assert_not_called()
 
 
@@ -185,11 +182,9 @@ async def test_update_stats_handles_network_errors():
     videos = [{"id": "test123", "title": "Test Video"}]
 
     with (
-        patch("maia.tracker.flow.VideoRepository") as MockVideoRepo,
+        patch("maia.tracker.flow.VideoRepository"),
         patch("maia.tracker.flow.YouTubeSearchStrategy") as MockStrategyClass,
     ):
-        mock_video_repo = MockVideoRepo.return_value
-
         # Simulate network error
         mock_strategy = MagicMock()
         mock_strategy.fetch_videos = AsyncMock(side_effect=Exception("Connection refused"))
@@ -238,7 +233,5 @@ async def test_update_stats_partial_success():
         result = await update_stats(videos)
 
         # Should return 1 (partial success)
-        assert (
-            result == 1
-        ), f"Expected 1 update in partial success scenario, got {result}"
+        assert result == 1, f"Expected 1 update in partial success scenario, got {result}"
         mock_video_repo.log_stats_batch.assert_called_once()

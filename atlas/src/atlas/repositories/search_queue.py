@@ -1,6 +1,5 @@
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from atlas.adapters import DatabaseAdapter
 from atlas.models.search_queue import SearchQueueItem
@@ -26,11 +25,11 @@ class SearchQueueRepository(DatabaseAdapter):
     async def update_state(
         self,
         topic_id: int,
-        next_token: Optional[str],
+        next_token: str | None,
         result_count: int,
         status: str = "active",
     ) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE search_queue

@@ -2,12 +2,11 @@
 Tests for Maia Archeologist module.
 """
 
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from maia.archeologist.flow import ArcheologistAgent, archeology_flow, hunt_history_task
+from maia.archeologist.flow import archeology_flow, hunt_history_task
 from maia.utils import RateLimitError
 
 
@@ -21,7 +20,7 @@ def mock_strategy() -> MagicMock:
 @pytest.mark.asyncio
 async def test_hunt_history_successful_retrieval(mock_strategy: MagicMock):
     """Test hunt_history successfully retrieves and ingests historical videos."""
-    mock_response_data: Dict[str, Any] = {
+    mock_response_data: dict[str, Any] = {
         "kind": "youtube#searchListResponse",
         "items": [
             {
@@ -113,9 +112,7 @@ async def test_run_archeology_campaign_iterates_through_years(mock_strategy: Mag
     with patch(
         "maia.archeologist.flow.hunt_history_task", new_callable=AsyncMock
     ) as mock_hunt_task:
-        result = await archeology_flow.fn(
-            start_year=2010, end_year=2011, strategy=mock_strategy
-        )
+        result = await archeology_flow.fn(start_year=2010, end_year=2011, strategy=mock_strategy)
 
         assert mock_hunt_task.call_count == 24
 

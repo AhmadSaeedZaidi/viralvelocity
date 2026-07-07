@@ -2,15 +2,15 @@ import abc
 import io
 import json
 import logging
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from atlas.config import settings
 
 HAS_GCS = False
 try:
     from google.cloud import storage  # type: ignore
-    from google.cloud.storage import Client as GCSClient  # type: ignore
+    from google.cloud.storage import Client as GCSClient  # type: ignore  # noqa: F401
 
     HAS_GCS = True
 except ImportError:
@@ -29,8 +29,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     try:
-        from google.cloud import storage
-        from google.cloud.storage import Client as GCSClient
+        from google.cloud import storage  # noqa: F401
     except ImportError:
         pass
 
@@ -49,15 +48,15 @@ class VaultStrategy(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def fetch_json(self, path: str) -> Optional[Dict[Any, Any]]:
+    def fetch_json(self, path: str) -> dict[Any, Any] | None:
         pass
 
     @abc.abstractmethod
-    def list_files(self, prefix: str) -> List[str]:
+    def list_files(self, prefix: str) -> list[str]:
         pass
 
     @abc.abstractmethod
-    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+    def store_visual_evidence(self, video_id: str, frames: list[tuple[int, bytes]]) -> None:
         pass
 
     @abc.abstractmethod
@@ -65,35 +64,33 @@ class VaultStrategy(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
+    def fetch_binary(self, path: str) -> io.BytesIO | None:
         pass
 
-    def store_metadata(
-        self, video_id: str, data: Dict[Any, Any], date: Optional[str] = None
-    ) -> None:
+    def store_metadata(self, video_id: str, data: dict[Any, Any], date: str | None = None) -> None:
         if date is None:
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date = datetime.now(UTC).strftime("%Y-%m-%d")
         path = f"metadata/{date}/{video_id}.json"
         self.store_json(path, data)
 
-    def fetch_metadata(self, video_id: str, date: str) -> Optional[Dict[Any, Any]]:
+    def fetch_metadata(self, video_id: str, date: str) -> dict[Any, Any] | None:
         path = f"metadata/{date}/{video_id}.json"
         return self.fetch_json(path)
 
-    def store_transcript(self, video_id: str, transcript: Dict[Any, Any]) -> None:
+    def store_transcript(self, video_id: str, transcript: dict[Any, Any]) -> None:
         path = f"transcripts/{video_id}.json"
         self.store_json(path, transcript)
 
-    def fetch_transcript(self, video_id: str) -> Optional[Dict[Any, Any]]:
+    def fetch_transcript(self, video_id: str) -> dict[Any, Any] | None:
         path = f"transcripts/{video_id}.json"
         return self.fetch_json(path)
 
     @abc.abstractmethod
     def append_metrics(
         self,
-        data: List[Dict[Any, Any]],
-        date: Optional[str] = None,
-        hour: Optional[str] = None,
+        data: list[dict[Any, Any]],
+        date: str | None = None,
+        hour: str | None = None,
     ) -> None:
         pass
 
@@ -102,8 +99,7 @@ class HuggingFaceVault(VaultStrategy):
     def __init__(self) -> None:
         if not HAS_HF:
             raise ImportError(
-                "HuggingFace dependencies not installed. "
-                "Install with: pip install huggingface-hub"
+                "HuggingFace dependencies not installed. Install with: pip install huggingface-hub"
             )
         if not settings.HF_DATASET_ID:
             raise ValueError("HF_DATASET_ID required for HuggingFace vault")
@@ -128,7 +124,7 @@ class HuggingFaceVault(VaultStrategy):
             logger.error(f"HF upload failed for {path}: {e}")
             raise
 
-    def fetch_json(self, path: str) -> Optional[Dict[Any, Any]]:
+    def fetch_json(self, path: str) -> dict[Any, Any] | None:
         try:
             local_path = hf_hub_download(
                 repo_id=self.repo_id,
@@ -136,14 +132,14 @@ class HuggingFaceVault(VaultStrategy):
                 repo_type="dataset",
                 token=self.token,
             )
-            with open(local_path, "r") as f:
-                result: Dict[Any, Any] = json.load(f)
+            with open(local_path) as f:
+                result: dict[Any, Any] = json.load(f)
                 return result
         except Exception as e:
             logger.warning(f"Failed to fetch {path} from HF vault: {e}")
             return None
 
-    def list_files(self, prefix: str) -> List[str]:
+    def list_files(self, prefix: str) -> list[str]:
         try:
             files = self.api.list_repo_files(
                 repo_id=self.repo_id,
@@ -154,7 +150,7 @@ class HuggingFaceVault(VaultStrategy):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+    def store_visual_evidence(self, video_id: str, frames: list[tuple[int, bytes]]) -> None:
         """Stores visual frames cleanly using a single commit operation to avoid API rate limits."""
         try:
             operations = []
@@ -192,7 +188,7 @@ class HuggingFaceVault(VaultStrategy):
             logger.error(f"HF binary upload failed for {path}: {e}")
             raise
 
-    def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
+    def fetch_binary(self, path: str) -> io.BytesIO | None:
         try:
             if path.startswith("hf://"):
                 path = path.split(self.repo_id + "/")[-1]
@@ -213,9 +209,9 @@ class HuggingFaceVault(VaultStrategy):
 
     def append_metrics(
         self,
-        data: List[Dict[Any, Any]],
-        date: Optional[str] = None,
-        hour: Optional[str] = None,
+        data: list[dict[Any, Any]],
+        date: str | None = None,
+        hour: str | None = None,
     ) -> None:
         """
         Append time-series metrics to partitioned Parquet files.
@@ -228,9 +224,9 @@ class HuggingFaceVault(VaultStrategy):
             raise ImportError("Pandas required for metrics")
 
         if date is None:
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date = datetime.now(UTC).strftime("%Y-%m-%d")
         if hour is None:
-            hour = datetime.now(timezone.utc).strftime("%H")
+            hour = datetime.now(UTC).strftime("%H")
 
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
 
@@ -278,8 +274,7 @@ class GCSVault(VaultStrategy):
     def __init__(self) -> None:
         if not HAS_GCS:
             raise ImportError(
-                "Google Cloud Storage not installed. "
-                "Install with: pip install google-cloud-storage"
+                "Google Cloud Storage not installed. Install with: pip install google-cloud-storage"
             )
         if not settings.GCS_BUCKET_NAME:
             raise ValueError("GCS_BUCKET_NAME required for GCS vault")
@@ -297,18 +292,18 @@ class GCSVault(VaultStrategy):
             logger.error(f"GCS upload failed for {path}: {e}")
             raise
 
-    def fetch_json(self, path: str) -> Optional[Dict[Any, Any]]:
+    def fetch_json(self, path: str) -> dict[Any, Any] | None:
         try:
             blob = self.bucket.blob(path)
             if not blob.exists():
                 return None
-            result: Dict[Any, Any] = json.loads(blob.download_as_text())
+            result: dict[Any, Any] = json.loads(blob.download_as_text())
             return result
         except Exception as e:
             logger.warning(f"Failed to fetch {path} from GCS vault: {e}")
             return None
 
-    def list_files(self, prefix: str) -> List[str]:
+    def list_files(self, prefix: str) -> list[str]:
         try:
             blobs = self.client.list_blobs(self.bucket_name, prefix=prefix)
             return [blob.name for blob in blobs]
@@ -316,7 +311,7 @@ class GCSVault(VaultStrategy):
             logger.error(f"Failed to list files with prefix {prefix}: {e}")
             return []
 
-    def store_visual_evidence(self, video_id: str, frames: List[Tuple[int, bytes]]) -> None:
+    def store_visual_evidence(self, video_id: str, frames: list[tuple[int, bytes]]) -> None:
         """Stores visual frames individually using the frames/ path."""
         try:
             for idx, img_bytes in frames:
@@ -339,7 +334,7 @@ class GCSVault(VaultStrategy):
             logger.error(f"GCS binary upload failed for {path}: {e}")
             raise
 
-    def fetch_binary(self, path: str) -> Optional[io.BytesIO]:
+    def fetch_binary(self, path: str) -> io.BytesIO | None:
         try:
             if path.startswith("gs://"):
                 path = path.split(self.bucket_name + "/")[-1]
@@ -358,9 +353,9 @@ class GCSVault(VaultStrategy):
 
     def append_metrics(
         self,
-        data: List[Dict[Any, Any]],
-        date: Optional[str] = None,
-        hour: Optional[str] = None,
+        data: list[dict[Any, Any]],
+        date: str | None = None,
+        hour: str | None = None,
     ) -> None:
         """
         Append time-series metrics to partitioned Parquet files in GCS.
@@ -375,9 +370,9 @@ class GCSVault(VaultStrategy):
             )
 
         if date is None:
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            date = datetime.now(UTC).strftime("%Y-%m-%d")
         if hour is None:
-            hour = datetime.now(timezone.utc).strftime("%H")
+            hour = datetime.now(UTC).strftime("%H")
 
         path = f"metrics/date={date}/hour={hour}/stats.parquet"
 
@@ -414,7 +409,7 @@ class GCSVault(VaultStrategy):
             raise
 
 
-_vault_instance: Optional[VaultStrategy] = None
+_vault_instance: VaultStrategy | None = None
 
 
 def get_vault() -> VaultStrategy:

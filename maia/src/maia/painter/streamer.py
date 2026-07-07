@@ -9,7 +9,7 @@ Architecture:
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 import yt_dlp
 from tenacity import (
@@ -31,7 +31,7 @@ class StealthVideoStreamer:
     construction time.  Direct ``os.environ`` access is forbidden.
     """
 
-    def __init__(self, cookies_path: Optional[str] = None) -> None:
+    def __init__(self, cookies_path: str | None = None) -> None:
         """Initialise streamer.
 
         Args:
@@ -40,13 +40,13 @@ class StealthVideoStreamer:
                           ``atlas.config.settings.youtube_cookies_resolved_path``.
         """
         if cookies_path is not None:
-            resolved: Optional[str] = cookies_path
+            resolved: str | None = cookies_path
         else:
             from atlas.config import settings
 
             resolved = settings.youtube_cookies_resolved_path
 
-        self.cookies_path: Optional[Path] = None
+        self.cookies_path: Path | None = None
         if resolved:
             p = Path(resolved)
             if p.exists():
@@ -56,9 +56,9 @@ class StealthVideoStreamer:
 
     # ── yt-dlp option builders ───────────────────────────────────────────
 
-    def _get_base_options(self) -> Dict[str, Any]:
+    def _get_base_options(self) -> dict[str, Any]:
         """Base yt-dlp options shared across all strategies."""
-        opts: Dict[str, Any] = {
+        opts: dict[str, Any] = {
             "quiet": True,
             "no_warnings": True,
             "nocheckcertificate": True,
@@ -73,7 +73,7 @@ class StealthVideoStreamer:
             opts["cookiefile"] = str(self.cookies_path)
         return opts
 
-    def _get_primary_options(self) -> Dict[str, Any]:
+    def _get_primary_options(self) -> dict[str, Any]:
         """Primary strategy: web client with cookies."""
         opts = self._get_base_options()
         opts["extractor_args"] = {
@@ -84,7 +84,7 @@ class StealthVideoStreamer:
         }
         return opts
 
-    def _get_fallback_options(self) -> Dict[str, Any]:
+    def _get_fallback_options(self) -> dict[str, Any]:
         """Fallback strategy: TV / mobile clients (less likely to be blocked)."""
         opts = self._get_base_options()
         opts["extractor_args"] = {
@@ -97,13 +97,13 @@ class StealthVideoStreamer:
     # ── Extraction ───────────────────────────────────────────────────────
 
     @staticmethod
-    def _resolve_stream_url(info: Dict[str, Any]) -> Optional[str]:
+    def _resolve_stream_url(info: dict[str, Any]) -> str | None:
         """Ensure we have a usable stream URL, preferring mp4 for OpenCV."""
         stream_url = info.get("url")
         if stream_url:
             return cast(str, stream_url)
 
-        formats: List[Dict[str, Any]] = info.get("formats", [])
+        formats: list[dict[str, Any]] = info.get("formats", [])
         mp4_formats = [f for f in formats if f.get("ext") == "mp4" and f.get("url")]
         if mp4_formats:
             best = max(
@@ -120,7 +120,7 @@ class StealthVideoStreamer:
         retry=retry_if_exception_type(yt_dlp.utils.DownloadError),
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )
-    def extract_info(self, video_url: str) -> Dict[str, Any]:
+    def extract_info(self, video_url: str) -> dict[str, Any]:
         """Extract video metadata and stream info via yt-dlp.
 
         Tries the primary (web + cookies) strategy first, then falls back
@@ -144,7 +144,7 @@ class StealthVideoStreamer:
             ("Fallback (TV/Mobile)", self._get_fallback_options()),
         ]
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for name, options in strategies:
             try:
@@ -153,7 +153,7 @@ class StealthVideoStreamer:
                     info = ydl.extract_info(video_url, download=False)
                     if info:
                         logger.info(f"[yt-dlp] Success with {name}")
-                        return cast(Dict[str, Any], info)
+                        return cast(dict[str, Any], info)
             except yt_dlp.utils.DownloadError as e:
                 last_error = e
                 error_msg = str(e)
@@ -170,8 +170,8 @@ class StealthVideoStreamer:
         raise last_error or yt_dlp.utils.DownloadError("All extraction strategies exhausted")
 
     def extract_heatmap_peaks(
-        self, heatmap_data: List[Dict[str, Any]], top_n: int = 5
-    ) -> List[float]:
+        self, heatmap_data: list[dict[str, Any]], top_n: int = 5
+    ) -> list[float]:
         """Extract top *N* peak timestamps from video heatmap data.
 
         Args:

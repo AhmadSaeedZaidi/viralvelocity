@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import aiohttp
 
@@ -31,19 +32,19 @@ _CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 _API_BATCH_LIMIT = 50
 
 
-def _chunk(seq: Sequence[str], n: int) -> List[List[str]]:
+def _chunk(seq: Sequence[str], n: int) -> list[list[str]]:
     """Split ``seq`` into chunks of size ``n``."""
     return [list(seq[i : i + n]) for i in range(0, len(seq), n)]
 
 
 async def _execute_get(
     url: str,
-    params: Dict[str, Any],
+    params: dict[str, Any],
     executor: ResiliencyExecutor,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute a single GET via the resiliency executor (key rotation on 429/403)."""
 
-    async def make_request(api_key: str) -> Dict[str, Any]:
+    async def make_request(api_key: str) -> dict[str, Any]:
         params_with_key = {**params, "key": api_key}
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -51,7 +52,7 @@ async def _execute_get(
             ) as resp:
                 text = await resp.text()
                 if resp.status == 200:
-                    result: Dict[str, Any] = json.loads(text) if text else {}
+                    result: dict[str, Any] = json.loads(text) if text else {}
                     return result
                 if resp.status in (403, 429):
                     raise Exception(f"HTTP {resp.status}: {text[:200]}")
@@ -64,10 +65,10 @@ async def _execute_get(
 async def lookup_videos(
     video_ids: Sequence[str],
     *,
-    executor: Optional[ResiliencyExecutor] = None,
+    executor: ResiliencyExecutor | None = None,
     key_ring_pool: str = "hunting",
     parts: str = "snippet,contentDetails,statistics",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Resolve full metadata for a list of YouTube video IDs.
 
     Args:
@@ -87,7 +88,7 @@ async def lookup_videos(
     if executor is None:
         executor = ResiliencyExecutor(KeyRing(key_ring_pool), agent_name="youtube_lookup")
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for chunk in _chunk(list(video_ids), _API_BATCH_LIMIT):
         resp = await _execute_get(
             _VIDEOS_URL,
@@ -103,10 +104,10 @@ async def lookup_videos(
 async def lookup_channels(
     channel_ids: Sequence[str],
     *,
-    executor: Optional[ResiliencyExecutor] = None,
+    executor: ResiliencyExecutor | None = None,
     key_ring_pool: str = "hunting",
     parts: str = "snippet,statistics",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Resolve full metadata for a list of YouTube channel IDs.
 
     Args:
@@ -124,7 +125,7 @@ async def lookup_channels(
     if executor is None:
         executor = ResiliencyExecutor(KeyRing(key_ring_pool), agent_name="youtube_lookup")
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for chunk in _chunk(list(channel_ids), _API_BATCH_LIMIT):
         resp = await _execute_get(
             _CHANNELS_URL,

@@ -2,9 +2,9 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
-from pydantic import Field, PostgresDsn, SecretStr, field_validator, model_validator
+from pydantic import Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger("atlas.config")
@@ -16,9 +16,9 @@ class Settings(BaseSettings):  # type: ignore[misc]
         "huggingface", description="Storage Backend Provider"
     )
 
-    HF_DATASET_ID: Optional[str] = Field(None, description="HF Dataset ID (username/dataset)")
-    HF_TOKEN: Optional[SecretStr] = Field(None, description="HF Write Token")
-    GCS_BUCKET_NAME: Optional[str] = Field(None, description="GCS Bucket Name")
+    HF_DATASET_ID: str | None = Field(None, description="HF Dataset ID (username/dataset)")
+    HF_TOKEN: SecretStr | None = Field(None, description="HF Write Token")
+    GCS_BUCKET_NAME: str | None = Field(None, description="GCS Bucket Name")
 
     COMPLIANCE_MODE: bool = Field(True, description="Enforce API Policy limits")
     ENV: str = Field("dev", description="Deployment environment (dev/prod)")
@@ -28,13 +28,13 @@ class Settings(BaseSettings):  # type: ignore[misc]
     KEY_POOL_ARCHEOLOGY_SIZE: int = Field(1, description="Keys reserved for archeology")
     KEY_POOL_TRACKING_SIZE: int = Field(1, description="Keys reserved for tracking")
 
-    DISCORD_WEBHOOK_ALERTS: Optional[SecretStr] = None
-    DISCORD_WEBHOOK_HUNT: Optional[SecretStr] = None
-    DISCORD_WEBHOOK_SURVEILLANCE: Optional[SecretStr] = None
-    DISCORD_WEBHOOK_OPS: Optional[SecretStr] = None
+    DISCORD_WEBHOOK_ALERTS: SecretStr | None = None
+    DISCORD_WEBHOOK_HUNT: SecretStr | None = None
+    DISCORD_WEBHOOK_SURVEILLANCE: SecretStr | None = None
+    DISCORD_WEBHOOK_OPS: SecretStr | None = None
 
-    PREFECT_API_URL: Optional[str] = None
-    PREFECT_API_KEY: Optional[SecretStr] = None
+    PREFECT_API_URL: str | None = None
+    PREFECT_API_KEY: SecretStr | None = None
 
     JANITOR_ENABLED: bool = Field(
         True, description="Enable automatic cleanup of old processed data"
@@ -44,10 +44,10 @@ class Settings(BaseSettings):  # type: ignore[misc]
         True, description="Verify data exists in Vault before deletion"
     )
 
-    YOUTUBE_COOKIES_PATH: Optional[str] = Field(
+    YOUTUBE_COOKIES_PATH: str | None = Field(
         None, description="Path to Netscape cookies.txt file for YouTube authentication"
     )
-    YOUTUBE_COOKIES_CONTENT: Optional[SecretStr] = Field(
+    YOUTUBE_COOKIES_CONTENT: SecretStr | None = Field(
         None,
         description="Raw Netscape cookies.txt content (written to temp file at startup)",
     )
@@ -63,12 +63,12 @@ class Settings(BaseSettings):  # type: ignore[misc]
         return self
 
     @property
-    def api_keys(self) -> List[str]:
+    def api_keys(self) -> list[str]:
         try:
             payload = self.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()
             keys_parsed = json.loads(payload)
             if isinstance(keys_parsed, str):
-                keys_list: List[str] = [keys_parsed]
+                keys_list: list[str] = [keys_parsed]
             else:
                 keys_list = keys_parsed
 
@@ -79,7 +79,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
             return [self.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()]
 
     @property
-    def key_rings(self) -> Dict[str, List[str]]:
+    def key_rings(self) -> dict[str, list[str]]:
         raw_keys = self.api_keys
         total_keys = len(raw_keys)
         reserved_count = self.KEY_POOL_ARCHEOLOGY_SIZE + self.KEY_POOL_TRACKING_SIZE
@@ -106,7 +106,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
         }
 
     @property
-    def youtube_cookies_resolved_path(self) -> Optional[str]:
+    def youtube_cookies_resolved_path(self) -> str | None:
         """Resolve the YouTube cookies file path.
 
         Priority:

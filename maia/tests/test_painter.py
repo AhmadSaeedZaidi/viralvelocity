@@ -2,12 +2,9 @@
 Tests for Maia Painter module.
 """
 
-from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
-
 from maia.painter.flow import (
     fetch_painter_targets_task,
     painter_flow,
@@ -98,9 +95,7 @@ async def test_process_frames_successful_with_chapters():
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
@@ -144,9 +139,7 @@ async def test_process_frames_successful_with_heatmap():
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
@@ -189,9 +182,7 @@ async def test_process_frames_fallback_strategy():
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
         patch("maia.painter.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
         mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
@@ -288,14 +279,13 @@ async def test_process_frames_handles_vault_failure():
         patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-        patch("maia.painter.flow.get_vault") as mock_get_vault,
+        patch("maia.painter.flow.get_vault"),
         patch(
             "maia.painter.flow.vault_op_with_retry",
             new_callable=AsyncMock,
             side_effect=Exception("Vault error"),
         ),
     ):
-        mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
         mock_repo.mark_failed = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
@@ -319,7 +309,7 @@ async def test_process_frames_propagates_resiliency_strategy():
     video = Video(id="VIDEO_001", title="Test Video")
 
     with (
-        patch("maia.painter.flow.VideoRepository") as MockRepo,
+        patch("maia.painter.flow.VideoRepository"),
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
     ):
         mock_streamer_instance = MockStreamer.return_value
@@ -355,12 +345,8 @@ async def test_run_painter_cycle_processes_batch():
     ]
 
     with (
-        patch(
-            "maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
-        patch(
-            "maia.painter.flow.process_frames_task", new_callable=AsyncMock
-        ) as mock_process,
+        patch("maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock) as mock_fetch,
+        patch("maia.painter.flow.process_frames_task", new_callable=AsyncMock) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.return_value = None

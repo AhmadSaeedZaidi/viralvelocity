@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from atlas.adapters import DatabaseAdapter
 from atlas.models.watchlist import WatchlistItem
@@ -51,12 +51,12 @@ class WatchlistRepository(DatabaseAdapter):
         await self._execute_many(query, params_list)
 
     def calculate_next_track_time(
-        self, published_at: datetime, tier: Optional[str] = None
+        self, published_at: datetime, tier: str | None = None
     ) -> tuple[str, datetime]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if published_at.tzinfo is None:
-            published_at = published_at.replace(tzinfo=timezone.utc)
+            published_at = published_at.replace(tzinfo=UTC)
 
         age = now - published_at
 

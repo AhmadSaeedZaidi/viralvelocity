@@ -1,7 +1,8 @@
 import logging
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
@@ -13,7 +14,7 @@ logger = logging.getLogger("atlas.db")
 
 class DatabaseManager:
     _instance: Optional["DatabaseManager"] = None
-    _pool: Optional[AsyncConnectionPool] = None
+    _pool: AsyncConnectionPool | None = None
 
     def __new__(cls) -> "DatabaseManager":
         if cls._instance is None:
@@ -116,17 +117,20 @@ class DatabaseManager:
         async with self.get_connection() as conn:
             await conn.execute(
                 """
-                DO $$ 
-                DECLARE 
-                    r RECORD; 
-                BEGIN 
+                DO $$
+                DECLARE
+                    r RECORD;
+                BEGIN
                     -- Iterate over all tables in public schema
-                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP 
+                    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
                         -- TRUNCATE is faster than DELETE
                         -- RESTART IDENTITY resets serials (id=1)
                         -- CASCADE handles foreign keys
-                        EXECUTE 'TRUNCATE TABLE public.' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE'; 
-                    END LOOP; 
+                        EXECUTE (
+                            $$TRUNCATE TABLE public.$$ || quote_ident(r.tablename)
+                            || $$ RESTART IDENTITY CASCADE$$
+                        );
+                    END LOOP;
                 END $$;
             """
             )
@@ -147,7 +151,7 @@ def load_schema_sql(*, include_extensions: bool = True) -> str:
     if not os.path.exists(schema_path):
         raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
-    with open(schema_path, "r") as f:
+    with open(schema_path) as f:
         sql = f.read()
 
     if not include_extensions:

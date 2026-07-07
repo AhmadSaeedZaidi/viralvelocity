@@ -1,7 +1,5 @@
 """Tests for configuration module."""
 
-import json
-
 import pytest
 from pydantic import ValidationError
 

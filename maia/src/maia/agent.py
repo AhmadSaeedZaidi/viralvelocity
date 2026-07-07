@@ -6,7 +6,7 @@ the CLI entry-point.
 """
 
 import argparse
-from typing import Any, Dict, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -18,4 +18,4 @@ class Agent(Protocol):
     @staticmethod
     def add_cli_args(parser: argparse.ArgumentParser) -> None: ...
 
-    async def run(self, **kwargs: Any) -> Dict[str, Any]: ...
+    async def run(self, **kwargs: Any) -> dict[str, Any]: ...

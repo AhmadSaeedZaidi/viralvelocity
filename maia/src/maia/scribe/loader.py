@@ -8,7 +8,7 @@ anti-bot protections for both the transcript listing and content fetch.
 
 import http.cookiejar as cookiejar
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests  # type: ignore[import-untyped]
 from prefect import get_run_logger
@@ -30,7 +30,7 @@ class TranscriptLoader:
     construction time. Direct ``os.environ`` access is forbidden.
     """
 
-    def __init__(self, cookies_path: Optional[str] = None) -> None:
+    def __init__(self, cookies_path: str | None = None) -> None:
         """Initialise loader.
 
         Args:
@@ -44,13 +44,13 @@ class TranscriptLoader:
             self.logger = logging.getLogger("maia.scribe.loader")
 
         if cookies_path is not None:
-            resolved: Optional[str] = cookies_path
+            resolved: str | None = cookies_path
         else:
             from atlas.config import settings
 
             resolved = settings.youtube_cookies_resolved_path
 
-        self.cookies_path: Optional[str] = resolved
+        self.cookies_path: str | None = resolved
         self._http_client = self._build_http_client(resolved)
 
         if not resolved:
@@ -60,7 +60,7 @@ class TranscriptLoader:
             )
 
     @staticmethod
-    def _build_http_client(cookies_path: Optional[str]) -> requests.Session:
+    def _build_http_client(cookies_path: str | None) -> requests.Session:
         """Build a ``requests.Session`` with optional cookies and a browser UA."""
         session = requests.Session()
         session.headers.update(
@@ -85,7 +85,7 @@ class TranscriptLoader:
 
         return session
 
-    def fetch(self, video_id: str) -> List[Dict[Any, Any]]:
+    def fetch(self, video_id: str) -> list[dict[Any, Any]]:
         """Fetch transcript for a YouTube video using authenticated session.
 
         Returns:
@@ -111,7 +111,7 @@ class TranscriptLoader:
                     )
 
             fetched = transcript.fetch()
-            result: List[Dict[Any, Any]] = [
+            result: list[dict[Any, Any]] = [
                 {"text": s.text, "start": s.start, "duration": s.duration} for s in fetched.snippets
             ]
             if not result:

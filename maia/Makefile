@@ -12,13 +12,13 @@ install:
 	poetry install --with dev
 
 lint-local:
-	poetry run black src/maia tests
-	poetry run isort src/maia tests
+	poetry run ruff check --fix src/maia tests
+	poetry run ruff format src/maia tests
 	poetry run mypy src/maia --config-file pyproject.toml --no-error-summary
 
 lint:
-	poetry run black --check src/maia tests
-	poetry run isort --check-only src/maia tests
+	poetry run ruff check src/maia tests
+	poetry run ruff format --check src/maia tests
 	poetry run mypy src/maia --config-file pyproject.toml --no-error-summary
 
 test:

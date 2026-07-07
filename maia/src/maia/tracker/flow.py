@@ -8,8 +8,8 @@ and persists them back to Atlas.
 import argparse
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+from datetime import UTC, datetime
+from typing import Any
 
 from atlas.models import VideoStats
 from atlas.repositories import VideoRepository
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @task(name="fetch_targets")
-async def fetch_targets_task(batch_size: int) -> List[Dict[str, Any]]:
+async def fetch_targets_task(batch_size: int) -> list[dict[str, Any]]:
     """Fetch videos that need statistics updates."""
     video_repo = VideoRepository()
     run_logger = get_run_logger()
@@ -37,9 +37,7 @@ async def fetch_targets_task(batch_size: int) -> List[Dict[str, Any]]:
 
 
 @task(name="update_stats")
-async def update_stats_task(
-    videos: List[Dict[str, Any]], strategy: YouTubeSearchStrategy
-) -> int:
+async def update_stats_task(videos: list[dict[str, Any]], strategy: YouTubeSearchStrategy) -> int:
     """
     Fetch and update statistics for a batch of videos.
 
@@ -57,14 +55,8 @@ async def update_stats_task(
     video_repo = VideoRepository()
 
     video_ids = [v["id"] for v in videos]
-    id_str = ",".join(video_ids)
 
     run_logger.info(f"Fetching stats for {len(video_ids)} videos...")
-
-    params: Dict[str, Any] = {
-        "part": "statistics",
-        "id": id_str,
-    }
 
     try:
         response_json = await strategy.fetch_videos(video_ids)
@@ -95,7 +87,7 @@ async def update_stats_task(
                     comment_count=(
                         int(stats.get("commentCount", 0)) if stats.get("commentCount") else None
                     ),
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
             )
 
@@ -110,9 +102,7 @@ async def update_stats_task(
 
 
 @flow(name="run_tracker_cycle")
-async def tracker_flow(
-    batch_size: int, strategy: YouTubeSearchStrategy
-) -> Dict[str, Any]:
+async def tracker_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[str, Any]:
     """
     Execute a complete Tracker cycle: fetch stale videos, update stats.
 
@@ -126,7 +116,7 @@ async def tracker_flow(
     run_logger = get_run_logger()
     run_logger.info("=== Starting Tracker Cycle ===")
 
-    stats: Dict[str, Any] = {
+    stats: dict[str, Any] = {
         "videos_fetched": 0,
         "videos_updated": 0,
         "updates_failed": 0,
@@ -189,7 +179,7 @@ class TrackerAgent:
             help="Number of videos to track per cycle (max 50, default: 50)",
         )
 
-    async def run(self, batch_size: int = 50, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, batch_size: int = 50, **kwargs: Any) -> dict[str, Any]:
         """
         Execute a complete Tracker cycle.
 
@@ -200,14 +190,12 @@ class TrackerAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        result: Dict[str, Any] = await tracker_flow(
-            batch_size=batch_size, strategy=self.strategy
-        )
+        result: dict[str, Any] = await tracker_flow(batch_size=batch_size, strategy=self.strategy)
         return result
 
 
 @task(name="update_stats")
-async def update_stats(videos: List[Dict[str, Any]]) -> int:
+async def update_stats(videos: list[dict[str, Any]]) -> int:
     """Legacy Task wrapper — creates strategy and delegates."""
     strategy = YouTubeSearchStrategy("tracking", agent_name="legacy_tracker")
     result: int = await update_stats_task(videos, strategy)
@@ -215,7 +203,7 @@ async def update_stats(videos: List[Dict[str, Any]]) -> int:
 
 
 @flow(name="run_tracker_cycle")
-async def run_tracker_cycle(batch_size: int = 50) -> Dict[str, Any]:
+async def run_tracker_cycle(batch_size: int = 50) -> dict[str, Any]:
     """
     Legacy function wrapper for backward compatibility.
 

@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from atlas.adapters import DatabaseAdapter
 from atlas.config import settings
@@ -52,11 +52,11 @@ class VideoRepository(DatabaseAdapter):
             ),
         )
 
-    async def get_by_id(self, video_id: str) -> Optional[Video]:
+    async def get_by_id(self, video_id: str) -> Video | None:
         row = await self._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
         return Video.model_validate(row) if row else None
 
-    async def get_latest_stats(self, video_id: str) -> Optional[VideoStats]:
+    async def get_latest_stats(self, video_id: str) -> VideoStats | None:
         row = await self._fetch_one(
             """
             SELECT video_id, views, likes, comment_count, timestamp
@@ -70,7 +70,7 @@ class VideoRepository(DatabaseAdapter):
         return VideoStats.model_validate(row) if row else None
 
     async def fetch_tracker_targets(self, batch_size: int = 50) -> list[Video]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         z1_cutoff = now - timedelta(hours=24)
         z1_thresh = now - timedelta(hours=1)
@@ -131,7 +131,7 @@ class VideoRepository(DatabaseAdapter):
             INSERT INTO video_stats_log (video_id, views, likes, comment_count, timestamp)
             VALUES (%s, %s, %s, %s, %s)
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         async with self._cursor() as cur:
             for update in updates:
@@ -190,7 +190,7 @@ class VideoRepository(DatabaseAdapter):
     # ── State Machine: Transition helpers ─────────────────────────────────
 
     async def mark_transcript_safe(self, video_id: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE videos
@@ -203,7 +203,7 @@ class VideoRepository(DatabaseAdapter):
         )
 
     async def mark_visuals_safe(self, video_id: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE videos
@@ -216,7 +216,7 @@ class VideoRepository(DatabaseAdapter):
         )
 
     async def mark_done(self, video_id: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE videos
@@ -227,7 +227,7 @@ class VideoRepository(DatabaseAdapter):
         )
 
     async def mark_failed(self, video_id: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE videos
@@ -238,7 +238,7 @@ class VideoRepository(DatabaseAdapter):
         )
 
     async def mark_archived(self, video_id: str) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE videos
@@ -251,7 +251,7 @@ class VideoRepository(DatabaseAdapter):
     # ── Janitor: Sweep Phase ──────────────────────────────────────────────
 
     async def sweep_archivable(self, batch_size: int = ARCHIVAL_BATCH_SIZE) -> list[Video]:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
+        cutoff = datetime.now(UTC) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
         rows = await self._fetch_all(
             """
             SELECT * FROM videos
@@ -266,7 +266,7 @@ class VideoRepository(DatabaseAdapter):
         return [Video.model_validate(r) for r in rows]
 
     async def count_archivable(self) -> int:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
+        cutoff = datetime.now(UTC) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
         row = await self._fetch_one(
             """
             SELECT COUNT(*) as total FROM videos
@@ -321,8 +321,12 @@ class VideoRepository(DatabaseAdapter):
                     "duration": video.duration,
                     "tags": video.tags,
                     "category_id": video.category_id,
-                    "discovered_at": video.discovered_at.isoformat() if video.discovered_at else None,
-                    "last_updated_at": video.last_updated_at.isoformat() if video.last_updated_at else None,
+                    "discovered_at": video.discovered_at.isoformat()
+                    if video.discovered_at
+                    else None,
+                    "last_updated_at": video.last_updated_at.isoformat()
+                    if video.last_updated_at
+                    else None,
                     "has_transcript": video.has_transcript,
                     "has_visuals": video.has_visuals,
                 }
@@ -338,7 +342,7 @@ class VideoRepository(DatabaseAdapter):
                         else None,
                     }
 
-                date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                date_key = datetime.now(UTC).strftime("%Y-%m-%d")
 
                 # Hand-off: write metadata to vault (synchronous → thread)
                 await asyncio.to_thread(v.store_metadata, video.id, metadata, date_key)
@@ -356,12 +360,8 @@ class VideoRepository(DatabaseAdapter):
                 await self.mark_archived(video.id)
 
                 # Purge stats + transcript rows from hot tier
-                await self._execute(
-                    "DELETE FROM video_stats_log WHERE video_id = %s", (video.id,)
-                )
-                await self._execute(
-                    "DELETE FROM transcripts WHERE video_id = %s", (video.id,)
-                )
+                await self._execute("DELETE FROM video_stats_log WHERE video_id = %s", (video.id,))
+                await self._execute("DELETE FROM transcripts WHERE video_id = %s", (video.id,))
 
                 archived_count += 1
 
@@ -390,7 +390,7 @@ class VideoRepository(DatabaseAdapter):
         return await self.claim_painter_batch(batch_size)
 
     async def ingest_video_metadata(
-        self, video_data: dict[str, Any], priority_override: Optional[int] = None
+        self, video_data: dict[str, Any], priority_override: int | None = None
     ) -> None:
         snippet = video_data.get("snippet", {})
         channel_id = snippet.get("channelId")
@@ -419,7 +419,7 @@ class VideoRepository(DatabaseAdapter):
                 pend = _CHANNEL_TITLE_PENDING
                 await conn.execute(
                     channel_upsert,
-                    (channel_id, channel_title, datetime.now(timezone.utc), pend, pend),
+                    (channel_id, channel_title, datetime.now(UTC), pend, pend),
                 )
 
             video_query = """
@@ -448,7 +448,7 @@ class VideoRepository(DatabaseAdapter):
                     snippet.get("tags", []),
                     snippet.get("categoryId"),
                     snippet.get("defaultLanguage"),
-                    datetime.now(timezone.utc),
+                    datetime.now(UTC),
                 ),
             )
             await conn.commit()
@@ -456,7 +456,7 @@ class VideoRepository(DatabaseAdapter):
     async def archive_cold_stats(self, retention_days: int = 7, batch_size: int = 5000) -> int:
         from atlas.vault import get_vault
 
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff_date = datetime.now(UTC) - timedelta(days=retention_days)
 
         async with self._connection() as conn:
             cur = await conn.execute(
@@ -472,7 +472,7 @@ class VideoRepository(DatabaseAdapter):
             )
             columns = [desc[0] for desc in cur.description] if cur.description else []
             rows = await cur.fetchall()
-            stats = [dict(zip(columns, row)) for row in rows]
+            stats = [dict(zip(columns, row, strict=True)) for row in rows]
 
             if not stats:
                 return 0
@@ -515,7 +515,7 @@ class VideoRepository(DatabaseAdapter):
         if not settings.JANITOR_ENABLED:
             return {"deleted": 0, "reason": "disabled"}
 
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
+        cutoff_date = datetime.now(UTC) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
         safety_clause = ""
         if settings.JANITOR_SAFETY_CHECK:
             safety_clause = "AND (has_transcript = TRUE OR has_visuals = TRUE)"

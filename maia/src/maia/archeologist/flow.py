@@ -8,8 +8,8 @@ video table (the work queue for downstream consumers).
 import argparse
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import UTC, datetime
+from typing import Any
 
 from atlas.repositories import VideoRepository
 from prefect import flow, get_run_logger, task
@@ -24,18 +24,16 @@ TARGET_CATEGORIES = ["10", "20", "24", "28", "27"]
 
 
 @task(name="hunt_history")
-async def hunt_history_task(
-    year: int, month: int, strategy: YouTubeSearchStrategy
-) -> None:
+async def hunt_history_task(year: int, month: int, strategy: YouTubeSearchStrategy) -> None:
     """Search for top videos in target categories for a specific month in history."""
     run_logger = get_run_logger()
     video_repo = VideoRepository()
 
-    start_date = datetime(year, month, 1, tzinfo=timezone.utc)
+    start_date = datetime(year, month, 1, tzinfo=UTC)
     if month == 12:
-        end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        end_date = datetime(year + 1, 1, 1, tzinfo=UTC)
     else:
-        end_date = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+        end_date = datetime(year, month + 1, 1, tzinfo=UTC)
 
     start_str = start_date.isoformat().replace("+00:00", "Z")
     end_str = end_date.isoformat().replace("+00:00", "Z")
@@ -43,7 +41,7 @@ async def hunt_history_task(
     run_logger.info(f"Archeologist digging in: {start_str} to {end_str}")
 
     for category in TARGET_CATEGORIES:
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "part": "snippet",
             "type": "video",
             "order": "viewCount",
@@ -56,16 +54,13 @@ async def hunt_history_task(
         try:
             data = await strategy.search(params)
             if not data:
-                run_logger.warning(
-                    f"No data returned for {year}-{month} (Cat: {category})"
-                )
+                run_logger.warning(f"No data returned for {year}-{month} (Cat: {category})")
                 continue
 
             items = data.get("items", [])
 
             ingest_tasks = [
-                video_repo.ingest_video_metadata(item, priority_override=100)
-                for item in items
+                video_repo.ingest_video_metadata(item, priority_override=100) for item in items
             ]
             await asyncio.gather(*ingest_tasks)
 
@@ -87,26 +82,20 @@ async def hunt_history_task(
                         f"Channel enrichment after archeology ingest (non-fatal): {e}"
                     )
 
-            run_logger.info(
-                f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})"
-            )
+            run_logger.info(f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})")
 
         except RateLimitError:
-            run_logger.critical(
-                f"Archeologist rate-limited on {year}-{month} (Cat: {category})"
-            )
+            run_logger.critical(f"Archeologist rate-limited on {year}-{month} (Cat: {category})")
             raise
         except Exception as e:
-            run_logger.error(
-                f"Archeologist error on {year}-{month} (Cat: {category}): {e}"
-            )
+            run_logger.error(f"Archeologist error on {year}-{month} (Cat: {category}): {e}")
             continue
 
 
 @flow(name="run_archeology_campaign")
 async def archeology_flow(
     start_year: int, end_year: int, strategy: YouTubeSearchStrategy
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute an archeology campaign to discover historical videos.
 
@@ -169,8 +158,8 @@ class ArcheologistAgent:
 
     async def run(
         self, start_year: int = 2005, end_year: int = 2024, **kwargs: Any
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = await archeology_flow(
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = await archeology_flow(
             start_year=start_year, end_year=end_year, strategy=self.strategy
         )
         return result

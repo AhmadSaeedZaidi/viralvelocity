@@ -7,13 +7,12 @@ Mark as integration tests: pytest -m integration
 Real Integration Testing: Uses real YouTube video (Blender Tutorial) with real captions.
 """
 
-from datetime import datetime, timezone
-from typing import Any, Dict
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from maia.scribe.flow import process_transcript, run_scribe_cycle
+from maia.scribe.flow import run_scribe_cycle
 
 
 @pytest.mark.integration
@@ -42,12 +41,10 @@ async def test_scribe_complete_cycle(video_repo, channel_repo):
     try:
         await run_scribe_cycle(batch_size=1)
 
-        video = await video_repo._fetch_one(
-            "SELECT * FROM videos WHERE id = %s", ("B0J27sf9N1Y",)
+        video = await video_repo._fetch_one("SELECT * FROM videos WHERE id = %s", ("B0J27sf9N1Y",))
+        assert video["has_transcript"] is True, (
+            f"Video should have transcript after scribe cycle, got {video['has_transcript']}"
         )
-        assert (
-            video["has_transcript"] is True
-        ), f"Video should have transcript after scribe cycle, got {video['has_transcript']}"
 
     except Exception as e:
         if "429" in str(e) or "HTTP Error 429" in str(e):
@@ -68,7 +65,7 @@ async def test_scribe_handles_unavailable_transcripts(video_repo):
             "channelId": "CHANNEL_001",
             "channelTitle": "Test Channel",
             "title": "Video without transcript",
-            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "publishedAt": datetime.now(UTC).isoformat(),
             "tags": ["test"],
             "categoryId": "28",
             "defaultLanguage": "en",
@@ -87,9 +84,9 @@ async def test_scribe_handles_unavailable_transcripts(video_repo):
         video = await video_repo._fetch_one(
             "SELECT * FROM videos WHERE id = %s", ("NO_TRANSCRIPT_001",)
         )
-        assert (
-            video["has_transcript"] is True
-        ), "Video should be marked as transcribed even with unavailable transcripts"
+        assert video["has_transcript"] is True, (
+            "Video should be marked as transcribed even with unavailable transcripts"
+        )
 
 
 @pytest.mark.integration
@@ -102,7 +99,7 @@ async def test_scribe_handles_resiliency_strategy(video_repo):
             "channelId": "CHANNEL_001",
             "channelTitle": "Test Channel",
             "title": "Video causing rate limit",
-            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "publishedAt": datetime.now(UTC).isoformat(),
             "tags": ["test"],
             "categoryId": "28",
             "defaultLanguage": "en",
@@ -113,9 +110,7 @@ async def test_scribe_handles_resiliency_strategy(video_repo):
 
     with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
         mock_loader_instance = MagicMock()
-        mock_loader_instance.fetch = MagicMock(
-            side_effect=RuntimeError("429 Rate Limit")
-        )
+        mock_loader_instance.fetch = MagicMock(side_effect=RuntimeError("429 Rate Limit"))
         MockLoader.return_value = mock_loader_instance
 
         await run_scribe_cycle(batch_size=1)
@@ -123,9 +118,9 @@ async def test_scribe_handles_resiliency_strategy(video_repo):
         video = await video_repo._fetch_one(
             "SELECT * FROM videos WHERE id = %s", ("RATE_LIMIT_001",)
         )
-        assert (
-            video["status"] == "FAILED"
-        ), f"Expected video status FAILED after rate limit error, got {video['status']}"
+        assert video["status"] == "FAILED", (
+            f"Expected video status FAILED after rate limit error, got {video['status']}"
+        )
 
 
 @pytest.mark.integration
@@ -148,7 +143,7 @@ async def test_scribe_batch_size_enforcement(video_repo):
                 "channelId": "CHANNEL_001",
                 "channelTitle": "Test Channel",
                 "title": f"Video {i}",
-                "publishedAt": datetime.now(timezone.utc).isoformat(),
+                "publishedAt": datetime.now(UTC).isoformat(),
                 "tags": ["test"],
                 "categoryId": "28",
                 "defaultLanguage": "en",
@@ -168,16 +163,14 @@ async def test_scribe_batch_size_enforcement(video_repo):
         processed = await video_repo._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'BATCH_TEST_%%'"
         )
-        assert (
-            len(processed) == 5
-        ), f"Expected 5 videos processed with batch_size=5, got {len(processed)}"
+        assert len(processed) == 5, (
+            f"Expected 5 videos processed with batch_size=5, got {len(processed)}"
+        )
 
         remaining = await video_repo._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = FALSE AND id LIKE 'BATCH_TEST_%%'"
         )
-        assert (
-            len(remaining) == 5
-        ), f"Expected 5 unprocessed videos remaining, got {len(remaining)}"
+        assert len(remaining) == 5, f"Expected 5 unprocessed videos remaining, got {len(remaining)}"
 
 
 @pytest.mark.integration
@@ -192,7 +185,7 @@ async def test_scribe_sequential_processing(video_repo):
                 "channelId": "CHANNEL_001",
                 "channelTitle": "Test Channel",
                 "title": f"Video {i}",
-                "publishedAt": datetime.now(timezone.utc).isoformat(),
+                "publishedAt": datetime.now(UTC).isoformat(),
                 "tags": ["test"],
                 "categoryId": "28",
                 "defaultLanguage": "en",
@@ -200,7 +193,6 @@ async def test_scribe_sequential_processing(video_repo):
         }
         await video_repo.ingest_video_metadata(video_data)
 
-    processing_order = []
     mock_transcript = [{"text": "Test", "start": 0.0, "duration": 1.0}]
 
     with patch("maia.scribe.flow.TranscriptLoader") as MockLoader:
@@ -213,9 +205,9 @@ async def test_scribe_sequential_processing(video_repo):
         processed = await video_repo._fetch_all(
             "SELECT * FROM videos WHERE has_transcript = TRUE AND id LIKE 'SEQ_TEST_%%'"
         )
-        assert (
-            len(processed) == 3
-        ), f"All 3 sequential videos should be processed, got {len(processed)}"
+        assert len(processed) == 3, (
+            f"All 3 sequential videos should be processed, got {len(processed)}"
+        )
 
 
 @pytest.mark.integration
@@ -228,7 +220,7 @@ async def test_scribe_vault_failure_marks_video_failed(video_repo, mock_sleep):
             "channelId": "CHANNEL_001",
             "channelTitle": "Test Channel",
             "title": "Video with vault failure",
-            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "publishedAt": datetime.now(UTC).isoformat(),
             "tags": ["test"],
             "categoryId": "28",
             "defaultLanguage": "en",
@@ -248,9 +240,7 @@ async def test_scribe_vault_failure_marks_video_failed(video_repo, mock_sleep):
         MockLoader.return_value = mock_loader_instance
 
         mock_vault = MagicMock()
-        mock_vault.store_transcript = MagicMock(
-            side_effect=Exception("Vault connection error")
-        )
+        mock_vault.store_transcript = MagicMock(side_effect=Exception("Vault connection error"))
         mock_get_vault.return_value = mock_vault
 
         await run_scribe_cycle(batch_size=1)
@@ -258,9 +248,9 @@ async def test_scribe_vault_failure_marks_video_failed(video_repo, mock_sleep):
         video = await video_repo._fetch_one(
             "SELECT * FROM videos WHERE id = %s", ("VAULT_FAIL_001",)
         )
-        assert (
-            video["status"] == "FAILED"
-        ), f"Expected video status FAILED after vault error, got {video['status']}"
+        assert video["status"] == "FAILED", (
+            f"Expected video status FAILED after vault error, got {video['status']}"
+        )
 
 
 @pytest.mark.integration
@@ -273,7 +263,7 @@ async def test_scribe_retry_logic_on_network_errors(video_repo, mock_sleep):
             "channelId": "CHANNEL_001",
             "channelTitle": "Test Channel",
             "title": "Video with network issues",
-            "publishedAt": datetime.now(timezone.utc).isoformat(),
+            "publishedAt": datetime.now(UTC).isoformat(),
             "tags": ["test"],
             "categoryId": "28",
             "defaultLanguage": "en",
@@ -297,16 +287,17 @@ async def test_scribe_retry_logic_on_network_errors(video_repo, mock_sleep):
 
         await run_scribe_cycle(batch_size=1)
 
-        assert (
-            mock_loader_instance.fetch.call_count == 3
-        ), f"Expected 3 fetch calls (2 retries + 1 success), got {mock_loader_instance.fetch.call_count}"
+        assert mock_loader_instance.fetch.call_count == 3, (
+            f"Expected 3 fetch calls (2 retries + 1 success),"
+            f" got {mock_loader_instance.fetch.call_count}"
+        )
 
         video = await video_repo._fetch_one(
             "SELECT * FROM videos WHERE id = %s", ("RETRY_TEST_001",)
         )
-        assert (
-            video["has_transcript"] is True
-        ), "Video should have transcript after successful retry"
+        assert video["has_transcript"] is True, (
+            "Video should have transcript after successful retry"
+        )
 
 
 @pytest_asyncio.fixture

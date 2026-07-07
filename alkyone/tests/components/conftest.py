@@ -101,11 +101,3 @@ def mock_sleep():
 
 
 # Import fixtures from alkyone.fixtures
-from alkyone.fixtures import (
-    fresh_db,
-    mock_search_queue_item,
-    mock_tracker_target,
-    mock_youtube_search_response,
-    mock_youtube_stats_response,
-    system_init,
-)

@@ -8,7 +8,7 @@ and persists results to Atlas Vault.
 import argparse
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from atlas.models import Video
 from atlas.repositories import VideoRepository
@@ -27,7 +27,7 @@ from youtube_transcript_api import TranscriptsDisabled  # type: ignore[attr-defi
 
 from maia.utils import RateLimitError, vault_op_with_retry
 
-from .loader import TranscriptExtractionError, TranscriptLoader
+from .loader import TranscriptLoader
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) ->
 
 
 @task(name="fetch_scribe_targets")
-async def fetch_scribe_targets_task(batch_size: int) -> List[Video]:
+async def fetch_scribe_targets_task(batch_size: int) -> list[Video]:
     """Fetch videos that need transcripts."""
     video_repo = VideoRepository()
     targets = await video_repo.claim_scribe_batch(batch_size)
@@ -84,7 +84,7 @@ async def process_transcript_task(video: Video) -> None:
 
 
 @flow(name="run_scribe_cycle")
-async def scribe_flow(batch_size: int) -> Dict[str, Any]:
+async def scribe_flow(batch_size: int) -> dict[str, Any]:
     """
     Execute a complete Scribe cycle: fetch videos, download transcripts, store to Vault.
 
@@ -140,7 +140,7 @@ class ScribeAgent:
             help="Number of videos to process per cycle (default: 10)",
         )
 
-    async def run(self, batch_size: int = 10, **kwargs: Any) -> Dict[str, Any]:
+    async def run(self, batch_size: int = 10, **kwargs: Any) -> dict[str, Any]:
         """
         Execute a complete Scribe cycle.
 
@@ -151,12 +151,12 @@ class ScribeAgent:
         Returns:
             Dictionary with cycle statistics
         """
-        result: Dict[str, Any] = await scribe_flow(batch_size=batch_size)
+        result: dict[str, Any] = await scribe_flow(batch_size=batch_size)
         return result
 
 
 @task(name="process_transcript")
-async def process_transcript(video: Dict[str, Any]) -> None:
+async def process_transcript(video: dict[str, Any]) -> None:
     """Legacy Task wrapper — converts dict to Video and delegates."""
     from atlas.models import Video as VideoModel
 

@@ -8,7 +8,9 @@ from atlas.repositories import VideoRepository
 async def test():
     repo = VideoRepository()
     async with repo._connection() as conn:
-        await conn.execute("CREATE TABLE IF NOT EXISTS test_table (id SERIAL PRIMARY KEY, val TEXT)")
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS test_table (id SERIAL PRIMARY KEY, val TEXT)"
+        )
         await conn.execute("INSERT INTO test_table (val) VALUES ('hello')")
 
     async with repo._connection() as conn:

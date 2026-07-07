@@ -5,9 +5,8 @@ These tests verify end-to-end behavior of Archeologist historical campaigns.
 Mark as integration tests: pytest -m integration
 """
 
-import os
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -18,9 +17,7 @@ from maia.archeologist import hunt_history, run_archeology_campaign
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_archeologist_complete_hunt_cycle(
-    video_repo, mock_youtube_search_response
-):
+async def test_archeologist_complete_hunt_cycle(video_repo, mock_youtube_search_response):
     """Test complete Archeologist hunt cycle for a single month."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
@@ -63,17 +60,15 @@ async def test_archeologist_complete_hunt_cycle(
         )
 
         video_ids = [v["id"] for v in videos]
-        assert (
-            "dQw4w9WgXcQ" in video_ids
-        ), f"Expected test video not found. Got: {video_ids}"
+        assert "dQw4w9WgXcQ" in video_ids, f"Expected test video not found. Got: {video_ids}"
 
         # Verify connection to REAL Neon (check DSN)
         from atlas.config import settings
 
         db_url = str(settings.DATABASE_URL)
-        assert (
-            "neon.tech" in db_url or "postgres" in db_url
-        ), f"CRITICAL: DATABASE_URL does not point to Neon! Got: {db_url[:50]}..."
+        assert "neon.tech" in db_url or "postgres" in db_url, (
+            f"CRITICAL: DATABASE_URL does not point to Neon! Got: {db_url[:50]}..."
+        )
 
         print(f"[Test] ✅ SUCCESS! Videos written to REAL Neon DB at {db_url[:30]}...")
 
@@ -131,21 +126,19 @@ async def test_archeologist_high_priority_override(video_repo):
             "SELECT * FROM videos WHERE id = %s", ("HISTORICAL_001",)
         )
 
-        assert (
-            video is not None
-        ), "Historical video HISTORICAL_001 not found in database"
+        assert video is not None, "Historical video HISTORICAL_001 not found in database"
         assert video["id"] == "HISTORICAL_001", f"Video ID mismatch: {video['id']}"
         # Note: Priority is stored in search_queue, not videos table
         # The video itself should exist with PENDING status
-        assert (
-            video["status"] == "PENDING"
-        ), f"Expected PENDING status for historical video, got {video['status']}"
+        assert video["status"] == "PENDING", (
+            f"Expected PENDING status for historical video, got {video['status']}"
+        )
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_archeologist_handles_resiliency_strategy(video_repo, mock_sleep):
-    """Test Archeologist handles 429 rate limit gracefully with retry logic and exponential backoff."""
+    """Test Archeologist handles 429 rate limit with retry and exponential backoff."""
     with (
         patch("maia.archeologist.flow.aiohttp.ClientSession") as MockSession,
         patch("maia.archeologist.flow.KeyRing") as MockKeyRing,
@@ -189,9 +182,7 @@ async def test_archeologist_handles_resiliency_strategy(video_repo, mock_sleep):
         await hunt_history(year=2010, month=1)
 
         # Verify that warning logs were emitted for rate limit retries
-        assert (
-            mock_logger.warning.call_count >= 1
-        ), "Should log warnings during retry attempts"
+        assert mock_logger.warning.call_count >= 1, "Should log warnings during retry attempts"
 
 
 @pytest.mark.integration
@@ -241,9 +232,9 @@ async def test_archeologist_key_rotation_on_403(video_repo, mock_sleep):
 
         await hunt_history(year=2010, month=1)
 
-        assert (
-            len(keys_used) > 1
-        ), f"Key rotation should use >1 key on 403 errors, used {len(keys_used)}"
+        assert len(keys_used) > 1, (
+            f"Key rotation should use >1 key on 403 errors, used {len(keys_used)}"
+        )
 
 
 @pytest.mark.integration
@@ -267,9 +258,9 @@ async def test_archeologist_campaign_multi_month(video_repo):
         await run_archeology_campaign(start_year=2010, end_year=2010)
 
         # Verify hunt_history_task was called for all 12 months of 2010
-        assert (
-            mock_hunt.call_count == 12
-        ), f"Campaign should invoke hunt_history for all 12 months, got {mock_hunt.call_count}"
+        assert mock_hunt.call_count == 12, (
+            f"Campaign should invoke hunt_history for all 12 months, got {mock_hunt.call_count}"
+        )
 
         # Verify correct month sequence (should be called with year, month, keys)
         for month in range(1, 13):
@@ -279,9 +270,7 @@ async def test_archeologist_campaign_multi_month(video_repo):
                 for call in mock_hunt.call_args_list
                 if len(call[0]) >= 2 and call[0][0] == 2010 and call[0][1] == month
             ]
-            assert (
-                len(calls_with_month) == 1
-            ), f"Month {month} should be called exactly once"
+            assert len(calls_with_month) == 1, f"Month {month} should be called exactly once"
 
 
 @pytest.mark.integration
@@ -320,9 +309,7 @@ async def test_archeologist_handles_empty_results(video_repo):
             "SELECT * FROM videos WHERE published_at BETWEEN %s AND %s",
             ("2005-01-01", "2005-02-01"),
         )
-        assert (
-            len(videos) == 0
-        ), f"Expected 0 videos for empty result month, got {len(videos)}"
+        assert len(videos) == 0, f"Expected 0 videos for empty result month, got {len(videos)}"
 
 
 @pytest.mark.integration
@@ -358,18 +345,14 @@ async def test_archeologist_time_window_calculation(video_repo):
         last_call = mock_session_instance.get.call_args_list[-1]
         params = last_call[1]["params"]
 
-        assert (
-            "publishedAfter" in params
-        ), "publishedAfter missing from API request params"
-        assert (
-            "publishedBefore" in params
-        ), "publishedBefore missing from API request params"
-        assert params["publishedAfter"].startswith(
-            "2010-12-01"
-        ), f"Expected Dec 2010 start window, got {params['publishedAfter']}"
-        assert params["publishedBefore"].startswith(
-            "2011-01-01"
-        ), f"Expected Jan 2011 end window, got {params['publishedBefore']}"
+        assert "publishedAfter" in params, "publishedAfter missing from API request params"
+        assert "publishedBefore" in params, "publishedBefore missing from API request params"
+        assert params["publishedAfter"].startswith("2010-12-01"), (
+            f"Expected Dec 2010 start window, got {params['publishedAfter']}"
+        )
+        assert params["publishedBefore"].startswith("2011-01-01"), (
+            f"Expected Jan 2011 end window, got {params['publishedBefore']}"
+        )
 
 
 @pytest_asyncio.fixture
@@ -381,7 +364,7 @@ async def video_repo(fresh_db):
 
 
 @pytest.fixture
-def mock_youtube_search_response() -> Dict[str, Any]:
+def mock_youtube_search_response() -> dict[str, Any]:
     """Mock YouTube Search API response for Archeologist with high-volume results."""
     return {
         "kind": "youtube#searchListResponse",
@@ -420,16 +403,14 @@ async def test_archeologist_real_youtube_api_search(video_repo):
 
     # Verify the first key doesn't look like a test key
     first_key = keys.next_key()
-    if any(
-        marker in first_key.lower() for marker in ["test_", "dummy_", "fake_", "mock_"]
-    ):
+    if any(marker in first_key.lower() for marker in ["test_", "dummy_", "fake_", "mock_"]):
         pytest.fail(f"API key looks like a test key: {first_key[:10]}...")
 
     # Test historical search for a month known to have videos (January 2010)
     base_url = "https://www.googleapis.com/youtube/v3/search"
 
-    start_date = datetime(2010, 1, 1, tzinfo=timezone.utc)
-    end_date = datetime(2010, 2, 1, tzinfo=timezone.utc)
+    start_date = datetime(2010, 1, 1, tzinfo=UTC)
+    end_date = datetime(2010, 2, 1, tzinfo=UTC)
 
     start_str = start_date.isoformat().replace("+00:00", "Z")
     end_str = end_date.isoformat().replace("+00:00", "Z")
@@ -453,9 +434,9 @@ async def test_archeologist_real_youtube_api_search(video_repo):
                     f"YouTube API returned 400 - likely invalid test key (key={first_key[:10]}...)"
                 )
 
-            assert (
-                resp.status == 200
-            ), f"YouTube API returned status {resp.status} (key={first_key[:10]}...)"
+            assert resp.status == 200, (
+                f"YouTube API returned status {resp.status} (key={first_key[:10]}...)"
+            )
 
             data = await resp.json()
             items = data.get("items", [])
@@ -466,10 +447,8 @@ async def test_archeologist_real_youtube_api_search(video_repo):
             # Verify response structure
             for item in items[:3]:  # Check first 3 items
                 assert "id" in item, f"Missing 'id' in API response item: {item}"
-                assert (
-                    "videoId" in item["id"]
-                ), f"Missing 'videoId' in item.id: {item['id']}"
-                assert "snippet" in item, f"Missing 'snippet' in API response item"
+                assert "videoId" in item["id"], f"Missing 'videoId' in item.id: {item['id']}"
+                assert "snippet" in item, "Missing 'snippet' in API response item"
                 assert "title" in item["snippet"], "Missing 'title' in snippet"
                 assert "channelId" in item["snippet"], "Missing 'channelId' in snippet"
 
@@ -478,25 +457,21 @@ async def test_archeologist_real_youtube_api_search(video_repo):
 
             # Verify video was stored IN REAL DATABASE
             video_id = items[0]["id"]["videoId"]
-            video = await video_repo._fetch_one(
-                "SELECT * FROM videos WHERE id = %s", (video_id,)
+            video = await video_repo._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
+            assert video is not None, (
+                f"Video {video_id} not found in REAL database after ingestion!"
             )
-            assert (
-                video is not None
-            ), f"Video {video_id} not found in REAL database after ingestion!"
             assert video["id"] == video_id
 
             # CRITICAL: Verify connection to REAL Neon (not mock/in-memory)
             from atlas.config import settings
 
             db_url = str(settings.DATABASE_URL)
-            assert (
-                "neon.tech" in db_url or "postgres" in db_url
-            ), f"CRITICAL: DATABASE_URL does not point to real Neon! Got: {db_url[:50]}..."
-
-            print(
-                f"[Test] ✅ SUCCESS! Video {video_id} ingested into REAL Neon DB at {db_url[:30]}..."
+            assert "neon.tech" in db_url or "postgres" in db_url, (
+                f"CRITICAL: DATABASE_URL does not point to real Neon! Got: {db_url[:50]}..."
             )
+
+            print(f"[Test] SUCCESS! Video {video_id} ingested into Neon DB at {db_url[:30]}...")
 
 
 @pytest.mark.integration
@@ -521,7 +496,7 @@ async def test_archeologist_real_api_rate_limit_detection(video_repo):
 
     # Make several requests - if we hit a 429, we should handle it
     async with aiohttp.ClientSession() as session:
-        for i in range(3):
+        for _i in range(3):
             async with session.get(base_url, params=params) as resp:
                 # Should be either 200 (success) or 429 (rate limit)
                 assert resp.status in [
@@ -540,9 +515,7 @@ async def test_archeologist_real_api_rate_limit_detection(video_repo):
                 else:
                     # Success - verify response structure
                     data = await resp.json()
-                    assert (
-                        "items" in data
-                    ), f"Missing 'items' in API response: {list(data.keys())}"
+                    assert "items" in data, f"Missing 'items' in API response: {list(data.keys())}"
 
 
 @pytest.mark.integration
@@ -562,7 +535,7 @@ async def test_archeologist_real_api_key_rotation(video_repo):
     used_keys = set()
 
     # Try up to the number of keys we have
-    for attempt in range(min(3, keys.size)):
+    for _attempt in range(min(3, keys.size)):
         key = keys.next_key()
         used_keys.add(key)
 
@@ -586,9 +559,7 @@ async def test_archeologist_real_api_key_rotation(video_repo):
                 if resp.status == 200:
                     # Key is valid - great!
                     data = await resp.json()
-                    assert (
-                        "items" in data
-                    ), f"Missing 'items' in API response: {list(data.keys())}"
+                    assert "items" in data, f"Missing 'items' in API response: {list(data.keys())}"
                     break
 
     # Verify key rotation happened if we have multiple keys

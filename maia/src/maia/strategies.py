@@ -4,17 +4,15 @@ Encapsulates core HTTP request, key rotation, and rate-limit backoff logic
 shared by the Hunter and Archeologist producers, plus the Tracker consumer.
 """
 
-from abc import ABC
-from typing import Any, Dict, Optional
+from typing import Any
 
 import aiohttp
-
 from atlas.utils import KeyRing, ResiliencyExecutor
 
-from maia.utils import RateLimitError, execute_with_rate_limit
+from maia.utils import execute_with_rate_limit
 
 
-class YouTubeSearchStrategy(ABC):
+class YouTubeSearchStrategy:
     """Base class for YouTube Data API search and video resolution.
 
     Provides ``execute_get()`` which handles key rotation and Resiliency
@@ -32,7 +30,7 @@ class YouTubeSearchStrategy(ABC):
         self.keys = KeyRing(key_ring_pool)
         self.executor = ResiliencyExecutor(self.keys, agent_name=agent_name)
 
-    async def execute_get(self, url: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def execute_get(self, url: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Execute an authenticated GET request with key rotation and rate-limit handling.
 
         Returns:
@@ -42,12 +40,12 @@ class YouTubeSearchStrategy(ABC):
             RateLimitError: When all keys are exhausted (Resiliency Strategy).
         """
 
-        async def make_request(api_key: str) -> Dict[str, Any]:
-            params_with_key: Dict[str, Any] = {**params, "key": api_key}
+        async def make_request(api_key: str) -> dict[str, Any]:
+            params_with_key: dict[str, Any] = {**params, "key": api_key}
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params_with_key) as resp:
                     if resp.status == 200:
-                        result: Dict[str, Any] = await resp.json()
+                        result: dict[str, Any] = await resp.json()
                         return result
                     elif resp.status in (403, 429):
                         error_text = await resp.text()
@@ -57,14 +55,12 @@ class YouTubeSearchStrategy(ABC):
                             f"maia.strategies.{self.executor.agent_name}"
                         )
                         error_text = await resp.text()
-                        run_logger.error(
-                            f"HTTP {resp.status} for {url}: {error_text[:200]}"
-                        )
+                        run_logger.error(f"HTTP {resp.status} for {url}: {error_text[:200]}")
                         raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
 
         return await execute_with_rate_limit(self.executor, make_request)
 
-    async def search(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def search(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Perform a ``youtube/v3/search`` request.
 
         Subclasses should populate *params* with the desired search criteria
@@ -74,7 +70,7 @@ class YouTubeSearchStrategy(ABC):
 
     async def fetch_videos(
         self, video_ids: list[str], parts: str = "statistics"
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Resolve statistics/details for a batch of video IDs (max 50 per call)."""
-        params: Dict[str, Any] = {"part": parts, "id": ",".join(video_ids)}
+        params: dict[str, Any] = {"part": parts, "id": ",".join(video_ids)}
         return await self.execute_get(self.VIDEOS_URL, params)
