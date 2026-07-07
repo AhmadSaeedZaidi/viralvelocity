@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict
 VideoStatus = Literal["PENDING", "PROCESSING", "PROCESSED", "ARCHIVED", "FAILED"]
 
 
-class Video(BaseModel):
+class Video(BaseModel):  # type: ignore[misc]
     id: str
     channel_id: str | None = None
     title: str
@@ -26,7 +26,7 @@ class Video(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class VideoStats(BaseModel):
+class VideoStats(BaseModel):  # type: ignore[misc]
     video_id: str
     timestamp: datetime
     views: int | None = None

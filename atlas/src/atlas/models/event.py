@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
-class SystemEvent(BaseModel):
+class SystemEvent(BaseModel):  # type: ignore[misc]
     id: str
     event_type: str
     entity_id: str | None = None

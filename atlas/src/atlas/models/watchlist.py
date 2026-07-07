@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class WatchlistItem(BaseModel):
+class WatchlistItem(BaseModel):  # type: ignore[misc]
     video_id: str
     tracking_tier: str = "HOURLY"
     last_tracked_at: datetime | None = None

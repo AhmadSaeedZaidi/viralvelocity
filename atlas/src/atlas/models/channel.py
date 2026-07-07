@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class Channel(BaseModel):
+class Channel(BaseModel):  # type: ignore[misc]
     id: str
     title: str
     country: str | None = None
@@ -15,7 +15,7 @@ class Channel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ChannelStats(BaseModel):
+class ChannelStats(BaseModel):  # type: ignore[misc]
     channel_id: str
     timestamp: datetime
     view_count: int | None = None
@@ -25,7 +25,7 @@ class ChannelStats(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ChannelHistory(BaseModel):
+class ChannelHistory(BaseModel):  # type: ignore[misc]
     id: str
     channel_id: str
     changed_at: datetime | None = None

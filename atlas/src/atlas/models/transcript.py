@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class Transcript(BaseModel):
+class Transcript(BaseModel):  # type: ignore[misc]
     video_id: str
     language: str = "en"
     vault_uri: str

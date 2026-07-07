@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class SearchQueueItem(BaseModel):
+class SearchQueueItem(BaseModel):  # type: ignore[misc]
     id: int
     query_term: str
     priority: int = 0
