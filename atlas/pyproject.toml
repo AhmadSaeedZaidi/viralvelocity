@@ -86,12 +86,9 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 warn_redundant_casts = false
 disallow_untyped_decorators = false
-plugins = ["pydantic.mypy"]
-
-[tool.pydantic-mypy]
-init_forbid_extra = false
-init_typed = true
-warn_required_dynamic_aliases = true
+exclude = [
+    "src/atlas/models/",
+]
 
 [[tool.mypy.overrides]]
 module = [
