@@ -1,5 +1,6 @@
 """Tests for the VideoStateMixin streamer/singer claim + mark methods."""
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -51,9 +52,7 @@ async def test_mark_audio_safe():
 @pytest.mark.asyncio
 async def test_claim_muralist_batch():
     s = FakeState()
-    s._fetch_all.return_value = [
-        {"id": "V1", "title": "t", "has_video": False}
-    ]
+    s._fetch_all.return_value = [{"id": "V1", "title": "t", "has_video": False}]
     vids = await s.claim_muralist_batch(5)
     s._fetch_all.assert_called_once()
     assert vids[0].id == "V1"
@@ -77,10 +76,11 @@ async def test_mark_fetched():
     sql, params = s._execute.call_args[0]
     assert "fetched = TRUE" in sql
     assert "raw_uri = %s" in sql
+    assert "raw_stored_at = %s" in sql
     assert "captions_uri" not in sql
     assert "has_captions" not in sql
     assert params[0] == "raw/V1.mp4"
-    assert params[2] == "V1"
+    assert params[3] == "V1"
 
 
 @pytest.mark.asyncio
@@ -90,6 +90,8 @@ async def test_reclaim_raw_if_complete_deletes_when_both_done():
         "raw_uri": "raw/V1.mp4",
         "has_audio": True,
         "has_visuals": True,
+        "has_video": True,
+        "raw_stored_at": datetime.now(UTC),
     }
     with (
         patch("atlas.vault.get_vault") as mock_gv,
@@ -118,3 +120,81 @@ async def test_reclaim_raw_if_complete_skips_when_incomplete():
     deleted = await s.reclaim_raw_if_complete("V1")
     assert deleted == 0
     s._execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reclaim_raw_keeps_raw_within_ttl_when_no_clip():
+    """Muralist hasn't run (no clip) and raw is fresh → keep raw."""
+    s = FakeState()
+    s._fetch_one.return_value = {
+        "raw_uri": "raw/V1.mp4",
+        "has_audio": True,
+        "has_visuals": True,
+        "has_video": False,
+        "raw_stored_at": datetime.now(UTC) - timedelta(hours=10),  # < 48h TTL
+    }
+    deleted = await s.reclaim_raw_if_complete("V1")
+    assert deleted == 0
+    s._execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reclaim_raw_reclaims_after_ttl_when_no_clip():
+    """Muralist never ran but raw aged past TTL → reclaim to bound disk."""
+    s = FakeState()
+    s._fetch_one.return_value = {
+        "raw_uri": "raw/V1.mp4",
+        "has_audio": True,
+        "has_visuals": True,
+        "has_video": False,
+        "raw_stored_at": datetime.now(UTC) - timedelta(hours=100),  # > 48h TTL
+    }
+    with (
+        patch("atlas.vault.get_vault") as mock_gv,
+        patch("atlas.vault.meta_path", return_value="meta/V1.info.json"),
+    ):
+        mock_vault = mock_gv.return_value
+        mock_vault.delete_files = MagicMock(return_value=1)
+        deleted = await s.reclaim_raw_if_complete("V1")
+    assert deleted == 1
+    mock_vault.delete_files.assert_called_once_with(["raw/V1.mp4", "meta/V1.info.json"])
+    s._execute.assert_called_once()
+    assert s._execute.call_args[0][0].startswith("UPDATE videos SET raw_uri = NULL")
+
+
+@pytest.mark.asyncio
+async def test_reclaim_raw_keeps_when_stored_at_null_and_no_clip():
+    """Rows predating raw_stored_at are never reclaimed via age."""
+    s = FakeState()
+    s._fetch_one.return_value = {
+        "raw_uri": "raw/V1.mp4",
+        "has_audio": True,
+        "has_visuals": True,
+        "has_video": False,
+        "raw_stored_at": None,
+    }
+    deleted = await s.reclaim_raw_if_complete("V1")
+    assert deleted == 0
+    s._execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_scribe_batch_requires_audio():
+    """Scribe consumes audio (produced by singer) — never claim before it."""
+    s = FakeState()
+    s._fetch_all.return_value = []
+    await s.claim_scribe_batch(5)
+    sql = s._fetch_all.call_args[0][0]
+    assert "has_audio = TRUE" in sql
+    assert "has_transcript = FALSE" in sql
+
+
+@pytest.mark.asyncio
+async def test_claim_muralist_batch_requires_raw_uri():
+    """Muralist needs the raw input — never claim a row whose raw was reclaimed."""
+    s = FakeState()
+    s._fetch_all.return_value = []
+    await s.claim_muralist_batch(5)
+    sql = s._fetch_all.call_args[0][0]
+    assert "raw_uri IS NOT NULL" in sql
+    assert "has_video = FALSE" in sql

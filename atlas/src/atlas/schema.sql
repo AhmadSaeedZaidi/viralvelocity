@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS videos (
     fetched BOOLEAN DEFAULT FALSE,
     -- Vault path of the raw fetched artifact (e.g. `raw/{id}.webm`).
     raw_uri VARCHAR(255),
+    -- Timestamp the raw artifact was stored via mark_fetched. Drives the raw
+    -- TTL reclamation window so the muralist (clip consumer) has a bounded
+    -- chance to derive from it before it is reclaimed.
+    raw_stored_at TIMESTAMPTZ,
     -- The full source video has been archived to the vault by the muralist
     -- consumer at `videos/{id}.mp4`. Marked once the full clip is stored.
     has_video BOOLEAN DEFAULT FALSE,
@@ -78,6 +82,8 @@ ALTER TABLE videos ADD COLUMN IF NOT EXISTS has_video BOOLEAN DEFAULT FALSE;
 -- a network-fetch (streamer) + local-extract (singer) pair.
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS fetched BOOLEAN DEFAULT FALSE;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS raw_uri VARCHAR(255);
+-- `raw_stored_at` added to bound raw-artifact retention (muralist TTL window).
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS raw_stored_at TIMESTAMPTZ;
 -- `has_captions` / `captions_uri` were added when the streamer fetched captions
 -- alongside the raw media. Caption ownership has since moved entirely to the
 -- Scribe (single `timedtext` throttle surface, with an audio-STT fallback), so

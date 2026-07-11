@@ -19,6 +19,7 @@ class VideoStateMixin(DatabaseAdapter):
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
                   AND has_transcript = FALSE
+                  AND has_audio = TRUE
                 ORDER BY discovered_at ASC
                 LIMIT %s
                 FOR UPDATE SKIP LOCKED
@@ -107,6 +108,7 @@ class VideoStateMixin(DatabaseAdapter):
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
                   AND has_video = FALSE
+                  AND raw_uri IS NOT NULL
                 ORDER BY discovered_at ASC
                 LIMIT %s
                 FOR UPDATE SKIP LOCKED
@@ -157,10 +159,11 @@ class VideoStateMixin(DatabaseAdapter):
             UPDATE videos
             SET fetched = TRUE,
                 raw_uri = %s,
+                raw_stored_at = %s,
                 last_updated_at = %s
             WHERE id = %s
             """,
-            (raw_uri, now, video_id),
+            (raw_uri, now, now, video_id),
         )
 
     async def reclaim_raw_if_complete(self, video_id: str) -> int:
@@ -171,11 +174,35 @@ class VideoStateMixin(DatabaseAdapter):
         ``has_visuals`` are both TRUE — otherwise the second consumer would find
         its input gone. Returns the number of files reclaimed (0 or 1).
         """
+        from atlas.config import settings
+
         row = await self._fetch_one(
-            "SELECT raw_uri, has_audio, has_visuals FROM videos WHERE id = %s",
+            """
+            SELECT raw_uri, has_audio, has_visuals, has_video, raw_stored_at
+            FROM videos WHERE id = %s
+            """,
             (video_id,),
         )
+        # Reclaim only once BOTH derived consumers are done. Requiring
+        # `has_audio` (singer) and `has_visuals` (painter) before touching the
+        # raw prevents reclaiming the input out from under a still-pending
+        # consumer — the root cause of the muralist starvation bug.
         if not row or not row["raw_uri"] or not (row["has_audio"] and row["has_visuals"]):
+            return 0
+
+        # Keep the raw bounded when the muralist (clip producer) is disabled or
+        # manual-only: reclaim as soon as the clip exists, otherwise only after
+        # the raw has aged past RAW_TTL_HOURS. A NULL raw_stored_at (rows that
+        # predate this column) is never reclaimed via age — only via has_video.
+        has_video = row["has_video"]
+        raw_stored_at = row["raw_stored_at"]
+        raw_age_hours = (
+            (datetime.now(UTC) - raw_stored_at).total_seconds() / 3600.0
+            if raw_stored_at is not None
+            else None
+        )
+        ttl_hours = settings.RAW_TTL_HOURS
+        if not has_video and not (raw_age_hours is not None and raw_age_hours > ttl_hours):
             return 0
 
         from atlas.vault import get_vault, meta_path
@@ -187,9 +214,7 @@ class VideoStateMixin(DatabaseAdapter):
             logger.warning(f"raw reclamation failed for {video_id}: {e}")
             return 0
         # Clear the pointer so we never try to reclaim twice.
-        await self._execute(
-            "UPDATE videos SET raw_uri = NULL WHERE id = %s", (video_id,)
-        )
+        await self._execute("UPDATE videos SET raw_uri = NULL WHERE id = %s", (video_id,))
         logger.info(f"Reclaimed {deleted} raw artifacts for {video_id}")
         return deleted
 

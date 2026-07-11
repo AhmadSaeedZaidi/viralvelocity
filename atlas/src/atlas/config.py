@@ -51,6 +51,19 @@ class Settings(BaseSettings):  # type: ignore[misc]
         True, description="Verify data exists in Vault before deletion"
     )
 
+    # ── Raw artifact reclaim (streamer → singer/painter/muralist) ─────────────
+    RAW_TTL_HOURS: int = Field(
+        48,
+        description=(
+            "Hours to retain the raw source artifact after fetch before "
+            "reclaiming it when the muralist (clip producer) has not run. "
+            "Singer and painter must finish first (has_audio AND has_visuals); "
+            "only then is the raw eligible for reclamation — immediately once "
+            "has_video is set, or after this TTL if the muralist never runs "
+            "(keeps disk bounded on a VPS where muralist is manual-only)."
+        ),
+    )
+
     YOUTUBE_COOKIES_PATH: str | None = Field(
         None, description="Path to Netscape cookies.txt file for YouTube authentication"
     )
@@ -116,9 +129,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
         600,
         description="Only HEAD-probe candidates shorter than this (saves probes on long videos).",
     )
-    QUALITY_SHORTS_HEAD_TIMEOUT: float = Field(
-        5.0, description="Per-probe HTTP timeout (seconds)."
-    )
+    QUALITY_SHORTS_HEAD_TIMEOUT: float = Field(5.0, description="Per-probe HTTP timeout (seconds).")
     QUALITY_SHORTS_HEAD_CONCURRENCY: int = Field(
         8, description="Max concurrent HEAD probes per batch."
     )
