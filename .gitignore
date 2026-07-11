@@ -119,3 +119,10 @@ COOKIES.txt
 # --- Local session summary (not committed) ---
 SUMMARY.md
 .local-summary/
+
+# --- Local tooling / agent + session state (not committed) ---
+.agents/
+.opencode/
+
+# --- Stray download / transcript artifacts ---
+*.part
