@@ -24,28 +24,28 @@ pleiades/
 │   │       ├── notifier.py      # Alerts and notifications
 │   │       ├── utils.py         # KeyRing, HydraExecutor
 │   │       ├── schema.sql       # Database schema
-│   │       └── adapters/
-│   │           ├── maia.py      # MaiaDAO (data access)
-│   │           └── maia_adaptive_scheduling.py # Adaptive Scheduling mixin
+│   │       └── adapters/        # Low-level DB adapter (DatabaseAdapter)
+│   │       └── repositories/    # One Repository class per entity (Video, Channel, ...)
 │   ├── docs/                    # Atlas-specific docs
 │   └── tests/                   # Atlas unit tests
 │
 ├── maia/                        # SERVICE: Video Collection
 │   ├── pyproject.toml           # Deps: Atlas (local), Google-API-Client
-│   ├── Dockerfile               # Slim container
+│   ├── Dockerfile               # Single image (atlas + maia)
 │   ├── src/
 │   │   └── maia/
 │   │       ├── __init__.py
-│   │       ├── hunter/
-│   │       │   └── flow.py      # Discovery agent
-│   │       ├── tracker/
-│   │       │   └── flow.py      # Monitoring agent (Adaptive Scheduling)
-│   │       ├── janitor/
-│   │       │   └── flow.py      # Cleanup agent (Tiered Storage)
-│   │       ├── painter/
-│   │       │   └── flow.py      # Metadata enrichment
-│   │       └── scribe/
-│   │           └── flow.py      # Feature extraction
+│   │       ├── registry.py      # AGENT_REGISTRY (name → class)
+│   │       ├── hunter/          # Discovery agent (producer)
+│   │       ├── tracker/         # Monitoring agent (consumer)
+│   │       ├── janitor/         # Cleanup agent (consumer)
+│   │       ├── painter/         # Keyframe extraction (consumer)
+│   │       ├── scribe/          # Captions extraction (consumer)
+│   │       ├── streamer/        # Unified YouTube fetch -> vault `raw` (producer)
+│   │       ├── singer/          # Audio extraction from `raw` (consumer)
+│   │       ├── muralist/        # Full-video archival (consumer, manual-only)
+│   │       ├── media/           # Shared YouTube streamer (single yt-dlp path)
+│   │       └── heartbeat/       # Fleet status reporter
 │   ├── docs/                    # Maia-specific docs
 │   └── tests/                   # Maia unit tests
 │
@@ -129,27 +129,24 @@ executor = HydraExecutor(keys, agent_name="hunter")
 result = await executor.execute_async(make_request)
 ```
 
-#### 6. Data Access (`atlas.adapters.maia`)
-DAO pattern for SQL operations:
+#### 6. Data Access (`atlas.repositories`)
+Repository pattern — one class per entity, returning validated domain models
+(see `refactor_draft.md` for the rationale behind retiring the old `MaiaDAO`):
 ```python
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import VideoRepository, SearchQueueRepository
 
-dao = MaiaDAO()
-
-# Search queue operations
-await dao.add_to_search_queue(["query1", "query2"])
-batch = await dao.fetch_hunter_batch(10)
+video_repo = VideoRepository()
+search_repo = SearchQueueRepository()
 
 # Video operations
-await dao.ingest_video_metadata(video_data)
+videos = await video_repo.claim_streamer_batch(10)
+await video_repo.mark_fetched(video_id, raw_uri)
+
+# Search queue operations
+await search_repo.add_to_search_queue(["query1", "query2"])
 
 # Adaptive Scheduling operations
-await dao.add_to_watchlist(video_id)
-batch = await dao.fetch_tracking_batch(50)
-await dao.update_watchlist_schedule(updates)
-
-# Janitor operations
-result = await dao.run_janitor()
+await video_repo.add_to_watchlist(video_id)
 ```
 
 ---
@@ -186,6 +183,7 @@ async def run_hunter_cycle(batch_size: int = 10):
 - Resiliency Strategy for key management
 - Snowball effect (adds related queries)
 - Tiered Storage integration
+- Quality gate: per-video signal + Shorts HEAD probe + AI-slop denylist + channel-statistics AI-farm filter, applied before ingest/snowball
 
 #### 2. Tracker (Monitoring)
 Monitors video statistics:
@@ -236,35 +234,54 @@ async def run_janitor_cycle():
 - Safety checks
 - Watchlist protection
 
-#### 4. Painter (Enrichment)
-Enriches metadata with external APIs:
+#### 4. Painter (Frame Extraction)
+Extracts keyframes from the `raw` artifact that streamer stored in the vault
+(range-requested, so no full download) and sets `has_visuals`:
 
 ```python
 @flow(name="run_painter_cycle")
 async def run_painter_cycle():
-    # Fetch unenriched videos
-    videos = await dao.fetch_painter_targets()
-    
-    # Enrich with external data
+    videos = await video_repo.claim_painter_batch()
     for video in videos:
-        enriched = await enrich_metadata(video)
-        await dao.update_video_metadata(enriched)
+        frames = await extract_frames(video)   # range-requested from vault raw
+        await vault.store_frames(video.id, frames)
+        await video_repo.mark_visuals_safe(video.id)
 ```
 
-#### 5. Scribe (Feature Extraction)
-Extracts features for ML:
+#### 5. Scribe (Transcript / Caption Extraction)
+Owns captions: pulls audio (from singer's `audio/{id}.opus` or a YouTube
+fallback), transcribes via the Grok → Mistral cascade, stores the transcript
+and sets `has_transcript`:
 
 ```python
 @flow(name="run_scribe_cycle")
 async def run_scribe_cycle():
-    # Fetch unprocessed videos
-    videos = await dao.fetch_scribe_targets()
-    
-    # Extract features
+    videos = await video_repo.claim_scribe_batch()   # requires has_audio = TRUE
     for video in videos:
-        features = extract_features(video)
-        await dao.store_features(features)
+        transcript = await transcribe(video)
+        await vault.store_transcript(video.id, transcript)
+        await video_repo.mark_transcript_safe(video.id)
 ```
+
+#### 6. Streamer, Singer & Muralist (Audio / Video pipeline)
+
+The audio and video media now flow through a small producer/consumer set
+(see `maia/README.md` for the authoritative detail):
+
+- **Streamer** (producer) — performs one unified YouTube pull (audio + frames),
+  stores the `raw` artifact in the vault, and flips `fetched = TRUE`. It does
+  **not** set `has_audio` / `has_visuals` itself.
+- **Singer** (consumer) — extracts the speech track from the stored `raw` locally
+  (no YouTube rate limit), stores `audio/{id}.opus`, and sets `has_audio`.
+- **Scribe** (consumer) — transcribes that audio via the Grok → Mistral cascade
+  and sets `has_transcript` (see above).
+- **Muralist** (consumer, manual-only) — archives the full source clip to
+  `videos/{id}.mp4` (`has_video`); not fleet-scheduled (storage-heavy). It
+  consumes the `raw` artifact, so `raw` is only reclaimed after muralist runs
+  (or once a `raw_ttl` elapses) — see `reclaim_raw_if_complete`.
+
+All of streamer/singer/painter/muralist share the single YouTube stream path in
+`maia/media/streamer.py` (yt-dlp + Deno PoToken + `bgutil` PO-token provider).
 
 ---
 
@@ -350,14 +367,16 @@ async def test_tracker_handles_deleted_videos():
 
 ## Key Patterns
 
-### 1. DAO Pattern
+### 1. Repository Pattern
 
-All SQL access goes through Data Access Objects:
+All SQL access goes through per-entity Repositories (one class per entity,
+returning validated domain models). This replaced the old monolithic `MaiaDAO`
+— see `refactor_draft.md`:
 
 ```python
 # ✅ GOOD
-dao = MaiaDAO()
-videos = await dao.fetch_hunter_batch(10)
+video_repo = VideoRepository()
+videos = await video_repo.claim_streamer_batch(10)
 
 # ❌ BAD
 async with db.get_connection() as conn:
@@ -371,7 +390,7 @@ Agents are stateless and idempotent:
 ```python
 # ✅ GOOD - Stateless
 async def run_hunter_cycle(batch_size: int):
-    dao = MaiaDAO()  # New instance each cycle
+    video_repo = VideoRepository()  # New instance each cycle
     # ... processing
 
 # ❌ BAD - Stateful
@@ -425,7 +444,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - YOUTUBE_API_KEY_POOL_JSON=${YOUTUBE_API_KEY_POOL_JSON}
     restart: on-failure:5
-    command: python -m maia.hunter.flow
+    command: python -m maia hunter
 
   maia-tracker:
     build: ./maia
@@ -450,7 +469,7 @@ spec:
       containers:
       - name: hunter
         image: pleiades/maia:latest
-        command: ["python", "-m", "maia.hunter.flow"]
+        command: ["python", "-m", "maia", "hunter"]
         env:
         - name: DATABASE_URL
           valueFrom:
@@ -516,5 +535,6 @@ Pleiades architecture enables:
 - ✅ **Resilient API usage** (Resiliency Strategy)
 - ✅ **Clean separation** (Atlas ↔ Maia ↔ Alkyone)
 - ✅ **Stateless agents** (Easy scaling)
+- ✅ **Corpus-quality tooling** (`quality-report` monitor, `purge` for short/low-value videos with overwrite-on-reprocess)
 
 **Result**: Scalable, maintainable viral video intelligence platform.
