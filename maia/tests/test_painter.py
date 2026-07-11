@@ -2,16 +2,62 @@
 Tests for Maia Painter module.
 """
 
+import io
+import json
+import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from atlas.utils import QuotaExhaustedError
 from maia.painter.flow import (
     fetch_painter_targets_task,
     painter_flow,
     process_frames_task,
 )
 from maia.painter.streamer import StealthVideoStreamer
-from maia.utils import RateLimitError
+
+# A RIFF/WEBP-magic buffer (frames are encoded as webp by default).
+FAKE_WEBP = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 100
+
+
+def _fake_ffmpeg(bytes_out: bytes, returncode: int = 0):
+    """Stand-in for subprocess.run that writes *bytes_out* to the output file.
+
+    ``_ffmpeg_extract_frame`` encodes to a temp file (not stdout) and then reads
+    it back, so the fake must materialise the bytes on disk at ``cmd[-1]``.
+    """
+
+    def _run(cmd, *args, **kwargs):
+        out_path = cmd[-1]
+        with open(out_path, "wb") as fh:
+            fh.write(bytes_out)
+        return subprocess.CompletedProcess(cmd, returncode, stdout=b"", stderr=b"")
+
+    return _run
+
+
+def _fake_subprocess(webp_bytes: bytes, video_stream: bool = True, duration: float = 200.0):
+    """Fake for ``subprocess.run`` that handles BOTH ffprobe and ffmpeg.
+
+    ``_has_video_stream`` and ``_ffprobe_duration`` shell out to ffprobe; frame
+    extraction shells out to ffmpeg (which must materialise the webp on disk).
+    """
+
+    def _run(cmd, *args, **kwargs):
+        if cmd[0] == "ffprobe":
+            if "stream=index" in cmd:
+                # _has_video_stream: report a video stream index if present.
+                out = "0\n" if video_stream else ""
+                return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+            # _ffprobe_duration: report the duration in seconds.
+            return subprocess.CompletedProcess(cmd, 0, stdout=str(duration), stderr="")
+        # ffmpeg frame extraction → write the fake webp to the output path.
+        out_path = cmd[-1]
+        with open(out_path, "wb") as fh:
+            fh.write(webp_bytes)
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    return _run
 
 
 @pytest.mark.asyncio
@@ -88,12 +134,12 @@ async def test_process_frames_successful_with_chapters():
         ],
         "heatmap": [],
     }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    fake_webp = FAKE_WEBP
 
     with (
         patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
+        patch("maia.painter.flow.subprocess.run", side_effect=_fake_ffmpeg(fake_webp)),
         patch("maia.painter.flow.get_vault") as mock_get_vault,
         patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
@@ -105,17 +151,17 @@ async def test_process_frames_successful_with_chapters():
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        mock_process = MagicMock()
-        mock_process.communicate.return_value = (fake_jpeg, b"")
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
         mock_vault.store_visual_evidence = MagicMock()
 
-        await process_frames_task.fn(video)
+        result = await process_frames_task.fn(video)
 
-        mock_vault_retry.assert_called_once()
-        mock_repo.mark_visuals_safe.assert_called_once_with("VIDEO_001")
+        # Storage is deferred to the flow (batched into one commit).
+        assert isinstance(result, tuple)
+        assert result[0] == "VIDEO_001"
+        assert len(result[1]) > 0
+        mock_vault_retry.assert_not_called()
+        mock_vault.store_visual_evidence.assert_not_called()
+        mock_repo.mark_visuals_safe.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -132,12 +178,12 @@ async def test_process_frames_successful_with_heatmap():
             {"start_time": 10.0, "value": 0.9},
         ],
     }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    fake_webp = FAKE_WEBP
 
     with (
         patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
+        patch("maia.painter.flow.subprocess.run", side_effect=_fake_ffmpeg(fake_webp)),
         patch("maia.painter.flow.get_vault") as mock_get_vault,
         patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
@@ -150,17 +196,16 @@ async def test_process_frames_successful_with_heatmap():
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[10.0])
 
-        mock_process = MagicMock()
-        mock_process.communicate.return_value = (fake_jpeg, b"")
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
         mock_vault.store_visual_evidence = MagicMock()
 
-        await process_frames_task.fn(video)
+        result = await process_frames_task.fn(video)
 
-        mock_vault_retry.assert_called_once()
-        mock_repo.mark_visuals_safe.assert_called_once_with("VIDEO_002")
+        assert isinstance(result, tuple)
+        assert result[0] == "VIDEO_002"
+        assert len(result[1]) > 0
+        mock_vault_retry.assert_not_called()
+        mock_vault.store_visual_evidence.assert_not_called()
+        mock_repo.mark_visuals_safe.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -175,12 +220,12 @@ async def test_process_frames_fallback_strategy():
         "chapters": [],
         "heatmap": [],
     }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    fake_webp = FAKE_WEBP
 
     with (
         patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
+        patch("maia.painter.flow.subprocess.run", side_effect=_fake_ffmpeg(fake_webp)),
         patch("maia.painter.flow.get_vault") as mock_get_vault,
         patch("maia.painter.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
     ):
@@ -193,17 +238,72 @@ async def test_process_frames_fallback_strategy():
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
         mock_streamer_instance.extract_heatmap_peaks = MagicMock(return_value=[])
 
-        mock_process = MagicMock()
-        mock_process.communicate.return_value = (fake_jpeg, b"")
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
         mock_vault.store_visual_evidence = MagicMock()
 
-        await process_frames_task.fn(video)
+        result = await process_frames_task.fn(video)
 
-        mock_vault_retry.assert_called_once()
-        mock_repo.mark_visuals_safe.assert_called_once_with("VIDEO_003")
+        assert isinstance(result, tuple)
+        assert result[0] == "VIDEO_003"
+        assert len(result[1]) > 0
+        mock_vault_retry.assert_not_called()
+        mock_vault.store_visual_evidence.assert_not_called()
+        mock_repo.mark_visuals_safe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_frames_local_meta_no_youtube():
+    """Preferred path: read stream URL from vault meta, range-request frames.
+
+    The unified streamer stashes the video's stream URLs in meta/{id}.info.json.
+    The painter pulls frames via FFmpeg range requests from that URL — no full
+    download and no YouTube metadata session (extract_info must NOT be called).
+    """
+    from atlas.models import Video
+
+    video = Video(id="VIDEO_LOCAL", title="Local")
+    fake_info = {
+        "duration": 200.0,
+        "chapters": [],
+        "heatmap": [],
+        "formats": [
+            {
+                "url": "https://googlevideo.com/segment?id=VIDEO_LOCAL",
+                "height": 360,
+                "vcodec": "av01.0.05M.08",
+                "acodec": "none",
+            },
+        ],
+    }
+
+    with (
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
+        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
+        patch(
+            "maia.painter.flow.subprocess.run",
+            side_effect=_fake_subprocess(FAKE_WEBP, video_stream=True, duration=200.0),
+        ),
+        patch("maia.painter.flow.get_vault") as mock_get_vault,
+    ):
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_visuals_safe = AsyncMock()
+        mock_repo.mark_failed = AsyncMock()
+        mock_vault = mock_get_vault.return_value
+
+        # meta present (with stream URLs); raw absent.
+        def _fetch(path: str):
+            if path.startswith("meta/"):
+                return io.BytesIO(json.dumps(fake_info).encode())
+            return None
+
+        mock_vault.fetch_binary = MagicMock(side_effect=_fetch)
+
+        result = await process_frames_task.fn(video)
+
+        assert isinstance(result, tuple)
+        assert result[0] == "VIDEO_LOCAL"
+        assert len(result[1]) > 0
+        # The YouTube streamer must not be used on the vault-meta path.
+        MockStreamer.return_value.extract_info.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -241,49 +341,14 @@ async def test_process_frames_handles_video_capture_failure():
         "heatmap": [],
     }
 
-    with (
-        patch("maia.painter.flow.VideoRepository") as MockRepo,
-        patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-    ):
-        mock_repo = MockRepo.return_value
-        mock_repo.mark_failed = AsyncMock()
-        mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
-
-        mock_process = MagicMock()
-        mock_process.communicate.return_value = (b"", b"FFmpeg error")
-        mock_process.returncode = 1
-        mock_popen.return_value = mock_process
-
-        await process_frames_task.fn(video)
-
-        mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
-
-
-@pytest.mark.asyncio
-async def test_process_frames_handles_vault_failure():
-    """Test process_frames handles vault storage failures after retries."""
-    from atlas.models import Video
-
-    video = Video(id="VIDEO_001", title="Test Video")
-    mock_video_info = {
-        "url": "https://example.com/video.mp4",
-        "duration": 100.0,
-        "chapters": [{"start_time": 0.0}],
-        "heatmap": [],
-    }
-    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+    fake_webp = FAKE_WEBP
 
     with (
         patch("maia.painter.flow.VideoRepository") as MockRepo,
         patch("maia.painter.flow.StealthVideoStreamer") as MockStreamer,
-        patch("maia.painter.flow.subprocess.Popen") as mock_popen,
-        patch("maia.painter.flow.get_vault"),
         patch(
-            "maia.painter.flow.vault_op_with_retry",
-            new_callable=AsyncMock,
-            side_effect=Exception("Vault error"),
+            "maia.painter.flow.subprocess.run",
+            side_effect=_fake_ffmpeg(fake_webp, returncode=1),
         ),
     ):
         mock_repo = MockRepo.return_value
@@ -291,19 +356,53 @@ async def test_process_frames_handles_vault_failure():
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(return_value=mock_video_info)
 
-        mock_process = MagicMock()
-        mock_process.communicate.return_value = (fake_jpeg, b"")
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
         await process_frames_task.fn(video)
 
         mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
 
 
 @pytest.mark.asyncio
+async def test_run_painter_cycle_handles_vault_failure():
+    """Test run_painter_cycle marks videos FAILED when the batched vault write fails."""
+    from atlas.models import Video
+
+    mock_videos = [Video(id="VIDEO_001", title="Test Video")]
+
+    with (
+        patch(
+            "maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock
+        ) as mock_fetch,
+        patch(
+            "maia.painter.flow.process_frames_task",
+            new_callable=AsyncMock,
+            return_value=("VIDEO_001", [(0, FAKE_WEBP)]),
+        ),
+        patch("maia.painter.flow.VideoRepository") as MockRepo,
+        patch("maia.painter.flow.get_vault") as mock_get_vault,
+        patch(
+            "maia.painter.flow.vault_op_with_retry",
+            new_callable=AsyncMock,
+            side_effect=Exception("Vault error"),
+        ),
+        patch("maia.painter.flow.clear_quota_exhausted"),
+    ):
+        mock_fetch.return_value = mock_videos
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_visuals_safe = AsyncMock()
+        mock_repo.mark_failed = AsyncMock()
+        mock_vault = mock_get_vault.return_value
+        mock_vault.store_visual_evidence_batch = MagicMock()
+
+        await painter_flow.fn(batch_size=1)
+
+        # The batched store raised, so every extracted video is marked FAILED.
+        mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_visuals_safe.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_process_frames_propagates_resiliency_strategy():
-    """Test process_frames propagates RateLimitError for Resiliency Strategy."""
+    """Test process_frames propagates QuotaExhaustedError."""
     from atlas.models import Video
 
     video = Video(id="VIDEO_001", title="Test Video")
@@ -314,10 +413,10 @@ async def test_process_frames_propagates_resiliency_strategy():
     ):
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.extract_info = MagicMock(
-            side_effect=RateLimitError("429 Rate Limit")
+            side_effect=QuotaExhaustedError("All keys exhausted")
         )
 
-        with pytest.raises(RateLimitError):
+        with pytest.raises(QuotaExhaustedError):
             await process_frames_task.fn(video)
 
 

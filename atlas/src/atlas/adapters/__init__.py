@@ -1,6 +1,6 @@
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
 from psycopg import AsyncConnection
@@ -14,13 +14,36 @@ class ConnectionProvider(Protocol):
 
 
 class DatabaseAdapterProtocol(Protocol):
+    """Structural type modelling the low-level helpers of :class:`DatabaseAdapter`.
+
+    Used by higher-level repository protocols so mixins can be type-checked
+    (``mypy --strict``) against the full composed surface without importing the
+    concrete adapter.
+    """
+
+    def _connection(self) -> AbstractAsyncContextManager[AsyncConnection]: ...
+
+    def _cursor(self) -> AbstractAsyncContextManager[Any]: ...
+
     async def _execute(self, query: str, params: tuple[Any, ...] | None = None) -> None: ...
+
+    async def _fetch_one(
+        self, query: str, params: tuple[Any, ...] | None = None
+    ) -> dict[str, Any] | None: ...
 
     async def _fetch_all(
         self, query: str, params: tuple[Any, ...] | None = None
     ) -> list[dict[str, Any]]: ...
 
+    async def _fetch_many(
+        self, query: str, params: tuple[Any, ...] | None, limit: int
+    ) -> list[dict[str, Any]]: ...
+
     async def _execute_many(self, query: str, params_list: list[tuple[Any, ...]]) -> None: ...
+
+    async def _fetch_scalar(
+        self, query: str, params: tuple[Any, ...] | None = None
+    ) -> Any | None: ...
 
 
 class DatabaseAdapter:
@@ -40,9 +63,8 @@ class DatabaseAdapter:
     @asynccontextmanager
     async def _cursor(self) -> AsyncIterator[Any]:
         assert self._db is not None
-        async with self._db.get_connection() as conn:  # type: ignore[var-annotated]
-            async with conn.cursor() as cur:
-                yield cur
+        async with self._db.get_connection() as conn, conn.cursor() as cur:  # type: ignore[var-annotated]
+            yield cur
 
     async def _execute(self, query: str, params: tuple[Any, ...] | None = None) -> None:
         async with self._connection() as conn:

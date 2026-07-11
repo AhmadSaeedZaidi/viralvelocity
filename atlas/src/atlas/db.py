@@ -1,9 +1,10 @@
 import logging
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
+import sqlparse
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
@@ -45,10 +46,10 @@ class DatabaseManager:
     async def health_check(self) -> bool:
         try:
             async with self.get_connection() as conn:
-                result = await conn.execute("SELECT 1")
-                return result is not None
+                await conn.execute("SELECT 1")
+            return True
         except Exception as e:
-            logger.error(f"Health check failed: {e}")
+            logger.exception(f"Health check failed: {e}")
             return False
 
     @asynccontextmanager
@@ -59,47 +60,60 @@ class DatabaseManager:
         async with self._pool.connection() as conn:
             yield conn
 
+    async def provision_schema(self) -> None:
+        """
+        Provision the production database schema.
+
+        Mirrors :meth:`setup_test_schema` in being resilient to environments
+        (e.g. Neon, RDS, Crunchy) where the ``timescaledb`` / ``vector``
+        extensions are unavailable: extension creation and ``create_hypertable``
+        calls are best-effort, while ``CREATE TABLE`` statements are mandatory.
+        Unlike the old ``SchemaManager.provision`` (which executed the raw
+        ``schema.sql`` verbatim and crashed on managed Postgres), this will
+        succeed even without TimescaleDB by skipping hypertable conversion.
+        """
+        await self._apply_schema(include_extensions=False)
+
     async def setup_test_schema(self) -> None:
         """
-        Initialize database schema.
+        Initialize database schema for tests.
 
         Resilient to environments (e.g. Neon) where ``timescaledb`` or
         ``vector`` extensions are unavailable: extension creation and
         ``create_hypertable`` calls are best-effort, while CREATE TABLE
         statements are mandatory.
         """
-        from psycopg.errors import (
-            DuplicateObject,
-            FeatureNotSupported,
-            InsufficientPrivilege,
-            UndefinedFile,
-            UndefinedFunction,
-        )
+        await self._apply_schema(include_extensions=False)
+
+    async def _apply_schema(self, *, include_extensions: bool) -> None:
+        from psycopg.errors import UndefinedFunction
 
         timescale_available = True
-        async with self.get_connection() as conn:
-            for ext_sql in (
-                "CREATE EXTENSION IF NOT EXISTS vector;",
-                "CREATE EXTENSION IF NOT EXISTS timescaledb;",
-            ):
-                try:
+        # Each extension is attempted in its own connection/transaction. On a
+        # managed Postgres without the extension packages installed, the CREATE
+        # fails; we must not let that abort a shared transaction (which would
+        # otherwise poison every subsequent statement). Best-effort: skip it.
+        for ext_sql in (
+            "CREATE EXTENSION IF NOT EXISTS vector;",
+            "CREATE EXTENSION IF NOT EXISTS timescaledb;",
+        ):
+            try:
+                async with self.get_connection() as conn:
                     await conn.execute(ext_sql)
-                except (
-                    DuplicateObject,
-                    FeatureNotSupported,
-                    InsufficientPrivilege,
-                    UndefinedFile,
-                ) as exc:
-                    logger.warning(f"Skipping extension ({type(exc).__name__}): {ext_sql}")
-                    if "timescaledb" in ext_sql:
-                        timescale_available = False
+            except Exception as exc:  # noqa: BLE001 - best-effort extension setup
+                logger.warning(f"Skipping extension ({type(exc).__name__}): {ext_sql}")
+                if "timescaledb" in ext_sql:
+                    timescale_available = False
 
-        sql = load_schema_sql(include_extensions=False)
-        statements = [s.strip() for s in sql.split(";") if s.strip()]
+        sql = load_schema_sql(include_extensions=include_extensions)
+        statements = [s.strip() for s in sqlparse.split(sql) if s.strip()]
         async with self.get_connection() as conn:
             for stmt in statements:
                 is_hypertable = "create_hypertable" in stmt.lower()
                 if is_hypertable and not timescale_available:
+                    logger.warning(
+                        "Skipping hypertable conversion (TimescaleDB unavailable)"
+                    )
                     continue
                 try:
                     await conn.execute(stmt + ";")
@@ -147,12 +161,11 @@ def load_schema_sql(*, include_extensions: bool = True) -> str:
     Returns:
         The SQL script as a string.
     """
-    schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
-    if not os.path.exists(schema_path):
+    schema_path = Path(__file__).parent / "schema.sql"
+    if not schema_path.exists():
         raise FileNotFoundError(f"Schema file not found: {schema_path}")
 
-    with open(schema_path) as f:
-        sql = f.read()
+    sql = schema_path.read_text()
 
     if not include_extensions:
         filtered_lines = [

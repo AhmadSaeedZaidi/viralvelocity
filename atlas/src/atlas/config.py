@@ -2,7 +2,7 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings
@@ -20,7 +20,14 @@ class Settings(BaseSettings):  # type: ignore[misc]
     HF_TOKEN: SecretStr | None = Field(None, description="HF Write Token")
     GCS_BUCKET_NAME: str | None = Field(None, description="GCS Bucket Name")
 
-    COMPLIANCE_MODE: bool = Field(True, description="Enforce API Policy limits")
+    COMPLIANCE_MODE: bool = Field(
+        False,
+        description=(
+            "Enforce API policy limits. When enabled, Atlas logs a warning and "
+            "applies conservative behaviour but does NOT collapse the key pool — "
+            "key rotation/resilience is always preserved."
+        ),
+    )
     ENV: str = Field("dev", description="Deployment environment (dev/prod)")
 
     YOUTUBE_API_KEY_POOL_JSON: SecretStr = Field(..., description="JSON List of YouTube API Keys")
@@ -52,14 +59,133 @@ class Settings(BaseSettings):  # type: ignore[misc]
         description="Raw Netscape cookies.txt content (written to temp file at startup)",
     )
 
+    # ── Transcription (Scribe) ──────────────────────────────────────────────
+    MISTRAL_API_KEY: SecretStr | None = Field(
+        None, description="Mistral API key for Voxtral speech-to-text transcription"
+    )
+    GROK_API_KEY: SecretStr | None = Field(
+        None,
+        description=(
+            "Groq Cloud API key (console.groq.com, 'gsk_…') for Whisper "
+            "speech-to-text transcription (Groq, not xAI)."
+        ),
+    )
+    SCRIBE_DAILY_AUDIO_CAP: int = Field(
+        30,
+        description=(
+            "Max videos/day transcribed via paid audio fallback (Grok/Mistral). "
+            "Once hit, the scribe falls back to captions-only for the day."
+        ),
+    )
+    SCRIBE_TRANSCRIBER: Literal["auto", "captions", "mistral", "grok"] = Field(
+        "auto",
+        description=(
+            "Transcription strategy: 'captions' (yt-dlp caption cascade only), "
+            "'mistral' (audio → Voxtral only), 'grok' (audio → Grok STT only), or "
+            "'auto' (captions first, fall back to audio→Grok then audio→Mistral on "
+            "rate-limit / no-captions)."
+        ),
+    )
+    SCRIBE_STORE_AUDIO: bool = Field(
+        False,
+        description="Persist the extracted audio (opus) to the vault after transcription.",
+    )
+
+    # ── Heuristic quality gate (pre-ingestion) ──────────────────────────────
+    QUALITY_GATE_ENABLED: bool = Field(
+        True, description="Reject low-value videos before ingest / snowball."
+    )
+    QUALITY_MIN_DURATION_SECONDS: int = Field(
+        65, description="Reject videos shorter than this (filters Shorts)."
+    )
+    QUALITY_MIN_VIEWS_PER_HOUR: float = Field(
+        5.0, description="Minimum views/hour since publication (traction)."
+    )
+    QUALITY_MIN_ENGAGEMENT_RATE: float = Field(
+        0.005, description="Minimum (likes+comments)/views engagement ratio."
+    )
+
+    # ── Shorts detection (HEAD probe) ──────────────────────────────────────
+    # The Data API has no `isShort` flag, so we probe the Shorts URL: a 200
+    # means it is a Short, a 3xx redirect to /watch means it is long-form.
+    QUALITY_SHORTS_HEAD_ENABLED: bool = Field(
+        True,
+        description="Detect Shorts via HEAD probe to /shorts/{id} (200=Short, 3xx=long-form).",
+    )
+    QUALITY_SHORTS_HEAD_MAX_DURATION: int = Field(
+        600,
+        description="Only HEAD-probe candidates shorter than this (saves probes on long videos).",
+    )
+    QUALITY_SHORTS_HEAD_TIMEOUT: float = Field(
+        5.0, description="Per-probe HTTP timeout (seconds)."
+    )
+    QUALITY_SHORTS_HEAD_CONCURRENCY: int = Field(
+        8, description="Max concurrent HEAD probes per batch."
+    )
+
+    # ── AI-slop / AI-generated detection (no API flag exists) ───────────────
+    # Conservative phrases indicating the *video itself* is AI-generated
+    # (not videos merely *about* AI). Tunable; empty list disables.
+    QUALITY_AI_DENYLIST: list[str] = Field(
+        default_factory=lambda: [
+            r"\b(ai[- ]?generated|ai[- ]?created|ai[- ]?made)\b",
+            r"\b(made|created|generated) (with|using) ai\b",
+            r"\b(this (video|content) (was|is) (generated|created|made) (with|using) ai)\b",
+            r"\b(fully (generated|created) by ai)\b",
+            r"\b(text[- ]?to[- ]?speech|tts voice|ai voiceover|ai narration|"
+            r"synthetic (voice|narration|media))\b",
+        ],
+        description="Regexes (title/description/tags) indicating AI-generated content.",
+    )
+
+    # ── Channel-statistics gate (AI-farm / spam filter) ─────────────────────
+    QUALITY_MIN_SUBSCRIBERS: int = Field(
+        50,
+        description=(
+            "Reject videos from channels with fewer subscribers than this "
+            "(catches tiny AI-farm/spam channels). 0 disables."
+        ),
+    )
+    QUALITY_MAX_VIDEOS_PER_DAY: float = Field(
+        20.0,
+        description=(
+            "Reject a video if its channel's upload rate (videoCount / channel_age_days) "
+            "exceeds this (mass-upload channels). Set high (or 0) so legitimate networks "
+            "that post many Shorts are NOT filtered; pair with QUALITY_MAX_VIDEOS_PER_SUBSCRIBER "
+            "for the actual spam signal. 0 disables."
+        ),
+    )
+    QUALITY_MAX_VIDEOS_PER_SUBSCRIBER: float = Field(
+        5.0,
+        description=(
+            "Better AI-farm signal than raw upload rate: reject a video if its channel's "
+            "videoCount / subscriberCount exceeds this (i.e. far more videos than subscribers "
+            "— the hallmark of spam/AI farms). Legit high-volume networks have many subscribers "
+            "per video, so they pass. 0 disables."
+        ),
+    )
+
+    # ── Search-queue dynamic scoring & decay ────────────────────────────────
+    # Score = mention_count * MENTION_WEIGHT
+    #       - hours_in_queue * DECAY_PER_HOUR
+    #       + priority (manual boost)
+    SEARCH_QUEUE_MENTION_WEIGHT: float = Field(
+        1.5, description="Weight applied to mention_count in the queue score."
+    )
+    SEARCH_QUEUE_DECAY_PER_HOUR: float = Field(
+        0.1, description="Score decay per hour a term has sat in the queue."
+    )
+    SEARCH_QUEUE_CULL_BELOW: float = Field(
+        0.0, description="Janitor deletes queue terms whose score drops below this."
+    )
+
     @model_validator(mode="after")
     def validate_vault_config(self) -> "Settings":
         if self.VAULT_PROVIDER == "huggingface":
             if not self.HF_DATASET_ID or not self.HF_TOKEN:
                 raise ValueError("HF_DATASET_ID and HF_TOKEN required for HuggingFace vault")
-        elif self.VAULT_PROVIDER == "gcs":
-            if not self.GCS_BUCKET_NAME:
-                raise ValueError("GCS_BUCKET_NAME required for GCS vault")
+        elif self.VAULT_PROVIDER == "gcs" and not self.GCS_BUCKET_NAME:
+            raise ValueError("GCS_BUCKET_NAME required for GCS vault")
         return self
 
     @property
@@ -73,16 +199,39 @@ class Settings(BaseSettings):  # type: ignore[misc]
                 keys_list = keys_parsed
 
             if self.COMPLIANCE_MODE:
-                return keys_list[:1]
+                # Compliance mode enforces policy limits (e.g. via logging /
+                # attribution), but it must NOT collapse the key pool — doing
+                # so silently disables rotation and guarantees exhaustion on the
+                # first quota error. Rotation and resilience are always kept.
+                logger.warning(
+                    "COMPLIANCE_MODE is enabled: applying conservative API policy "
+                    "enforcement, but all keys remain available for rotation."
+                )
             return keys_list
         except json.JSONDecodeError:
             return [self.YOUTUBE_API_KEY_POOL_JSON.get_secret_value()]
+
+    def effective_pool_sizes(self) -> tuple[int, int]:
+        """Return ``(tracking_size, archeology_size)`` in effect.
+
+        A cached dynamic allocation (written weekly by the janitor based on the
+        corpus size) takes precedence; otherwise the static ``.env`` sizes are
+        used. Reading the cache here keeps config free of any database
+        dependency — the corpus is only queried by the refresh job.
+        """
+        from atlas.key_pool import load_override
+
+        override = load_override()
+        if override is not None:
+            return override.tracking, override.archeology
+        return self.KEY_POOL_TRACKING_SIZE, self.KEY_POOL_ARCHEOLOGY_SIZE
 
     @property
     def key_rings(self) -> dict[str, list[str]]:
         raw_keys = self.api_keys
         total_keys = len(raw_keys)
-        reserved_count = self.KEY_POOL_ARCHEOLOGY_SIZE + self.KEY_POOL_TRACKING_SIZE
+        tracking_size, archeology_size = self.effective_pool_sizes()
+        reserved_count = archeology_size + tracking_size
 
         if total_keys <= reserved_count:
             logger.warning(
@@ -92,12 +241,15 @@ class Settings(BaseSettings):  # type: ignore[misc]
             )
             return {"hunting": raw_keys, "tracking": raw_keys, "archeology": raw_keys}
 
-        archeology_keys = raw_keys[-self.KEY_POOL_ARCHEOLOGY_SIZE :]
-        remaining = raw_keys[: -self.KEY_POOL_ARCHEOLOGY_SIZE]
+        archeology_keys = raw_keys[-archeology_size:]
+        remaining = raw_keys[:-archeology_size]
 
-        tracking_keys = remaining[-self.KEY_POOL_TRACKING_SIZE :]
-
-        hunting_keys = remaining[: -self.KEY_POOL_TRACKING_SIZE]
+        # Hunting keeps the bulk of the remaining keys (and the 100/day
+        # search.list bucket makes it the ring that rate-limits first); tracking
+        # is the cheap videos.list ring and gets a protected, smaller slice.
+        hunting_size = total_keys - tracking_size - archeology_size
+        hunting_keys = remaining[:hunting_size]
+        tracking_keys = remaining[hunting_size:]
 
         return {
             "hunting": hunting_keys,
@@ -137,6 +289,30 @@ class Settings(BaseSettings):  # type: ignore[misc]
     }
 
 
-# Initialize settings - will load from environment variables and .env file
-# Pydantic will validate all required fields are present at runtime
-settings = Settings()  # type: ignore[call-arg]
+_settings_instance: Settings | None = None
+
+
+def get_settings() -> Settings:
+    """Lazily initialised settings singleton.
+
+    ``from atlas.config import settings`` triggers ``__getattr__`` below
+    which calls this function on first access, so **no env vars are read or
+    validated at module-import time**.  Tests can replace ``_settings_instance``
+    directly or call ``reset_settings()`` before supplying their own env.
+    """
+    global _settings_instance
+    if _settings_instance is None:
+        _settings_instance = Settings()  # type: ignore[call-arg]
+    return _settings_instance
+
+
+def reset_settings() -> None:
+    """Clear the cached settings singleton (useful for testing)."""
+    global _settings_instance
+    _settings_instance = None
+
+
+def __getattr__(name: str) -> Any:
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

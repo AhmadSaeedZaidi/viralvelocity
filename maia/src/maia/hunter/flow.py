@@ -12,12 +12,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from atlas.repositories import ChannelRepository, SearchQueueRepository, VideoRepository
+from atlas.state import clear_quota_exhausted
+from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault
 from atlas.youtube import lookup_channels
 from prefect import flow, get_run_logger, task
 
+from maia.quality import filter_by_quality
 from maia.strategies import YouTubeSearchStrategy
-from maia.utils import RateLimitError
+from maia.utils import notify_quota_exhausted
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +82,11 @@ async def search_youtube_task(
 
     try:
         return await strategy.search(params)
-    except RateLimitError:
+    except QuotaExhaustedError:
+        await notify_quota_exhausted("hunter")
         raise
     except Exception as e:
-        run_logger.error(f"Search failed for '{query}': {e}")
+        run_logger.exception(f"Search failed for '{query}': {e}")
         return None
 
 
@@ -122,10 +126,11 @@ async def enrich_channels_task(channel_ids: list[str], strategy: YouTubeSearchSt
 
     try:
         items = await lookup_channels(needs, executor=strategy.executor)
-    except RateLimitError:
+    except QuotaExhaustedError:
+        await notify_quota_exhausted("hunter")
         raise
     except Exception as e:
-        run_logger.error(f"channels.list lookup failed for {len(needs)} ids: {e}")
+        run_logger.exception(f"channels.list lookup failed for {len(needs)} ids: {e}")
         return 0
 
     written = 0
@@ -134,7 +139,7 @@ async def enrich_channels_task(channel_ids: list[str], strategy: YouTubeSearchSt
             await channel_repo.ingest_channel_snapshot(item)
             written += 1
         except Exception as e:
-            run_logger.error(f"Failed to ingest channel snapshot for {item.get('id')}: {e}")
+            run_logger.exception(f"Failed to ingest channel snapshot for {item.get('id')}: {e}")
 
     run_logger.info(f"Enriched {written}/{len(needs)} channel records (API hit, snapshot logged).")
     return written
@@ -164,37 +169,61 @@ async def ingest_results_task(
     search_repo = SearchQueueRepository()
     run_logger = get_run_logger()
 
-    items = response.get("items", [])
+    raw_items = response.get("items", [])
     next_token = response.get("nextPageToken")
 
-    # 1. Store raw metadata to vault concurrently (best-effort, off event-loop)
+    # 0. QUALITY GATE — enrich (videos.list) + reject Shorts / low-traction /
+    #    low-engagement videos before anything is persisted or snowballed.
+    executor = strategy.executor if strategy is not None else None
+    try:
+        items = await filter_by_quality(raw_items, executor, logger=run_logger)
+    except QuotaExhaustedError:
+        await notify_quota_exhausted("hunter")
+        raise
+    except Exception as e:
+        # Enrichment failure is non-fatal: fall back to unfiltered ingest so we
+        # don't lose discovery, but warn loudly.
+        run_logger.warning(f"Quality gate enrichment failed, ingesting unfiltered: {e}")
+        items = raw_items
+
+    # 1. Store raw metadata to vault — bundle ALL discovered videos into ONE
+    #    commit (best-effort, off event-loop) instead of 1 commit/video, so we
+    #    stay far under HuggingFace's 128-commits/hour account cap.
     v = get_vault()
 
-    async def _vault_store(vid_id: str, data: dict[str, Any]) -> None:
+    def _vid_of(item: dict[str, Any]) -> str | None:
+        vid = item.get("id")
+        if isinstance(vid, dict):
+            return vid.get("videoId")
+        return vid
+
+    date_key = datetime.now(UTC).strftime("%Y-%m-%d")
+    vault_items: list[tuple[str, dict[str, Any]]] = []
+    for item in items:
+        vid_id = _vid_of(item)
+        if vid_id:
+            vault_items.append((f"metadata/{date_key}/{vid_id}.json", item))
+
+    if vault_items:
         try:
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: v.store_metadata(vid_id, data))
+            await loop.run_in_executor(None, v.store_batch, vault_items)
         except Exception as e:
-            run_logger.warning(f"Failed to store metadata for {vid_id} to vault: {e}")
-
-    vault_tasks = []
-    for item in items:
-        vid_id = item.get("id", {}).get("videoId")
-        if vid_id:
-            vault_tasks.append(_vault_store(vid_id, item))
+            run_logger.warning(
+                f"Failed to batch-store metadata for {len(vault_items)} videos to vault: {e}"
+            )
 
     # 2. Ingest structured metadata to database concurrently
     async def _db_ingest(item: dict[str, Any]) -> None:
-        vid_id = item.get("id", {}).get("videoId") or item.get("id")
         try:
             await video_repo.ingest_video_metadata(item)
         except Exception as e:
-            run_logger.error(f"Failed to ingest video {vid_id} to database: {e}")
+            run_logger.exception(f"Failed to ingest video {_vid_of(item)} to database: {e}")
 
     db_tasks = [_db_ingest(item) for item in items]
 
-    # Fire vault stores and DB inserts concurrently
-    await asyncio.gather(*vault_tasks, *db_tasks)
+    # Fire DB inserts concurrently (vault metadata was batched above)
+    await asyncio.gather(*db_tasks)
 
     # 3. Enrich newly-discovered channels (snippet -> channels.list -> stats log)
     if strategy is not None:
@@ -205,12 +234,13 @@ async def ingest_results_task(
         ]
         try:
             await enrich_channels_task(channel_ids, strategy)
-        except RateLimitError:
+        except QuotaExhaustedError:
+            await notify_quota_exhausted("hunter")
             raise
         except Exception as e:
-            run_logger.error(f"Channel enrichment failed (non-fatal): {e}")
+            run_logger.exception(f"Channel enrichment failed (non-fatal): {e}")
 
-    # 4. Extract snowball tags (pure computation — no I/O)
+    # 4. Extract snowball tags — only from videos that passed the quality gate.
     snowball_tags: list[str] = []
     for item in items:
         snippet = item.get("snippet", {})
@@ -227,7 +257,7 @@ async def ingest_results_task(
                 f"(from {len(snowball_tags)} total tags)"
             )
         except Exception as e:
-            run_logger.error(f"Failed to snowball tags into search queue: {e}")
+            run_logger.exception(f"Failed to snowball tags into search queue: {e}")
 
     try:
         await search_repo.update_state(
@@ -237,11 +267,11 @@ async def ingest_results_task(
             status="active" if next_token else "exhausted",
         )
     except Exception as e:
-        run_logger.error(f"Failed to update search state for topic {topic['id']}: {e}")
+        run_logger.exception(f"Failed to update search state for topic {topic['id']}: {e}")
 
     run_logger.info(
-        f"Ingested {len(items)} videos for '{topic['query_term']}' "
-        f"(snowballed {len(snowball_tags)} tags)"
+        f"Ingested {len(items)}/{len(raw_items)} videos for '{topic['query_term']}' "
+        f"(passed quality gate; snowballed {len(snowball_tags)} tags)"
     )
 
 
@@ -272,6 +302,7 @@ async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[
 
         if not targets:
             run_logger.info("No queries in queue. Hunter cycle complete (idle).")
+            clear_quota_exhausted("hunter")
             return stats
 
         stats["queries_processed"] = len(targets)
@@ -286,10 +317,11 @@ async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[
                     stats["searches_successful"] += 1
                 else:
                     stats["searches_failed"] += 1
-            except RateLimitError:
+            except QuotaExhaustedError:
+                await notify_quota_exhausted("hunter")
                 raise
             except Exception as e:
-                run_logger.error(f"Error processing topic '{topic.get('query_term')}': {e}")
+                run_logger.exception(f"Error processing topic '{topic.get('query_term')}': {e}")
                 stats["searches_failed"] += 1
 
         run_logger.info(
@@ -300,13 +332,14 @@ async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[
             f"Failed: {stats['searches_failed']}"
         )
 
-    except RateLimitError:
-        run_logger.critical("Hunter Cycle terminated by Resiliency strategy (429 Rate Limit)")
+    except QuotaExhaustedError:
+        run_logger.critical("Hunter Cycle terminated — all API keys exhausted")
         raise
     except Exception as e:
         run_logger.exception(f"Hunter cycle failed with unexpected error: {e}")
         raise
 
+    clear_quota_exhausted("hunter")
     return stats
 
 
@@ -373,9 +406,6 @@ def main() -> None:
     try:
         agent = HunterAgent()
         asyncio.run(agent.run())
-    except RateLimitError as e:
-        logger.critical(f"Hunter terminated: {e}")
-        raise
     except KeyboardInterrupt:
         logger.info("Hunter stopped by user (SIGINT)")
     except Exception as e:

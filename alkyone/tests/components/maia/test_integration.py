@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from maia.hunter import run_hunter_cycle
 from maia.tracker import run_tracker_cycle
-from maia.utils import RateLimitError
+from atlas.utils import QuotaExhaustedError
 
 
 @pytest.mark.asyncio
@@ -112,7 +112,7 @@ async def test_tracker_cycle_complete_flow(
 
 @pytest.mark.asyncio
 async def test_hunter_handles_resiliency_strategy():
-    """Test Hunter raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
+    """Test Hunter raises QuotaExhaustedError on all-keys-exhausted."""
     with (
         patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
         patch("maia.hunter.flow.aiohttp.ClientSession") as MockSession,
@@ -146,13 +146,13 @@ async def test_hunter_handles_resiliency_strategy():
         mock_response.status = 429
         mock_get_context.__aenter__.return_value = mock_response
 
-        with pytest.raises(RateLimitError):
+        with pytest.raises(QuotaExhaustedError):
             await run_hunter_cycle(batch_size=1)
 
 
 @pytest.mark.asyncio
 async def test_tracker_handles_resiliency_strategy():
-    """Test Tracker raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
+    """Test Tracker raises QuotaExhaustedError on all-keys-exhausted."""
     with (
         patch("maia.tracker.flow.VideoRepository") as MockVideoRepo,
         patch("maia.tracker.flow.aiohttp.ClientSession") as MockSession,
@@ -187,7 +187,7 @@ async def test_tracker_handles_resiliency_strategy():
         mock_response.status = 429
         mock_get_context.__aenter__.return_value = mock_response
 
-        with pytest.raises(RateLimitError):
+        with pytest.raises(QuotaExhaustedError):
             await run_tracker_cycle(batch_size=1)
 
 

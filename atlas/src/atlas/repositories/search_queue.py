@@ -2,25 +2,79 @@ import logging
 from datetime import UTC, datetime
 
 from atlas.adapters import DatabaseAdapter
+from atlas.config import get_settings
 from atlas.models.search_queue import SearchQueueItem
 
 logger = logging.getLogger("atlas.repositories.search_queue")
 
+# Dynamic relevance score, evaluated at read time (Phase 2):
+#   score = mention_count * MENTION_WEIGHT
+#         - hours_in_queue    * DECAY_PER_HOUR
+#         + priority (manual boost)
+# NOTE: this depends on NOW() so it is not IMMUTABLE and cannot be indexed;
+# the janitor's cull keeps the table small enough that a sort is negligible.
+_SCORE_EXPR = (
+    "(mention_count * %s "
+    "- EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600.0 * %s "
+    "+ priority)"
+)
+
 
 class SearchQueueRepository(DatabaseAdapter):
     async def fetch_batch(self, batch_size: int = 10) -> list[SearchQueueItem]:
+        s = get_settings()
         rows = await self._fetch_all(
-            """
+            f"""
             SELECT *
             FROM search_queue
             WHERE status = 'active'
-            ORDER BY priority DESC, mention_count DESC
+            ORDER BY {_SCORE_EXPR} DESC
             LIMIT %s
             FOR UPDATE SKIP LOCKED
             """,
-            (batch_size,),
+            (
+                s.SEARCH_QUEUE_MENTION_WEIGHT,
+                s.SEARCH_QUEUE_DECAY_PER_HOUR,
+                batch_size,
+            ),
         )
         return [SearchQueueItem.model_validate(r) for r in rows]
+
+    async def cull_stale(self, below: float | None = None) -> int:
+        """Delete low-scoring terms (time-decayed out of relevance).
+
+        Terms still being paginated (``next_page_token IS NOT NULL``) are never
+        culled, so an in-progress crawl is not dropped mid-flight.
+
+        **Opt-in**: the cull only runs when an explicit threshold is configured
+        (``SEARCH_QUEUE_CULL_BELOW``). The default of ``None`` disables it — the
+        queue is a long-lived accumulator and historically kept every term, so a
+        non-``None`` threshold should be set deliberately to avoid starving the
+        hunter of seed terms.
+
+        Returns the number of rows deleted (0 when disabled).
+        """
+        s = get_settings()
+        threshold = s.SEARCH_QUEUE_CULL_BELOW if below is None else below
+        if threshold is None:
+            logger.info("search_queue cull disabled (SEARCH_QUEUE_CULL_BELOW is None)")
+            return 0
+        async with self._cursor() as cur:
+            await cur.execute(
+                f"""
+                DELETE FROM search_queue
+                WHERE next_page_token IS NULL
+                  AND {_SCORE_EXPR} < %s
+                """,
+                (
+                    s.SEARCH_QUEUE_MENTION_WEIGHT,
+                    s.SEARCH_QUEUE_DECAY_PER_HOUR,
+                    threshold,
+                ),
+            )
+            deleted = cur.rowcount
+            await cur.connection.commit()
+        return int(deleted)
 
     async def update_state(
         self,

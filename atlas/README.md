@@ -58,14 +58,39 @@ settings.API_KEYS            # list[str] — all YouTube API keys
 settings.KEY_RINGS           # dict[str, list[str]] — split into hunting/tracking/archeology pools
 settings.VAULT_PROVIDER      # "huggingface" | "gcs"
 settings.JANITOR_RETENTION_DAYS  # default 7
-settings.COMPLIANCE_MODE     # when True, enforces vault config validation
+settings.COMPLIANCE_MODE     # opt-in policy enforcement; never collapses the key pool
 ```
 
 Key features:
 - `api_keys` property parses `YOUTUBE_API_KEY_POOL_JSON` into a list
-- `key_rings` property splits keys into 3 pools by configurable sizes
+- `key_rings` property splits keys into 3 pools (hunting / tracking / archeology)
+- `effective_pool_sizes()` returns the ring sizes in effect — a **dynamic
+  allocation cache** (written weekly by the janitor, see `key_pool.py`) takes
+  precedence over the static `KEY_POOL_*_SIZE` env vars
 - `validate_vault_config` model_validator ensures HF/GCS credentials are present based on provider
 - `youtube_cookies_resolved_path` resolves cookie file path
+
+#### Dynamic key pools — `key_pool.py`
+
+`archeology` is a fixed reserve; `tracking` scales step-wise with the size of the
+video corpus (more videos ⇒ more `videos.list` throughput needed to keep stats
+fresh); `hunting` takes the remainder (discovery is prioritised while the corpus
+is small).
+
+| Corpus size | hunting | tracking | archeology |
+|---|---|---|---|
+| < 10k | 19 | 2 | 3 |
+| 10k–100k | 17 | 4 | 3 |
+| 100k–500k | 13 | 8 | 3 |
+| 500k+ | 9 | 12 | 3 |
+
+*(example for a 24-key pool)*. The janitor's Phase 0 calls
+`refresh_allocation()` each cycle, but it only recomputes when the cache is older
+than `REFRESH_INTERVAL_DAYS` (7). The result is cached to
+`data/pool_allocation.json` (override with `KEY_POOL_ALLOCATION_PATH`) so the
+frequently-restarting agents read a stable value without querying the database.
+Corpus size is read via `VideoRepository.count_videos()` (an O(1) `reltuples`
+estimate).
 
 ### 2. Database Manager — `db.py`
 
@@ -139,12 +164,22 @@ The largest repository. Manages the full video lifecycle:
 
 - **Ingestion**: `ingest_video_metadata()` — parses YouTube API response, upserts video + channel
 - **Claiming**: `claim_scribe_batch()`, `claim_painter_batch()` — atomic `SELECT ... FOR UPDATE SKIP LOCKED`
-- **Tracking**: `fetch_tracker_targets()` — 3-tier zone query (HOURLY/DAILY/WEEKLY from watchlist)
+- **Tracking**: `fetch_tracker_targets()` — 3-tier recency-zone query (fresh → older) that prioritises recently published videos for stats refresh
 - **Stats**: `log_stats_batch()`, `update_stats_batch()`, `get_latest_stats()`
+- **Transcripts**: `record_transcript()` — upserts the `transcripts` pointer row (video_id → vault_uri) written by the Scribe
 - **Archival**: `archive_video_batch()` — vault hand-off with verification + purge (janitor Phase 3)
 - **Cold stats**: `archive_cold_stats()` — moves old `video_stats_log` rows to vault
-- **State transitions**: `mark_transcript_safe()`, `mark_visuals_safe()`, `mark_done()`, `mark_failed()`, `mark_archived()`
+- **State transitions**: `mark_transcript_safe()`, `mark_visuals_safe()`, `mark_done()`, `mark_failed()`, `mark_archived()`, `release_to_pending()` (re-queue a claimed video after a transient failure such as rate limiting)
 - **Cleanup**: `run_janitor()` — deletes old processed videos (legacy)
+
+**Mixin composition.** `VideoRepository` is assembled from focused mixins in
+`repositories/video/` — `VideoIngestionMixin`, `VideoTrackingMixin`,
+`VideoStateMixin`, `VideoJanitorMixin` (all extending `DatabaseAdapter`). Where a
+mixin calls a method defined on a sibling (e.g. the janitor calling
+`get_latest_stats`), the method types `self` as `VideoRepositoryProtocol`
+(`repositories/video/protocols.py`) — a `Protocol` modelling the full composed
+interface. This keeps cross-mixin dependencies explicit and passes
+`mypy --strict` without runtime cost.
 
 #### `ChannelRepository`
 - `save()` / `get_by_id()` — basic CRUD
@@ -170,11 +205,23 @@ Immutable event log:
 - `get_by_entity()`, `get_by_type()`, `get_recent()` — query methods
 
 #### `SearchQueueRepository`
-Discovery terms queue:
+Discovery terms queue with **dynamic time-decay scoring** (Phase 2):
 
-- `fetch_batch(batch_size)` — ordered by priority DESC, mention_count DESC, FOR UPDATE SKIP LOCKED
+- `fetch_batch(batch_size)` — ordered by a **read-time score**
+  `mention_count * MENTION_WEIGHT − hours_in_queue * DECAY_PER_HOUR + priority`
+  (FOR UPDATE SKIP LOCKED). The score depends on `NOW()` so it is not indexable;
+  the cull keeps the table small enough that the sort is negligible.
+- `cull_stale(below)` — deletes terms whose score dropped below `below`
+  (**opt-in**: only runs when `SEARCH_QUEUE_CULL_BELOW` is set to a number;
+  `None` disables it so the queue stays a long-lived accumulator and never
+  starves the hunter). **Never** culls terms mid-pagination
+  (`next_page_token IS NOT NULL`). Called from the janitor's Phase 0b.
 - `update_state()` — sets next_page_token, result_count after search
 - `add_terms(terms)` — batch insert with dedup, increments mention_count on conflict
+- `priority` is now a **manual boost** added into the score (0 by default).
+
+The `search_queue` table has a `created_at TIMESTAMPTZ DEFAULT NOW()` column
+driving the decay. Weights are configurable via `SEARCH_QUEUE_*` settings.
 
 ### 6. Vault — `vault.py`
 
@@ -185,9 +232,15 @@ Abstract `VaultStrategy` with two implementations:
 | `store_json(path, data)` | Upload JSON to HF dataset | Write to GCS bucket |
 | `fetch_json(path)` | Download from HF dataset | Read from GCS bucket |
 | `store_binary(path, data)` | Upload bytes | Write bytes |
+| `store_transcript(video_id, data)` | Store transcript, returns vault URI | Same |
 | `store_visual_evidence(video_id, frames)` | Upload screenshot frames | Same |
 | `append_metrics(metrics_data)` | Append to Parquet on HF | Append to Parquet on GCS |
+| `make_uri(path)` | `hf://datasets/<repo>/<path>` | `gs://<bucket>/<path>` |
 | `list_files(prefix)` | List HF dataset files | List GCS objects |
+
+`store_transcript()` writes the transcript payload to the vault and returns its
+provider-qualified URI (via `make_uri()`); the Scribe persists that URI to the
+`transcripts` table through `VideoRepository.record_transcript()`.
 
 ```python
 from atlas.vault import get_vault
@@ -254,7 +307,9 @@ session_id = keys.start_session()  # track per-session key usage
 keys.attempt_rotation(session_id)  # True if another key available
 ```
 
-Key pools are configured via `KEY_POOL_*_SIZE` env vars. Keys rotate infinitely.
+Ring sizes come from `settings.effective_pool_sizes()` — the dynamic allocation
+cache if present (see `key_pool.py`), otherwise the `KEY_POOL_*_SIZE` env vars.
+Keys rotate infinitely within a ring.
 
 #### `ResiliencyExecutor`
 Handles API key exhaustion with the Resiliency Strategy:
@@ -264,8 +319,11 @@ executor = ResiliencyExecutor(key_ring, agent_name="hunter")
 result = await executor.execute_async(make_request)
 ```
 
-- On 403/429: rotates key and retries
-- On all keys exhausted: `sys.exit(0)` — clean container death, orchestration will restart
+- On 429 (and other quota indicators): rotates key and retries
+- On all keys exhausted: raises `QuotaExhaustedError`; the caller (e.g. the
+  Maia agent layer) decides the resiliency action (typically restarting the
+  container to rotate the egress IP). A plain exception — not `sys.exit` — is
+  used so Atlas never tears down an unrelated host process that imports it.
 - Supports custom error classifiers
 
 #### Helpers
@@ -323,9 +381,11 @@ See [ENV.example](ENV.example) for all options. Key variables:
 | `HF_DATASET_ID` | — | HuggingFace dataset repo |
 | `HF_TOKEN` | — | HF API token |
 | `YOUTUBE_API_KEY_POOL_JSON` | — | JSON array of API keys |
-| `COMPLIANCE_MODE` | `true` | Enforce vault config validation |
+| `COMPLIANCE_MODE` | `false` | Opt-in API policy enforcement; rotation/resilience always preserved |
 | `JANITOR_RETENTION_DAYS` | `7` | Days before archiving videos |
-| `KEY_POOL_*_SIZE` | `1` | Keys to allocate per agent pool |
+| `KEY_POOL_ARCHEOLOGY_SIZE` | `1` | Fixed reserve for the archeology ring |
+| `KEY_POOL_TRACKING_SIZE` | `1` | Floor for the tracking ring (scaled up dynamically) |
+| `KEY_POOL_ALLOCATION_PATH` | `data/pool_allocation.json` | Cache file for the dynamic allocation |
 | `DISCORD_WEBHOOK_*` | — | Webhook URLs for notification channels |
 
 ---

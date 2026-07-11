@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from atlas.utils import QuotaExhaustedError
 from maia.tracker.flow import fetch_targets_task, update_stats_task
 
 
@@ -93,10 +94,9 @@ async def test_update_stats_handles_api_errors(
 async def test_update_stats_propagates_rate_limit(
     mock_strategy: MagicMock, mock_tracker_target: dict[str, Any]
 ):
-    """Test update_stats propagates RateLimitError."""
-    from maia.utils import RateLimitError
+    """Test update_stats propagates QuotaExhaustedError."""
 
-    mock_strategy.fetch_videos.side_effect = RateLimitError("429 Rate Limit")
+    mock_strategy.fetch_videos.side_effect = QuotaExhaustedError("All keys exhausted")
 
-    with pytest.raises(RateLimitError):
+    with pytest.raises(QuotaExhaustedError):
         await update_stats_task.fn([mock_tracker_target], mock_strategy)

@@ -2,7 +2,6 @@ import asyncio
 import logging
 
 from atlas.adapters import DatabaseAdapter
-from atlas.db import load_schema_sql
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -13,13 +12,13 @@ logger = logging.getLogger("atlas.setup")
 class SchemaManager(DatabaseAdapter):
     async def provision(self) -> None:
         logger.info("Provisioning database schema...")
-        sql_script = load_schema_sql()
+        from atlas.db import db
+
         try:
-            async with self._connection() as conn:
-                await conn.execute(sql_script)
+            await db.provision_schema()
             logger.info("Schema provisioned successfully")
         except Exception as e:
-            logger.error(f"Provisioning failed: {e}")
+            logger.exception(f"Provisioning failed: {e}")
             raise
 
 

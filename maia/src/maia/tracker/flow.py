@@ -13,10 +13,12 @@ from typing import Any
 
 from atlas.models import VideoStats
 from atlas.repositories import VideoRepository
+from atlas.state import clear_quota_exhausted
+from atlas.utils import QuotaExhaustedError
 from prefect import flow, get_run_logger, task
 
 from maia.strategies import YouTubeSearchStrategy
-from maia.utils import RateLimitError
+from maia.utils import notify_quota_exhausted
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ async def fetch_targets_task(batch_size: int) -> list[dict[str, Any]]:
         run_logger.info(f"Fetched {len(targets)} videos for tracking (batch_size={batch_size}).")
         return [t.model_dump() for t in targets]
     except Exception as e:
-        run_logger.error(f"Failed to fetch tracker targets: {e}")
+        run_logger.exception(f"Failed to fetch tracker targets: {e}")
         return []
 
 
@@ -60,10 +62,11 @@ async def update_stats_task(videos: list[dict[str, Any]], strategy: YouTubeSearc
 
     try:
         response_json = await strategy.fetch_videos(video_ids)
-    except RateLimitError:
+    except QuotaExhaustedError:
+        await notify_quota_exhausted("tracker")
         raise
     except Exception as e:
-        run_logger.error(f"Failed to fetch stats: {e}")
+        run_logger.exception(f"Failed to fetch stats: {e}")
         return 0
 
     if not response_json:
@@ -97,7 +100,7 @@ async def update_stats_task(videos: list[dict[str, Any]], strategy: YouTubeSearc
         run_logger.info(f"✓ Logged {len(stats_list)} stats to hot tier")
         return len(items)
     except Exception as e:
-        run_logger.error(f"Failed to update stats in database: {e}")
+        run_logger.exception(f"Failed to update stats in database: {e}")
         return 0
 
 
@@ -132,6 +135,7 @@ async def tracker_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict
 
         if not targets:
             run_logger.info("No videos need tracking updates. Tracker cycle complete (idle).")
+            clear_quota_exhausted("tracker")
             return stats
 
         updated_count = await update_stats_task(targets, strategy)
@@ -145,13 +149,14 @@ async def tracker_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict
             f"Failed: {stats['updates_failed']}"
         )
 
-    except RateLimitError:
-        run_logger.critical("Tracker Cycle terminated by Resiliency strategy (429 Rate Limit)")
+    except QuotaExhaustedError:
+        run_logger.critical("Tracker Cycle terminated — all API keys exhausted")
         raise
     except Exception as e:
         run_logger.exception(f"Tracker cycle failed with unexpected error: {e}")
         raise
 
+    clear_quota_exhausted("tracker")
     return stats
 
 
@@ -224,9 +229,6 @@ def main() -> None:
     try:
         agent = TrackerAgent()
         asyncio.run(agent.run())
-    except RateLimitError as e:
-        logger.critical(f"Tracker terminated: {e}")
-        raise
     except KeyboardInterrupt:
         logger.info("Tracker stopped by user (SIGINT)")
     except Exception as e:

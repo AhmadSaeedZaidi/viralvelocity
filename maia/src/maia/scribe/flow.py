@@ -1,49 +1,45 @@
 """Maia Scribe: Transcript extraction agent.
 
 Consumer in the Producer-Consumer pipeline. Pulls videos needing
-transcripts from the video table, fetches them via youtube-transcript-api,
-and persists results to Atlas Vault.
+transcripts from the video table, fetches them via yt-dlp native
+subtitle extraction, and persists results to Atlas Vault.
 """
 
 import argparse
 import asyncio
 import logging
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from atlas.models import Video
-from atlas.repositories import VideoRepository
-from atlas.vault import get_vault
+from atlas.repositories import TranscriptRepository, VideoRepository
+from atlas.state import audio_cap_reached, clear_quota_exhausted, record_audio_usage
+from atlas.utils import QuotaExhaustedError
+from atlas.vault import audio_path, get_vault
 from prefect import flow, get_run_logger, task
-from tenacity import (
-    before_sleep_log,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
+
+from maia.utils import notify_quota_exhausted
+
+from .loader import (
+    TranscriptExtractionError,
+    TranscriptLoader,
+    TranscriptRateLimitError,
 )
-
-# Re-export TranscriptsDisabled so the flow can catch it
-from youtube_transcript_api import TranscriptsDisabled  # type: ignore[attr-defined]
-
-from maia.utils import RateLimitError, vault_op_with_retry
-
-from .loader import TranscriptLoader
+from .transcription import (
+    transcribe_audio_download,
+    transcribe_audio_path,
+)
 
 logger = logging.getLogger(__name__)
 
-# Concurrent transcripts — bounded by semaphore to avoid overwhelming external APIs
-MAX_CONCURRENT_TRANSCRIPTS = 5
+# Concurrent transcripts — kept low because the VPS egress IP is flagged by
+# YouTube; aggressive concurrency triggers HTTP 429 (Too Many Requests).
+MAX_CONCURRENT_TRANSCRIPTS = 2
 
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-)
-async def _fetch_transcript_with_retry(loader: TranscriptLoader, vid_id: str) -> Any:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, loader.fetch, vid_id)
+# Pacing delay (seconds) between transcript fetches to stay under YouTube's
+# per-IP rate limits.
+SCRIBE_THROTTLE_SECONDS = 1.5
 
 
 @task(name="fetch_scribe_targets")
@@ -58,29 +54,81 @@ async def fetch_scribe_targets_task(batch_size: int) -> list[Video]:
 
 @task(name="process_transcript")
 async def process_transcript_task(video: Video) -> None:
-    """Process a single video's transcript."""
+    """Transcribe a video and *stage* it locally for the janitor to persist.
+
+    The Scribe is the single owner of caption fetching. It fetches via the
+    shared multi-client cascade (with 429-release-to-PENDING backoff), and only
+    if no captions exist does it fall back to speech-to-text on the singer's
+    stored audio (read from the vault — no extra YouTube fetch), downloading
+    audio from YouTube as a last resort. The Streamer no longer touches
+    captions, so the `timedtext` throttle surface lives only here.
+    """
     video_repo = VideoRepository()
     run_logger = get_run_logger()
     vid_id = video.id
-    loader = TranscriptLoader()
 
     try:
-        transcript_data = await _fetch_transcript_with_retry(loader, vid_id)
-
-        v = get_vault()
-        await vault_op_with_retry(lambda: v.store_transcript(vid_id, transcript_data))
+        segments = await _transcribe(video)
+        transcript_repo = TranscriptRepository()
+        await transcript_repo.record_transcript(
+            vid_id,
+            vault_uri=None,
+            language="en",
+            content_json=segments,
+        )
         await video_repo.mark_transcript_safe(vid_id)
         run_logger.info(f"Scribed transcript for {vid_id}")
 
-    except RateLimitError:
-        run_logger.critical(f"Rate limit hit while scribing {vid_id}. Propagating.")
+    except QuotaExhaustedError:
+        await notify_quota_exhausted("scribe")
         raise
-    except TranscriptsDisabled:
-        run_logger.warning(f"Transcripts disabled for {vid_id}")
+    except TranscriptRateLimitError as e:
+        # Transient — release back to PENDING so it retries on a later cycle
+        # instead of being permanently marked as having no transcript.
+        run_logger.warning(f"Rate-limited on {vid_id}, releasing for retry: {e}")
+        await video_repo.release_to_pending(vid_id)
+    except TranscriptExtractionError as e:
+        run_logger.warning(f"No transcript available for {vid_id}: {e}")
         await video_repo.mark_transcript_safe(vid_id)
     except Exception as e:
-        run_logger.error(f"Failed to scribe {vid_id} after retries: {e}")
+        run_logger.exception(f"Failed to scribe {vid_id} after retries: {e}")
         await video_repo.mark_failed(vid_id)
+
+
+async def _transcribe(video: Video) -> list[dict[str, Any]]:
+    """Return transcript segments, preferring vault artifacts over YouTube."""
+    vid_id = video.id
+
+    # 1) YouTube caption fetch via the Scribe's multi-client cascade + 429
+    #    release-to-PENDING backoff. This is the ONLY place that hits the
+    #    `timedtext` endpoint, so the throttle surface is centralized here.
+    try:
+        return TranscriptLoader().fetch(vid_id)
+    except TranscriptExtractionError:
+        pass  # no captions available — try audio STT below
+
+    # 2) Audio STT (paid Grok/Mistral fallback). Gated by our OWN daily cap so
+    #    we never blow the budget — captions above are free and preferred.
+    if audio_cap_reached():
+        raise TranscriptExtractionError(
+            f"Daily audio-transcription cap reached; skipping paid STT for {vid_id}"
+        )
+    try:
+        audio_buf = await asyncio.to_thread(get_vault().fetch_binary, audio_path(vid_id))
+        if audio_buf is not None:
+            tmp = tempfile.mktemp(suffix=".opus")
+            await asyncio.to_thread(Path(tmp).write_bytes, audio_buf.getvalue())
+            segs = await asyncio.to_thread(transcribe_audio_path, Path(tmp))
+        else:
+            segs = (await asyncio.to_thread(transcribe_audio_download, vid_id)).segments
+        record_audio_usage(1)
+        return segs
+    except (TranscriptExtractionError, QuotaExhaustedError):
+        raise
+    except Exception as e:
+        raise TranscriptExtractionError(
+            f"Audio STT unavailable for {vid_id}: {e}"
+        ) from e
 
 
 @flow(name="run_scribe_cycle")
@@ -110,8 +158,18 @@ async def scribe_flow(batch_size: int) -> dict[str, Any]:
     async def _bounded(video: Video) -> None:
         async with sem:
             await process_transcript_task(video)
+            await asyncio.sleep(SCRIBE_THROTTLE_SECONDS)
 
-    await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
+    results = await asyncio.gather(
+        *[_bounded(v) for v in targets], return_exceptions=True
+    )
+    # Propagate any QuotaExhaustedError that was caught by return_exceptions
+    quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
+    if quota_errors:
+        raise quota_errors[0]
+
+    # Cycle completed without quota exhaustion — clear any stale marker.
+    clear_quota_exhausted("scribe")
 
     run_logger.info(f"=== Scribe Cycle Complete === Processed {len(targets)} videos")
     return {"videos_processed": len(targets)}

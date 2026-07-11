@@ -4,7 +4,15 @@ Basic usage examples for Atlas infrastructure library.
 
 import asyncio
 
-from atlas import AlertChannel, AlertLevel, db, events, notifier, settings, vault
+from atlas import (
+    AlertChannel,
+    AlertLevel,
+    db,
+    events,
+    get_vault,
+    notifier,
+    settings,
+)
 
 
 async def database_example() -> None:
@@ -24,6 +32,8 @@ async def storage_example() -> None:
     """Demonstrate storage operations."""
     print("\nStorage Example:")
     print(f"  Active vault: {settings.VAULT_PROVIDER}")
+
+    vault = get_vault()
 
     # Store metadata (date-partitioned)
     metadata = {

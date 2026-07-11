@@ -1,7 +1,7 @@
 from atlas.repositories.channel import ChannelRepository
 from atlas.repositories.event import EventRepository
 from atlas.repositories.search_queue import SearchQueueRepository
-from atlas.repositories.video import VideoRepository
+from atlas.repositories.video import TranscriptRepository, VideoRepository
 from atlas.repositories.watchlist import WatchlistRepository
 
 __all__ = [
@@ -9,5 +9,6 @@ __all__ = [
     "EventRepository",
     "SearchQueueRepository",
     "VideoRepository",
+    "TranscriptRepository",
     "WatchlistRepository",
 ]

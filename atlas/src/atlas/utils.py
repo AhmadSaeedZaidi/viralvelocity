@@ -4,13 +4,23 @@ import asyncio
 import functools
 import itertools
 import logging
-import sys
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 logger = logging.getLogger("atlas.utils")
 
 T = TypeVar("T")
+
+
+class QuotaExhaustedError(Exception):
+    """Raised when all API keys in a KeyRing are exhausted for a request.
+
+    Callers (e.g. the Maia agent layer) should catch this and decide on the
+    appropriate resiliency action (e.g. container restart for IP rotation).
+    This is a normal ``Exception`` (not ``SystemExit``) so it propagates
+    cleanly through ``asyncio`` task groups and never tears down an unrelated
+    host process that happens to import Atlas as a library.
+    """
 
 
 def retry_async(
@@ -42,10 +52,11 @@ def retry_async(
                         await asyncio.sleep(sleep_time)
                         current_delay *= backoff
                     else:
-                        logger.error(f"{func.__name__} failed after {max_attempts} attempts")
+                        logger.exception(f"{func.__name__} failed after {max_attempts} attempts")
 
             if last_exception:
                 raise last_exception
+            return None
 
         return wrapper
 
@@ -66,7 +77,7 @@ async def health_check_all() -> dict[str, bool]:
     try:
         results["database"] = await db.health_check()
     except Exception as e:
-        logger.error(f"Database health check failed: {e}")
+        logger.exception(f"Database health check failed: {e}")
         results["database"] = False
 
     return results
@@ -127,15 +138,18 @@ class KeyRing:
         from atlas.config import settings
 
         self.pool_name = pool_name.lower()
-        self.keys = settings.key_rings.get(self.pool_name, [])
+        self.keys: list[str] = settings.key_rings.get(self.pool_name, [])
 
         if not self.keys:
             logger.error(f"KeyRing: No keys initialized for pool '{pool_name}'!")
             raise ValueError(f"Empty KeyRing for {pool_name}")
 
-        self._iterator = itertools.cycle(self.keys)
+        self._iterator: itertools.cycle[str] = itertools.cycle(self.keys)
 
-        # Session tracking for exhaustible rotation
+        # Session tracking for exhaustible rotation. A monotonically increasing
+        # counter guarantees every session gets a unique id, so concurrent
+        # calls on the same KeyRing never clobber each other's attempt counts.
+        self._session_counter = itertools.count()
         self._current_session_attempts: dict[int, int] = {}
 
         logger.info(f"KeyRing: Initialized '{pool_name}' with {len(self.keys)} keys.")
@@ -149,13 +163,15 @@ class KeyRing:
         Start a new exhaustible rotation session.
 
         Args:
-            session_id: Optional custom session ID (uses id() if not provided)
+            session_id: Optional custom session ID. When omitted, a unique
+                process-wide id is allocated so concurrent sessions never
+                share attempt state.
 
         Returns:
             Session ID to use for tracking
         """
         if session_id is None:
-            session_id = id(self)
+            session_id = next(self._session_counter)
 
         self._current_session_attempts[session_id] = 0
         return session_id
@@ -218,11 +234,11 @@ class ResiliencyExecutor:
     """
     Unified executor for Google API requests with Resiliency Strategy termination.
 
-    The Resiliency Strategy:
-    - Exit 0 (Clean Death): All keys exhausted for a request → Container restarts cleanly
-    - Exit 1 (Dirty Death): Unexpected error → Container restarts with error signal
-
-    This prevents infinite retry loops and enforces clean termination on quota exhaustion.
+    On quota exhaustion the executor raises :class:`QuotaExhaustedError` so the
+    caller (e.g. the Maia agent layer) can perform the appropriate resiliency
+    action — typically restarting the container to rotate the egress IP. Raising
+    a normal exception (rather than ``sys.exit``) prevents Atlas from
+    unconditionally killing an unrelated host process that merely imports it.
     """
 
     def __init__(self, key_ring: KeyRing, agent_name: str = "unknown"):
@@ -247,7 +263,8 @@ class ResiliencyExecutor:
             API response or None on non-quota errors
 
         Raises:
-            SystemExit: On key exhaustion (exit code 0) or critical errors
+            QuotaExhaustedError: When all keys are exhausted (caller decides on
+                resiliency action such as container restart).
         """
         session_id = self.key_ring.start_session()
 
@@ -276,40 +293,59 @@ class ResiliencyExecutor:
                         # Try rotating to next key
                         if self.key_ring.attempt_rotation(session_id):
                             continue  # Retry with next key
-                        else:
-                            # All keys exhausted - Resiliency Strategy: Clean Death
-                            self.logger.critical(
-                                f"RESILIENCY: All keys exhausted for {self.agent_name}. "
-                                f"Initiating clean container termination (exit 0)."
-                            )
-                            sys.exit(0)  # Clean death - container will restart
+                        # All keys exhausted - signal the caller (e.g. the Maia
+                        # agent layer) so it can perform the appropriate resiliency
+                        # action (e.g. container restart for IP rotation). We raise
+                        # a catchable exception rather than calling sys.exit, which
+                        # would unconditionally tear down the entire host process
+                        # (including other agents, web servers, or test runners
+                        # sharing this import).
+                        self.logger.critical(
+                            f"RESILIENCY: All keys exhausted for {self.agent_name}. "
+                            f"Signalling quota exhaustion to caller."
+                        )
+                        raise QuotaExhaustedError(
+                            f"All API keys exhausted for {self.agent_name}"
+                        ) from e
 
-                    elif is_retryable:
+                    if is_retryable:
                         # Retryable non-quota error (network issues, etc.)
                         self.logger.warning(f"Retryable error: {e}")
                         if self.key_ring.attempt_rotation(session_id):
                             continue
-                        else:
-                            self.logger.error("All retry attempts exhausted")
-                            return None
-                    else:
-                        # Non-retryable error - propagate
-                        self.logger.error(f"Non-retryable error: {e}")
-                        raise
+                        self.logger.exception("All retry attempts exhausted")
+                        return None
+                    # Non-retryable error - propagate
+                    self.logger.exception(f"Non-retryable error: {e}")
+                    raise
 
         finally:
             self.key_ring.end_session(session_id)
 
     def _is_quota_error(self, exception: Exception) -> bool:
-        """Default quota error detection."""
+        """Default quota error detection.
+
+        Only patterns that unambiguously indicate quota/rate exhaustion are
+        treated as such. A bare ``403`` is intentionally excluded: it commonly
+        means a *private / region-blocked / age-restricted* video, which is not
+        a quota condition and must not trigger needless key rotation (and
+        ultimately resiliency termination) over an unrelated, non-retryable video.
+        """
         error_str = str(exception).lower()
+
+        # Explicit 403 exclusion: YouTube API often returns 403 with a body
+        # containing "quotaExceeded" — without this guard the body text would
+        # match the quota indicators below and misclassify the error.
+        # Use a word-boundary-ish check so "403" doesn't accidentally match
+        # substrings like "34038" or "429403".
+        if "http 403" in error_str:
+            return False
 
         # Common quota error indicators
         quota_indicators = [
             "quota",
             "rate limit",
             "429",
-            "403",
             "quotaexceeded",
             "usagelimit",
         ]
@@ -334,10 +370,7 @@ async def execute_youtube_request_async(
         API response or None
 
     Raises:
-        SystemExit: On key exhaustion (Resiliency Strategy)
+        QuotaExhaustedError: On key exhaustion (Resiliency Strategy)
     """
     executor = ResiliencyExecutor(key_ring, agent_name)
     return await executor.execute_async(request_func)
-
-
-ResiliencyExecutor = ResiliencyExecutor

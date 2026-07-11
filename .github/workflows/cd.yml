@@ -66,7 +66,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./maia
+          context: .
+          file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -98,7 +99,7 @@ jobs:
 
       - name: Configure environment
         run: |
-          echo "AGENT_MODULE=maia.${{ github.inputs.agent || 'hunter' }}" >> $GITHUB_ENV
+          echo "AGENT_NAME=${{ github.inputs.agent || 'hunter' }}" >> $GITHUB_ENV
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> $GITHUB_ENV
           echo "VAULT_PROVIDER=${{ secrets.VAULT_PROVIDER }}" >> $GITHUB_ENV
           echo "YOUTUBE_API_KEY_POOL_JSON=${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}" >> $GITHUB_ENV
@@ -117,7 +118,7 @@ jobs:
             -e VAULT_PROVIDER \
             -e YOUTUBE_API_KEY_POOL_JSON \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            python -m ${{ env.AGENT_MODULE }}
+            python -m maia ${{ env.AGENT_NAME }}
           EXIT_CODE=$?
           set -e
           

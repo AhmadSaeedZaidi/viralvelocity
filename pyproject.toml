@@ -14,11 +14,10 @@ lint.ignore = [
     "B904",  # raise-without-from-inside-except
     "N802",  # function name should be lowercase (for DB column references)
     "N806",  # variable in function should be lowercase
+    "TRY002",  # raising builtin exception types with messages is intentional here
+    "TRY003",  # raising builtins with descriptive messages is idiomatic/intentional
 ]
-lint.per-file-ignores = {
-    "tests/**/*.py" = ["N802", "N806"],
-    "conftest.py" = ["N802", "N806"],
-}
+lint.per-file-ignores = { "tests/**/*.py" = ["N802", "N806"], "conftest.py" = ["N802", "N806"] }
 
 [tool.pytest.ini_options]
 minversion = "6.0"

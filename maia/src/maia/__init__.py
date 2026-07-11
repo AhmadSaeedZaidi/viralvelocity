@@ -12,7 +12,7 @@ Architecture (Producer-Consumer Pipeline):
   - Archeologist: Historical Curation (Grave Robbery method)
 
   Consumers (pull from work queue, process, update status):
-  - Scribe:      Transcription (youtube-transcript-api wrapper)
+  - Scribe:      Transcription (yt-dlp native subtitle extraction)
   - Painter:     Visual Archival (Intelligent keyframe extraction)
   - Tracker:     Velocity Monitoring (3-Zone Defense strategy)
   - Janitor:     Tiered storage cleanup

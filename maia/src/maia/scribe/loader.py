@@ -1,138 +1,83 @@
-"""Maia Scribe: Transcript loader using cookie-authenticated requests session.
+"""Maia Scribe: Transcript loader using the shared YouTube streamer.
 
-The loader builds a ``requests.Session`` populated with the YouTube cookies
-resolved from ``atlas.config.settings.youtube_cookies_resolved_path`` and passes
-it into ``YouTubeTranscriptApi(http_client=...)``. This bypasses YouTube's
-anti-bot protections for both the transcript listing and content fetch.
+Thin wrapper around :meth:`StealthVideoStreamer.extract_captions` (yt-dlp native
+subtitle extraction with TLS impersonation + Deno PoToken). This shares the exact
+yt-dlp invocation the Painter uses, so there is a single YouTube interaction path.
 """
 
-import http.cookiejar as cookiejar
 import logging
+import tempfile
 from typing import Any
 
-import requests  # type: ignore[import-untyped]
-from prefect import get_run_logger
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import IpBlocked, RequestBlocked, TranscriptsDisabled
+from maia.media.streamer import (
+    StealthVideoStreamer,
+    TranscriptExtractionError,
+    TranscriptRateLimitError,
+)
 
-from maia.utils import RateLimitError
+logger = logging.getLogger(__name__)
 
-
-class TranscriptExtractionError(Exception):
-    """Raised when transcript extraction fails or returns empty data."""
+# Caption cascade: YouTube throttles the `timedtext` endpoint per IP, but the
+# different player clients resolve captions through semi-independent surfaces, so
+# when one is rate-limited another often still succeeds. We try them in order and
+# only surface a rate-limit error if *every* client is throttled.
+_CAPTION_CLIENTS = ["default", "tv", "mweb"]
 
 
 class TranscriptLoader:
-    """
-    Wrapper for ``youtube-transcript-api`` 1.x with cookie authentication.
-
-    Cookie path is resolved exclusively through ``atlas.config.settings`` at
-    construction time. Direct ``os.environ`` access is forbidden.
-    """
+    """Fetch video transcripts via the shared YouTube streamer."""
 
     def __init__(self, cookies_path: str | None = None) -> None:
-        """Initialise loader.
+        self.cookies_path = cookies_path
+        self.logger = logging.getLogger("maia.scribe.loader")
 
-        Args:
-            cookies_path: Explicit override for cookie file path.
-                          When *None* (default) the path is resolved from
-                          ``atlas.config.settings.youtube_cookies_resolved_path``.
-        """
-        try:
-            self.logger: Any = get_run_logger()
-        except Exception:
-            self.logger = logging.getLogger("maia.scribe.loader")
-
-        if cookies_path is not None:
-            resolved: str | None = cookies_path
-        else:
-            from atlas.config import settings
-
-            resolved = settings.youtube_cookies_resolved_path
-
-        self.cookies_path: str | None = resolved
-        self._http_client = self._build_http_client(resolved)
-
-        if not resolved:
-            self.logger.warning(
-                "TranscriptLoader: No cookies configured. "
-                "YouTube may rate-limit or block unauthenticated transcript requests."
-            )
-
-    @staticmethod
-    def _build_http_client(cookies_path: str | None) -> requests.Session:
-        """Build a ``requests.Session`` with optional cookies and a browser UA."""
-        session = requests.Session()
-        session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9",
-            }
-        )
-
-        if cookies_path:
-            try:
-                jar = cookiejar.MozillaCookieJar(cookies_path)
-                jar.load(ignore_discard=True, ignore_expires=True)
-                session.cookies = jar  # type: ignore[assignment]
-            except Exception as exc:
-                logging.getLogger("maia.scribe.loader").warning(
-                    f"TranscriptLoader: Failed to load cookies from {cookies_path}: {exc}"
-                )
-
-        return session
-
-    def fetch(self, video_id: str) -> list[dict[Any, Any]]:
-        """Fetch transcript for a YouTube video using authenticated session.
-
-        Returns:
-            Non-empty list of transcript segments (``{"text", "start", "duration"}``).
+    def _fetch_with_client(self, video_id: str, client: str) -> list[dict[str, Any]]:
+        """Attempt caption extraction with a single player client.
 
         Raises:
-            RateLimitError: On YouTube 429 / TooManyRequests / IpBlocked.
-            TranscriptExtractionError: When no transcript data can be obtained.
-            TranscriptsDisabled: When the video has captions disabled.
+            TranscriptRateLimitError: transient throttle — caller may try another client.
+            TranscriptExtractionError: genuine "no subtitles" / failure for this client.
         """
-        try:
-            api = YouTubeTranscriptApi(http_client=self._http_client)
-            transcript_list = api.list(video_id)
-
-            try:
-                transcript = transcript_list.find_manually_created_transcript(["en"])
-            except Exception:
-                try:
-                    transcript = transcript_list.find_generated_transcript(["en"])
-                except Exception:
-                    transcript = transcript_list.find_manually_created_transcript(
-                        ["es", "fr", "de", "pt", "ru", "ja", "ko"]
-                    )
-
-            fetched = transcript.fetch()
-            result: list[dict[Any, Any]] = [
-                {"text": s.text, "start": s.start, "duration": s.duration} for s in fetched.snippets
-            ]
-            if not result:
-                raise TranscriptExtractionError(
-                    f"Transcript fetch returned empty data for {video_id}"
-                )
-            return result
-
-        except (IpBlocked, RequestBlocked) as exc:
-            self.logger.critical(
-                f"YouTube blocked transcript request for {video_id}: {type(exc).__name__}"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            return StealthVideoStreamer(self.cookies_path).extract_captions(
+                video_id, client, tmpdir
             )
-            raise RateLimitError(f"429/Block (Scribe) — YouTube {type(exc).__name__}") from exc
 
-        except TranscriptsDisabled:
-            raise
+    def fetch(self, video_id: str) -> list[dict[str, Any]]:
+        """Download captions for *video_id*, cascading across player clients.
 
-        except TranscriptExtractionError:
-            raise
+        Tries each client in :data:`_CAPTION_CLIENTS`. A rate-limit on one client
+        falls through to the next; only if **all** clients are throttled is a
+        :class:`TranscriptRateLimitError` raised (so the flow re-queues the video).
+        A genuine "no subtitles" result short-circuits the cascade.
 
-        except Exception as e:
-            raise TranscriptExtractionError(
-                f"Failed to extract transcript for {video_id}: {e}"
-            ) from e
+        Returns:
+            List of ``{"text", "start", "duration"}`` dicts (time in **seconds**).
+
+        Raises:
+            TranscriptExtractionError / TranscriptRateLimitError: see above.
+        """
+        last_rate_limit: TranscriptRateLimitError | None = None
+        last_error: TranscriptExtractionError | None = None
+
+        for client in _CAPTION_CLIENTS:
+            try:
+                return self._fetch_with_client(video_id, client)
+            except TranscriptRateLimitError as e:
+                self.logger.warning(
+                    f"[yt-dlp] Rate-limited for {video_id} via '{client}', trying next client"
+                )
+                last_rate_limit = e
+                continue
+            except TranscriptExtractionError as e:
+                # "No subtitles available" is authoritative — don't waste other clients.
+                if "No subtitles available" in str(e):
+                    raise
+                last_error = e
+                continue
+
+        if last_rate_limit is not None:
+            raise last_rate_limit
+        if last_error is not None:
+            raise last_error
+        raise TranscriptExtractionError(f"All caption clients failed for {video_id}")

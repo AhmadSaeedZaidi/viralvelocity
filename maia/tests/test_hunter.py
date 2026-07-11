@@ -53,10 +53,18 @@ async def test_ingest_results_with_snowball(
     mock_youtube_search_response: dict[str, Any],
 ):
     """Test ingest_results implements Snowball effect."""
+
+    async def _passthrough_gate(items, *args, **kwargs):
+        return items
+
     with (
         patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
         patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
         patch("maia.hunter.flow.get_vault") as mock_get_vault,
+        patch(
+            "maia.hunter.flow.filter_by_quality",
+            new=AsyncMock(side_effect=_passthrough_gate),
+        ),
     ):
         mock_vault = mock_get_vault.return_value
 
@@ -89,10 +97,18 @@ async def test_ingest_results_handles_vault_failure(
     mock_youtube_search_response: dict[str, Any],
 ):
     """Test ingest_results continues even if vault storage fails."""
+
+    async def _passthrough_gate(items, *args, **kwargs):
+        return items
+
     with (
         patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
         patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
         patch("maia.hunter.flow.get_vault") as mock_get_vault,
+        patch(
+            "maia.hunter.flow.filter_by_quality",
+            new=AsyncMock(side_effect=_passthrough_gate),
+        ),
     ):
         mock_vault = mock_get_vault.return_value
 

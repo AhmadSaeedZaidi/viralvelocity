@@ -4,20 +4,21 @@ Encapsulates core HTTP request, key rotation, and rate-limit backoff logic
 shared by the Hunter and Archeologist producers, plus the Tracker consumer.
 """
 
+import logging
 from typing import Any
 
 import aiohttp
 from atlas.utils import KeyRing, ResiliencyExecutor
 
-from maia.utils import execute_with_rate_limit
+logger = logging.getLogger(__name__)
 
 
 class YouTubeSearchStrategy:
     """Base class for YouTube Data API search and video resolution.
 
-    Provides ``execute_get()`` which handles key rotation and Resiliency
-    Strategy termination (``SystemExit`` → ``RateLimitError``) so that all
-    callers get a uniform interface.
+    Provides ``execute_get()`` which handles key rotation and Resilience
+    Strategy (``QuotaExhaustedError``).  On VPS the caller is expected
+    to catch ``QuotaExhaustedError``, notify Discord, and back off.
 
     Subclasses should call ``await self.execute_get(url, params)`` and
     implement their own response-processing logic.
@@ -37,28 +38,28 @@ class YouTubeSearchStrategy:
             Parsed JSON body on success, or ``None`` on non-retryable errors.
 
         Raises:
-            RateLimitError: When all keys are exhausted (Resiliency Strategy).
+            QuotaExhaustedError: When all API keys are exhausted.
         """
 
         async def make_request(api_key: str) -> dict[str, Any]:
             params_with_key: dict[str, Any] = {**params, "key": api_key}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params_with_key) as resp:
-                    if resp.status == 200:
-                        result: dict[str, Any] = await resp.json()
-                        return result
-                    elif resp.status in (403, 429):
-                        error_text = await resp.text()
-                        raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
-                    else:
-                        run_logger = __import__("logging").getLogger(  # noqa: E501
-                            f"maia.strategies.{self.executor.agent_name}"
-                        )
-                        error_text = await resp.text()
-                        run_logger.error(f"HTTP {resp.status} for {url}: {error_text[:200]}")
-                        raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
+            async with aiohttp.ClientSession() as session, session.get(
+                url, params=params_with_key
+            ) as resp:
+                if resp.status == 200:
+                    result: dict[str, Any] = await resp.json()
+                    return result
+                if resp.status in (403, 429):
+                    error_text = await resp.text()
+                    raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
+                run_logger = __import__("logging").getLogger(
+                    f"maia.strategies.{self.executor.agent_name}"
+                )
+                error_text = await resp.text()
+                run_logger.error(f"HTTP {resp.status} for {url}: {error_text[:200]}")
+                raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
 
-        return await execute_with_rate_limit(self.executor, make_request)
+        return await self.executor.execute_async(make_request)
 
     async def search(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Perform a ``youtube/v3/search`` request.

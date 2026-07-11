@@ -22,6 +22,10 @@ class Video(BaseModel):  # type: ignore[misc]
     status: str | None = "PENDING"
     has_transcript: bool = False
     has_visuals: bool = False
+    has_audio: bool = False
+    has_video: bool = False
+    fetched: bool = False
+    raw_uri: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

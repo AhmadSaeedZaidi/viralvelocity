@@ -6,8 +6,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from atlas.utils import QuotaExhaustedError
 from maia.archeologist.flow import archeology_flow, hunt_history_task
-from maia.utils import RateLimitError
 
 
 @pytest.fixture
@@ -51,9 +51,16 @@ async def test_hunt_history_successful_retrieval(mock_strategy: MagicMock):
     }
     mock_strategy.search.return_value = mock_response_data
 
+    async def _passthrough_gate(items, *args, **kwargs):
+        return items
+
     with (
         patch("maia.archeologist.flow.VideoRepository") as MockRepo,
         patch("maia.archeologist.flow.enrich_channels_task", new_callable=AsyncMock) as mock_enrich,
+        patch(
+            "maia.archeologist.flow.filter_by_quality",
+            new=AsyncMock(side_effect=_passthrough_gate),
+        ),
     ):
         mock_repo = MockRepo.return_value
         mock_repo.ingest_video_metadata = AsyncMock()
@@ -67,14 +74,14 @@ async def test_hunt_history_successful_retrieval(mock_strategy: MagicMock):
 
 @pytest.mark.asyncio
 async def test_hunt_history_handles_429_resiliency_strategy(mock_strategy: MagicMock):
-    """Test Archeologist raises RateLimitError on 429 rate limit (Resiliency Strategy)."""
-    mock_strategy.search.side_effect = RateLimitError("429 Rate Limit")
+    """Test Archeologist raises QuotaExhaustedError on all-keys-exhausted."""
+    mock_strategy.search.side_effect = QuotaExhaustedError("All keys exhausted")
 
     with patch("maia.archeologist.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
         mock_repo.ingest_video_metadata = AsyncMock()
 
-        with pytest.raises(RateLimitError):
+        with pytest.raises(QuotaExhaustedError):
             await hunt_history_task.fn(year=2010, month=1, strategy=mock_strategy)
 
 

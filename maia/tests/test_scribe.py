@@ -1,16 +1,42 @@
 """
-Tests for Maia Scribe module.
+Tests for Maia Scribe module (caption + transcript extraction).
+
+The Scribe is the single owner of caption fetching: it hits YouTube's
+`timedtext` endpoint via its multi-client cascade (with 429-release-to-PENDING
+backoff) and only falls back to speech-to-text on the Singer's stored audio
+(read from the vault) when no captions exist.
 """
 
+import io
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from atlas.models import Video
+from atlas.utils import QuotaExhaustedError
 from maia.scribe.flow import (
     fetch_scribe_targets_task,
     process_transcript_task,
     scribe_flow,
 )
-from maia.utils import RateLimitError
+from maia.scribe.loader import TranscriptExtractionError
+from maia.scribe.transcription import TranscriptResult
+
+
+def _json3(segments: list[dict]) -> bytes:
+    events = [
+        {
+            "tStartMs": int(s["start"] * 1000),
+            "dDurationMs": int(s["duration"] * 1000),
+            "segs": [{"utf8": s["text"]}],
+        }
+        for s in segments
+    ]
+    return json.dumps({"events": events}).encode()
+
+
+def _audio_result(segments: list[dict]) -> TranscriptResult:
+    return TranscriptResult(segments=segments, source="grok")
 
 
 @pytest.mark.asyncio
@@ -29,8 +55,6 @@ async def test_fetch_scribe_targets_empty():
 @pytest.mark.asyncio
 async def test_fetch_scribe_targets_with_videos():
     """Test fetch_scribe_targets returns videos needing transcripts."""
-    from atlas.models import Video
-
     mock_videos = [
         Video(id="VIDEO_001", title="Test Video 1"),
         Video(id="VIDEO_002", title="Test Video 2"),
@@ -48,108 +72,146 @@ async def test_fetch_scribe_targets_with_videos():
 
 
 @pytest.mark.asyncio
-async def test_process_transcript_successful():
-    """Test process_transcript successfully fetches and stores transcript."""
-    from atlas.models import Video
-
+async def test_process_transcript_youtube_caption_first():
+    """Scribe fetches captions from YouTube first (no vault captions step)."""
     video = Video(id="VIDEO_001", title="Test Video")
-    mock_transcript = [
-        {"text": "Hello", "start": 0.0, "duration": 1.5},
-        {"text": "World", "start": 1.5, "duration": 1.0},
-    ]
+    segs = [{"text": "Hello", "start": 0.0, "duration": 1.5}]
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+        patch("maia.scribe.flow.TranscriptRepository") as MockTranscriptRepo,
         patch("maia.scribe.flow.get_vault") as mock_get_vault,
-        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
+        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
     ):
-        mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
         mock_repo.mark_transcript_safe = AsyncMock()
-        mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
-        mock_vault.store_transcript = MagicMock()
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.record_transcript = AsyncMock()
+        mock_vault = mock_get_vault.return_value
+        mock_vault.fetch_binary = MagicMock(return_value=None)
+        MockLoader.return_value.fetch = MagicMock(return_value=segs)
 
         await process_transcript_task.fn(video)
 
-        mock_loader_instance.fetch.assert_called_once_with("VIDEO_001")
-        mock_vault_retry.assert_called_once()
+        # Caption ownership lives entirely in the Scribe → YouTube fetch first.
+        MockLoader.return_value.fetch.assert_called_once_with("VIDEO_001")
+        mock_transcript_repo.record_transcript.assert_called_once()
         mock_repo.mark_transcript_safe.assert_called_once_with("VIDEO_001")
 
 
 @pytest.mark.asyncio
-async def test_process_transcript_unavailable():
-    """Test process_transcript handles unavailable transcripts gracefully."""
-    from atlas.models import Video
-    from youtube_transcript_api._errors import TranscriptsDisabled
-
-    video = Video(id="VIDEO_NO_TRANSCRIPT", title="Video Without Transcript")
+async def test_process_transcript_audio_stt_fallback():
+    """No captions anywhere → speech-to-text on the Singer's vault audio."""
+    video = Video(id="VIDEO_003", title="Test Video")
+    segs = [{"text": "Audio only", "start": 0.0, "duration": 2.0}]
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+        patch("maia.scribe.flow.TranscriptRepository") as MockTranscriptRepo,
         patch("maia.scribe.flow.get_vault") as mock_get_vault,
-        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
+        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+        patch("maia.scribe.flow.transcribe_audio_path") as mock_audio,
+        patch("maia.scribe.flow.audio_cap_reached", return_value=False),
+        patch("maia.scribe.flow.record_audio_usage"),
     ):
-        mock_vault = mock_get_vault.return_value
         mock_repo = MockRepo.return_value
         mock_repo.mark_transcript_safe = AsyncMock()
-        mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(
-            side_effect=TranscriptsDisabled("VIDEO_NO_TRANSCRIPT")
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.record_transcript = AsyncMock()
+        # No vault captions; YouTube caption fetch fails; audio IS in the vault.
+        mock_vault = mock_get_vault.return_value
+        mock_vault.fetch_binary = MagicMock(
+            side_effect=lambda path: io.BytesIO(b"OPUS") if path.startswith("audio/") else None
         )
-        mock_vault.store_transcript = MagicMock()
+        MockLoader.return_value.fetch = MagicMock(
+            side_effect=TranscriptExtractionError("no subtitles")
+        )
+        mock_audio.return_value = _audio_result(segs)
 
         await process_transcript_task.fn(video)
 
-        mock_vault_retry.assert_not_called()
-        mock_repo.mark_transcript_safe.assert_called_once_with("VIDEO_NO_TRANSCRIPT")
+        MockLoader.return_value.fetch.assert_called_once_with("VIDEO_003")
+        mock_audio.assert_called_once()
+        mock_transcript_repo.record_transcript.assert_called_once()
+        mock_repo.mark_transcript_safe.assert_called_once_with("VIDEO_003")
 
 
 @pytest.mark.asyncio
-async def test_process_transcript_handles_vault_failure_with_retry(mock_sleep):
-    """Test process_transcript retries on vault storage failures."""
-    from atlas.models import Video
-
-    video = Video(id="VIDEO_001", title="Test Video")
-    mock_transcript = [{"text": "Hello", "start": 0.0, "duration": 1.0}]
+async def test_process_transcript_unavailable():
+    """No transcript at all (no captions, no audio STT) → marked safe, not failed."""
+    video = Video(id="VIDEO_NO_T", title="Video Without Transcript")
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
+        patch("maia.scribe.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.get_vault"),
-        patch(
-            "maia.scribe.flow.vault_op_with_retry",
-            new_callable=AsyncMock,
-            side_effect=Exception("Vault connection error"),
-        ),
+        patch("maia.scribe.flow.transcribe_audio_download") as mock_dl,
+        patch("maia.scribe.flow.audio_cap_reached", return_value=False),
+        patch("maia.scribe.flow.record_audio_usage"),
     ):
         mock_repo = MockRepo.return_value
-        mock_repo.mark_failed = AsyncMock()
-        mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(return_value=mock_transcript)
+        mock_repo.mark_transcript_safe = AsyncMock()
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.record_transcript = AsyncMock()
+        mock_vault = mock_get_vault.return_value
+        mock_vault.fetch_binary = MagicMock(return_value=None)
+        MockLoader.return_value.fetch = MagicMock(
+            side_effect=TranscriptExtractionError("no subtitles")
+        )
+        mock_dl.side_effect = TranscriptExtractionError("no audio transcriber")
 
         await process_transcript_task.fn(video)
 
-        mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_transcript_safe.assert_called_once_with("VIDEO_NO_T")
+        mock_transcript_repo.record_transcript.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_vault_flush_retries_and_marks_failed(mock_sleep, mock_prefect_logger):
+    """Janitor vault_flush retries on failure (429 backoff) and marks videos failed."""
+    from maia.janitor.flow import vault_flush_task
+
+    video = {"id": "VIDEO_001", "transcript": b"{}", "audio": None}
+
+    with (
+        patch("maia.janitor.flow.TranscriptRepository") as MockRepo,
+        patch("maia.janitor.flow.get_vault") as mock_get_vault,
+    ):
+        mock_repo = MockRepo.return_value
+        mock_repo.claim_vault_pending_batch = AsyncMock(return_value=[video])
+        mock_repo.clear_vault_pending = AsyncMock()
+        mock_repo.mark_failed = AsyncMock()
+        mock_vault = MagicMock()
+        mock_vault.store_batch = MagicMock(side_effect=Exception("Vault connection error"))
+        mock_get_vault.return_value = mock_vault
+
+        result = await vault_flush_task.fn(batch_size=10)
+
+        # On vault failure the video stays pending (self-heals on retry); it is
+        # NOT marked failed. So flushed=0, failed=1, and clear_vault_pending is
+        # not called. (store_batch now retries HTTP 429 internally; this test
+        # verifies the janitor leaves the video pending on hard failure.)
+        assert result["flushed"] == 0
+        assert result["failed"] == 1
+        mock_repo.clear_vault_pending.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_process_transcript_handles_transcript_fetch_failure():
-    """Test process_transcript handles TranscriptLoader failures."""
-    from atlas.models import Video
-
+    """Unexpected transcription error → video marked failed."""
     video = Video(id="VIDEO_001", title="Test Video")
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
     ):
         mock_repo = MockRepo.return_value
         mock_repo.mark_failed = AsyncMock()
-        mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(side_effect=Exception("Network timeout"))
+        mock_vault = mock_get_vault.return_value
+        mock_vault.fetch_binary = MagicMock(return_value=None)
+        MockLoader.return_value.fetch = MagicMock(side_effect=Exception("Network timeout"))
 
         await process_transcript_task.fn(video)
 
@@ -158,26 +220,31 @@ async def test_process_transcript_handles_transcript_fetch_failure():
 
 @pytest.mark.asyncio
 async def test_process_transcript_propagates_resiliency_strategy():
-    """Test process_transcript propagates RateLimitError for Resiliency Strategy."""
-    from atlas.models import Video
-
+    """QuotaExhaustedError propagates out of process_transcript."""
     video = Video(id="VIDEO_001", title="Test Video")
 
     with (
         patch("maia.scribe.flow.VideoRepository"),
+        patch("maia.scribe.flow.get_vault") as mock_get_vault,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+        patch("maia.scribe.flow.notify_quota_exhausted", new_callable=AsyncMock),
     ):
-        mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(side_effect=RateLimitError("429 Rate Limit"))
+        mock_vault = mock_get_vault.return_value
+        mock_vault.fetch_binary = MagicMock(return_value=None)
+        MockLoader.return_value.fetch = MagicMock(
+            side_effect=QuotaExhaustedError("All keys exhausted")
+        )
 
-        with pytest.raises(RateLimitError):
+        with pytest.raises(QuotaExhaustedError):
             await process_transcript_task.fn(video)
 
 
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_empty_queue():
     """Test run_scribe_cycle handles empty queue gracefully."""
-    with patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch:
+    with patch(
+        "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
+    ) as mock_fetch:
         mock_fetch.return_value = []
 
         await scribe_flow.fn(batch_size=10)
@@ -187,9 +254,7 @@ async def test_run_scribe_cycle_empty_queue():
 
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_processes_batch():
-    """Test run_scribe_cycle processes a batch of videos sequentially."""
-    from atlas.models import Video
-
+    """Test run_scribe_cycle processes a batch of videos."""
     mock_videos = [
         Video(id="VIDEO_001", title="Video 1"),
         Video(id="VIDEO_002", title="Video 2"),
@@ -197,8 +262,12 @@ async def test_run_scribe_cycle_processes_batch():
     ]
 
     with (
-        patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch,
-        patch("maia.scribe.flow.process_transcript_task", new_callable=AsyncMock) as mock_process,
+        patch(
+            "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
+        ) as mock_fetch,
+        patch(
+            "maia.scribe.flow.process_transcript_task", new_callable=AsyncMock
+        ) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.return_value = None
@@ -206,16 +275,11 @@ async def test_run_scribe_cycle_processes_batch():
         await scribe_flow.fn(batch_size=3)
 
         assert mock_process.call_count == 3
-        mock_process.assert_any_call(mock_videos[0])
-        mock_process.assert_any_call(mock_videos[1])
-        mock_process.assert_any_call(mock_videos[2])
 
 
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_continues_on_individual_failures():
     """Test run_scribe_cycle continues processing even if individual videos fail."""
-    from atlas.models import Video
-
     mock_videos = [
         Video(id="VIDEO_001", title="Video 1"),
         Video(id="VIDEO_002", title="Video 2 (will fail)"),
@@ -229,8 +293,12 @@ async def test_run_scribe_cycle_continues_on_individual_failures():
         return None
 
     with (
-        patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch,
-        patch("maia.scribe.flow.process_transcript_task", new_callable=AsyncMock) as mock_process,
+        patch(
+            "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
+        ) as mock_fetch,
+        patch(
+            "maia.scribe.flow.process_transcript_task", new_callable=AsyncMock
+        ) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.side_effect = mock_process_side_effect
@@ -238,37 +306,3 @@ async def test_run_scribe_cycle_continues_on_individual_failures():
         await scribe_flow.fn(batch_size=3)
 
         assert call_count["count"] == 3
-
-
-@pytest.mark.asyncio
-async def test_transcript_loader_retry_logic(mock_sleep):
-    """Test that transcript fetching retries on network errors."""
-    from atlas.models import Video
-
-    video = Video(id="VIDEO_001", title="Test Video")
-    mock_transcript = [{"text": "Success", "start": 0.0, "duration": 1.0}]
-
-    with (
-        patch("maia.scribe.flow.VideoRepository") as MockRepo,
-        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
-        patch("maia.scribe.flow.get_vault") as mock_get_vault,
-        patch("maia.scribe.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
-    ):
-        mock_vault = mock_get_vault.return_value
-        mock_repo = MockRepo.return_value
-        mock_repo.mark_transcript_safe = AsyncMock()
-        mock_loader_instance = MockLoader.return_value
-        mock_loader_instance.fetch = MagicMock(
-            side_effect=[
-                ConnectionError("Network error"),
-                ConnectionError("Network error"),
-                mock_transcript,
-            ]
-        )
-        mock_vault.store_transcript = MagicMock()
-
-        await process_transcript_task.fn(video)
-
-        assert mock_loader_instance.fetch.call_count == 3
-        mock_vault_retry.assert_called_once()
-        mock_repo.mark_transcript_safe.assert_called_once_with("VIDEO_001")

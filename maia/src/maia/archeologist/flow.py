@@ -12,11 +12,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from atlas.repositories import VideoRepository
+from atlas.state import clear_quota_exhausted
+from atlas.utils import QuotaExhaustedError
 from prefect import flow, get_run_logger, task
 
 from maia.hunter.flow import enrich_channels_task
+from maia.quality import filter_by_quality
 from maia.strategies import YouTubeSearchStrategy
-from maia.utils import RateLimitError
+from maia.utils import notify_quota_exhausted
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,12 @@ async def hunt_history_task(year: int, month: int, strategy: YouTubeSearchStrate
                 run_logger.warning(f"No data returned for {year}-{month} (Cat: {category})")
                 continue
 
-            items = data.get("items", [])
+            raw_items = data.get("items", [])
+
+            # QUALITY GATE — enrich + filter before persisting / enriching.
+            items = await filter_by_quality(
+                raw_items, strategy.executor, logger=run_logger
+            )
 
             ingest_tasks = [
                 video_repo.ingest_video_metadata(item, priority_override=100) for item in items
@@ -75,20 +83,27 @@ async def hunt_history_task(year: int, month: int, strategy: YouTubeSearchStrate
                     run_logger.info(
                         f"Enriched {n} channel(s) for recovered relics (Cat: {category})"
                     )
-                except RateLimitError:
+                except QuotaExhaustedError:
+                    await notify_quota_exhausted("archeologist")
                     raise
                 except Exception as e:
                     run_logger.warning(
                         f"Channel enrichment after archeology ingest (non-fatal): {e}"
                     )
 
-            run_logger.info(f"Recovered {len(items)} relics from {year}-{month} (Cat: {category})")
+            run_logger.info(
+                f"Recovered {len(items)}/{len(raw_items)} relics (passed quality gate) "
+                f"from {year}-{month} (Cat: {category})"
+            )
+            # A category completed without exhausting quota → clear the marker so
+            # the heartbeat stops reporting "rate limited" for this agent.
+            clear_quota_exhausted("archeologist")
 
-        except RateLimitError:
-            run_logger.critical(f"Archeologist rate-limited on {year}-{month} (Cat: {category})")
+        except QuotaExhaustedError:
+            await notify_quota_exhausted("archeologist")
             raise
         except Exception as e:
-            run_logger.error(f"Archeologist error on {year}-{month} (Cat: {category}): {e}")
+            run_logger.exception(f"Archeologist error on {year}-{month} (Cat: {category}): {e}")
             continue
 
 

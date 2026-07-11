@@ -46,17 +46,16 @@ async def _execute_get(
 
     async def make_request(api_key: str) -> dict[str, Any]:
         params_with_key = {**params, "key": api_key}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, params=params_with_key, timeout=aiohttp.ClientTimeout(total=30)
-            ) as resp:
-                text = await resp.text()
-                if resp.status == 200:
-                    result: dict[str, Any] = json.loads(text) if text else {}
-                    return result
-                if resp.status in (403, 429):
-                    raise Exception(f"HTTP {resp.status}: {text[:200]}")
+        async with aiohttp.ClientSession() as session, session.get(
+            url, params=params_with_key, timeout=aiohttp.ClientTimeout(total=30)
+        ) as resp:
+            text = await resp.text()
+            if resp.status == 200:
+                result: dict[str, Any] = json.loads(text) if text else {}
+                return result
+            if resp.status in (403, 429):
                 raise Exception(f"HTTP {resp.status}: {text[:200]}")
+            raise Exception(f"HTTP {resp.status}: {text[:200]}")
 
     result = await executor.execute_async(make_request)
     return result or {}

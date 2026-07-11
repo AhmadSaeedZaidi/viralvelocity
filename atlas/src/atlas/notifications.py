@@ -74,7 +74,7 @@ class DiscordNotifier:
                     else:
                         logger.debug(f"Alert sent to {channel.value}: {title}")
             except Exception as e:
-                logger.error(f"Discord alert error: {e}")
+                logger.exception(f"Discord alert error: {e}")
 
 
 notifier = DiscordNotifier()

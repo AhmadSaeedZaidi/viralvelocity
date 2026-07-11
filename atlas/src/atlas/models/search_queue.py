@@ -12,5 +12,6 @@ class SearchQueueItem(BaseModel):  # type: ignore[misc]
     last_searched_at: datetime | None = None
     result_count_total: int | None = 0
     status: str = "active"
+    created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

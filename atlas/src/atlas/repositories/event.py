@@ -26,7 +26,7 @@ class EventRepository(DatabaseAdapter):
                 (event_id, event_type, entity_id, payload_json, created_at),
             )
         except Exception as e:
-            logger.error(f"Event bus failure: {e}")
+            logger.exception(f"Event bus failure: {e}")
 
     async def get_by_entity(self, entity_id: str, limit: int = 50) -> list[SystemEvent]:
         rows = await self._fetch_all(

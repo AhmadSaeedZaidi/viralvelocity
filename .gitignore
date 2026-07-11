@@ -115,3 +115,7 @@ COOKIES.txt
 # --- Cline ---
 .clinerules/
 .cline*/
+
+# --- Local session summary (not committed) ---
+SUMMARY.md
+.local-summary/

@@ -3,7 +3,7 @@ Tests for Maia Janitor module — State Machine cleanup cycle.
 """
 
 from typing import Any
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from maia.janitor.flow import (
@@ -33,7 +33,7 @@ def _make_video_dict(video_id: str, **overrides: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_sweep_phase_empty():
+async def test_sweep_phase_empty(mock_prefect_logger):
     """Sweep returns empty list when no PROCESSED videos are eligible."""
     with patch("maia.janitor.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
@@ -48,7 +48,7 @@ async def test_sweep_phase_empty():
 
 
 @pytest.mark.asyncio
-async def test_sweep_phase_with_videos():
+async def test_sweep_phase_with_videos(mock_prefect_logger):
     """Sweep returns PROCESSED videos eligible for archival."""
     with patch("maia.janitor.flow.VideoRepository") as MockRepo:
         mock_repo = MockRepo.return_value
@@ -69,14 +69,18 @@ async def test_sweep_phase_with_videos():
 
 
 @pytest.mark.asyncio
-async def test_handoff_phase_dry_run():
+async def test_handoff_phase_dry_run(mock_prefect_logger):
     """Hand-off in dry-run mode returns would_archive count."""
     videos = [
         _make_video_dict("VIDEO_001"),
         _make_video_dict("VIDEO_002"),
     ]
 
-    with patch("maia.janitor.flow.VideoRepository") as MockRepo:
+    with (
+        patch("maia.janitor.flow.VideoRepository") as MockRepo,
+        patch("maia.janitor.flow.events") as mock_events,
+    ):
+        mock_events.emit = AsyncMock()
         mock_repo = MockRepo.return_value
         mock_repo.archive_video_batch = AsyncMock(
             return_value={
@@ -97,15 +101,21 @@ async def test_handoff_phase_dry_run():
 
 
 @pytest.mark.asyncio
-async def test_janitor_flow_no_videos():
+async def test_janitor_flow_no_videos(mock_prefect_logger):
     """Full janitor cycle with no archivable videos completes gracefully."""
     with (
         patch("maia.janitor.flow.VideoRepository") as MockRepo,
+        patch("maia.janitor.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.janitor.flow.get_vault") as mock_vault,
         patch("maia.janitor.flow.archive_cold_stats_task", new_callable=AsyncMock) as mock_stats,
         patch("maia.janitor.flow.events") as mock_events,
     ):
         mock_events.emit = AsyncMock()
         mock_repo = MockRepo.return_value
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.claim_vault_pending_batch = AsyncMock(return_value=[])
+        mock_transcript_repo.clear_vault_pending = AsyncMock()
+        mock_vault.return_value.store_batch = MagicMock()
         mock_repo.count_archivable = AsyncMock(return_value=0)
         mock_repo.sweep_archivable = AsyncMock(return_value=[])
         mock_stats.return_value = {"archived": 0, "batches": 0}
@@ -119,7 +129,7 @@ async def test_janitor_flow_no_videos():
 
 
 @pytest.mark.asyncio
-async def test_janitor_flow_happy_path():
+async def test_janitor_flow_happy_path(mock_prefect_logger):
     """Full janitor cycle succeeds: stats archived + videos archived."""
     mock_videos = [
         _make_video("VIDEO_001"),
@@ -128,11 +138,17 @@ async def test_janitor_flow_happy_path():
 
     with (
         patch("maia.janitor.flow.VideoRepository") as MockRepo,
+        patch("maia.janitor.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.janitor.flow.get_vault") as mock_vault,
         patch("maia.janitor.flow.archive_cold_stats_task", new_callable=AsyncMock) as mock_stats,
         patch("maia.janitor.flow.events") as mock_events,
     ):
         mock_events.emit = AsyncMock()
         mock_repo = MockRepo.return_value
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.claim_vault_pending_batch = AsyncMock(return_value=[])
+        mock_transcript_repo.clear_vault_pending = AsyncMock()
+        mock_vault.return_value.store_batch = MagicMock()
         mock_repo.count_archivable = AsyncMock(return_value=2)
         mock_repo.sweep_archivable = AsyncMock(return_value=mock_videos)
         mock_repo.archive_video_batch = AsyncMock(
@@ -150,15 +166,21 @@ async def test_janitor_flow_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_janitor_flow_dry_run():
+async def test_janitor_flow_dry_run(mock_prefect_logger):
     """Dry-run mode does not execute stats archival or video hand-off."""
     with (
         patch("maia.janitor.flow.VideoRepository") as MockRepo,
+        patch("maia.janitor.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.janitor.flow.get_vault") as mock_vault,
         patch("maia.janitor.flow.archive_cold_stats_task", new_callable=AsyncMock) as mock_stats,
         patch("maia.janitor.flow.events") as mock_events,
     ):
         mock_events.emit = AsyncMock()
         mock_repo = MockRepo.return_value
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.claim_vault_pending_batch = AsyncMock(return_value=[])
+        mock_transcript_repo.clear_vault_pending = AsyncMock()
+        mock_vault.return_value.store_batch = MagicMock()
         mock_repo.count_archivable = AsyncMock(return_value=0)
         mock_repo.sweep_archivable = AsyncMock(return_value=[])
 
@@ -169,7 +191,7 @@ async def test_janitor_flow_dry_run():
 
 
 @pytest.mark.asyncio
-async def test_janitor_flow_failure_path():
+async def test_janitor_flow_failure_path(mock_prefect_logger):
     """When archive_video_batch reports failures, cycle still reports results."""
     mock_videos = [
         _make_video("VIDEO_FAIL_001"),
@@ -178,11 +200,17 @@ async def test_janitor_flow_failure_path():
 
     with (
         patch("maia.janitor.flow.VideoRepository") as MockRepo,
+        patch("maia.janitor.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.janitor.flow.get_vault") as mock_vault,
         patch("maia.janitor.flow.archive_cold_stats_task", new_callable=AsyncMock) as mock_stats,
         patch("maia.janitor.flow.events") as mock_events,
     ):
         mock_events.emit = AsyncMock()
         mock_repo = MockRepo.return_value
+        mock_transcript_repo = MockTranscriptRepo.return_value
+        mock_transcript_repo.claim_vault_pending_batch = AsyncMock(return_value=[])
+        mock_transcript_repo.clear_vault_pending = AsyncMock()
+        mock_vault.return_value.store_batch = MagicMock()
         mock_repo.count_archivable = AsyncMock(return_value=2)
         mock_repo.sweep_archivable = AsyncMock(return_value=mock_videos)
         mock_repo.archive_video_batch = AsyncMock(
@@ -201,7 +229,7 @@ async def test_janitor_flow_failure_path():
 
 
 @pytest.mark.asyncio
-async def test_log_summary_emits_event():
+async def test_log_summary_emits_event(mock_prefect_logger):
     """log_summary_task emits a janitor.cycle_complete event."""
     with patch("maia.janitor.flow.events") as mock_events:
         mock_events.emit = AsyncMock()
@@ -227,11 +255,15 @@ async def test_log_summary_emits_event():
 
 
 @pytest.mark.asyncio
-async def test_archive_video_batch_delegates_to_repo():
+async def test_archive_video_batch_delegates_to_repo(mock_prefect_logger):
     """handoff_phase_task correctly delegates archive_video_batch to repo."""
     videos = [_make_video_dict("VIDEO_001")]
 
-    with patch("maia.janitor.flow.VideoRepository") as MockRepo:
+    with (
+        patch("maia.janitor.flow.VideoRepository") as MockRepo,
+        patch("maia.janitor.flow.events") as mock_events,
+    ):
+        mock_events.emit = AsyncMock()
         mock_repo = MockRepo.return_value
         mock_repo.archive_video_batch = AsyncMock(
             return_value={"archived": 1, "failed": 0, "failed_ids": []}

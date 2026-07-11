@@ -218,11 +218,16 @@ pleiades/
 │
 ├── maia/                    # 🤖 Collection service
 │   ├── src/maia/
-│   │   ├── hunter/          # Discovery agent
-│   │   ├── tracker/         # Monitoring agent
-│   │   ├── janitor/         # Cleanup agent
-│   │   ├── painter/         # Enrichment agent
-│   │   └── scribe/          # Feature extraction
+│   │   ├── hunter/          # Discovery agent (producer)
+│   │   ├── tracker/         # Monitoring agent (consumer)
+│   │   ├── janitor/         # Cleanup agent (consumer)
+│   │   ├── painter/         # Keyframe extraction (consumer)
+│   │   ├── scribe/          # Captions extraction (consumer)
+│   │   ├── streamer/        # Audio extraction + vault storage (producer)
+│   │   ├── singer/          # Audio transcription (consumer)
+│   │   ├── muralist/        # Full-video archival (consumer, manual-only)
+│   │   ├── media/           # Shared YouTube streamer (single yt-dlp path)
+│   │   └── heartbeat/       # Fleet status reporter
 │   ├── docs/                # Maia-specific docs
 │   └── tests/               # Unit tests
 │
@@ -311,27 +316,54 @@ pytest --cov=atlas --cov=maia --cov-report=html
 
 ### Docker Compose
 
+The root `Dockerfile` builds a single image that contains both `atlas` (lib) and
+`maia` (agents), so the build **context is the repository root**:
+
 ```yaml
 services:
   maia-hunter:
-    build: ./maia
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - YOUTUBE_API_KEY_POOL_JSON=${YOUTUBE_API_KEY_POOL_JSON}
-    restart: on-failure:5
-    command: python -m maia.hunter.flow
+    restart: unless-stopped
+    command: python -m maia hunter
 
   maia-tracker:
-    build: ./maia
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       - DATABASE_URL=${DATABASE_URL}
-    restart: on-failure:5
-    command: python -m maia.tracker.flow
+    restart: unless-stopped
+    command: python -m maia tracker
 ```
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
+
+> **Requirements**
+> - **Deno** is installed in the image and is required by `yt-dlp` (>=2026.6.9)
+>   to solve YouTube's BotGuard/POT challenge via `--js-runtimes`. Without it the
+>   hunter/tracker/painter/scribe/streamer/singer/muralist agents get rate-limited
+>   by YouTube's bot check.
+> - A **`bgutil` PO-token provider** must be running (the `bgutil-provider`
+>   systemd unit) — YouTube (2026) requires a per-video Proof-of-Origin token for
+>   authenticated GVS/subtitle requests. See `maia/README.md` (PO Token Setup).
+> - Vault writes are persisted to `./data/vault` (mounted into every agent).
+> - For authenticated/POT sessions, mount a cookies file and set
+>   `YOUTUBE_COOKIES_PATH` (Atlas config reads that var, not `MAIA_COOKIES_PATH`):
+>   ```yaml
+>   painter:
+>     environment:
+>       YOUTUBE_COOKIES_PATH: /cookies/youtube_cookies.txt
+>     volumes:
+>       - ${MAIA_COOKIES_PATH:-./www.youtube.cookies.txt}:/cookies/youtube_cookies.txt:ro
+>   ```
+
 
 ---
 

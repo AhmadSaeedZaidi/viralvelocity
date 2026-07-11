@@ -21,11 +21,13 @@ On vault failure: log to EventRepository, leave hot DB untouched.
 
 import argparse
 import asyncio
+import io
 import logging
 from typing import Any
 
 from atlas.events import events
-from atlas.repositories import VideoRepository
+from atlas.repositories import TranscriptRepository, VideoRepository
+from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -112,11 +114,124 @@ async def archive_cold_stats_task(retention_days: int = 7) -> dict[str, int]:
             run_logger.info(f"Stats batch {batch_count}: {archived} rows (total: {total_archived})")
             await asyncio.sleep(1)
         except Exception as e:
-            run_logger.error(f"Stats archival batch failed: {e}")
+            run_logger.exception(f"Stats archival batch failed: {e}")
             raise
 
     run_logger.info(f"Stats archival complete: {total_archived} rows in {batch_count} batches")
     return {"archived": total_archived, "batches": batch_count}
+
+
+@task(name="janitor_refresh_key_pools")
+async def refresh_key_pools_task() -> dict[str, Any]:
+    """Recompute the dynamic key-pool allocation from the corpus size.
+
+    Gated internally to a weekly cadence: ``refresh_allocation`` only rewrites
+    the cache when it is older than ``REFRESH_INTERVAL_DAYS``. Hunter/tracking
+    ring sizes then scale with the number of videos in the database.
+    """
+    from atlas.config import get_settings
+    from atlas.key_pool import refresh_allocation
+
+    run_logger = get_run_logger()
+    settings = get_settings()
+    repo = VideoRepository()
+
+    video_count = await repo.count_videos()
+    total_keys = len(settings.api_keys)
+
+    sizes = await asyncio.to_thread(
+        refresh_allocation,
+        total_keys,
+        video_count,
+        settings.KEY_POOL_ARCHEOLOGY_SIZE,
+    )
+
+    if sizes is None:
+        run_logger.info("Key-pool allocation still fresh — no change")
+        return {"refreshed": False, "video_count": video_count}
+
+    run_logger.info(
+        f"Key-pool allocation updated: tracking={sizes.tracking}, "
+        f"archeology={sizes.archeology}, video_count={video_count}"
+    )
+    return {
+        "refreshed": True,
+        "video_count": video_count,
+        "tracking": sizes.tracking,
+        "archeology": sizes.archeology,
+    }
+
+
+@task(name="janitor_cull_search_queue")
+async def cull_search_queue_task() -> dict[str, Any]:
+    """Delete search terms whose time-decayed score has dropped below the cull
+    threshold (Phase 2). In-progress paginations are protected."""
+    from atlas.repositories import SearchQueueRepository
+
+    run_logger = get_run_logger()
+    deleted = await SearchQueueRepository().cull_stale()
+    if deleted:
+        run_logger.info(f"Search queue: culled {deleted} stale term(s)")
+    return {"culled": deleted}
+
+
+@task(name="janitor_vault_flush")
+async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
+    """Flush staged transcripts (+ audio) from the DB to the vault.
+
+    This is the **single owner of vault writes** (Option A). The scribe only
+    stages transcripts/audio into the database; this task batches every pending
+    video into one vault commit, retries on HTTP 429 (HF 128-commits/hour), and
+    is idempotent so it self-heals videos left `vault_write_pending` by a
+    previous failure. All vault-persistence failures surface *here*.
+    """
+    transcript_repo = TranscriptRepository()
+    run_logger = get_run_logger()
+
+    pending = await transcript_repo.claim_vault_pending_batch(batch_size)
+    if not pending:
+        return {"flushed": 0, "failed": 0}
+
+    v = get_vault()
+    loop = asyncio.get_running_loop()
+    flushed = 0
+    failed = 0
+    # Batch MANY videos into a single HF commit. ``store_batch`` already writes
+    # all its files in one commit *and* retries HTTP 429 internally, so instead
+    # of 1 commit/video we do ~1 commit per CHUNK videos. This is the heart of
+    # the rate-limit strategy: it keeps us far under HuggingFace's
+    # 128-commits/hour *account* limit (transcript + audio for 25 videos lands
+    # in one commit). The 429 backoff lives inside the vault client, not here.
+    CHUNK = 25  # videos per commit (audio is large — stay within commit-size limits)
+    groups: list[list[tuple[str, Any]]] = []
+    vids: list[str] = []
+    for row in pending:
+        vid = row["id"]
+        vids.append(vid)
+        items: list[tuple[str, Any]] = [(f"transcripts/{vid}.json", row["transcript"])]
+        if row.get("audio"):
+            items.append((f"audio/{vid}.opus", io.BytesIO(row["audio"])))
+        groups.append(items)
+
+    for i in range(0, len(groups), CHUNK):
+        chunk_groups = groups[i : i + CHUNK]
+        chunk_vids = vids[i : i + CHUNK]
+        chunk_items = [it for g in chunk_groups for it in g]
+        try:
+            # store_batch runs synchronously in a worker thread (non-blocking)
+            # and retries 429 internally.
+            uris = await loop.run_in_executor(None, v.store_batch, chunk_items)
+            for vid in chunk_vids:
+                tpath = f"transcripts/{vid}.json"
+                uri = next((u for u in uris if u.endswith(tpath)), None)
+                await transcript_repo.clear_vault_pending(vid, uri)
+            flushed += len(chunk_vids)
+        except Exception as e:  # noqa: BLE001 - surface, don't abort the batch
+            failed += len(chunk_vids)
+            run_logger.exception(f"Vault flush chunk failed ({len(chunk_vids)} vids): {e}")
+
+    run_logger.info(f"Vault flush: {flushed} flushed, {failed} failed (/ {len(pending)} pending)")
+    return {"flushed": flushed, "failed": failed}
 
 
 @task(name="janitor_log_summary")
@@ -182,6 +297,31 @@ async def janitor_flow(
         "dry_run": dry_run,
     }
 
+    # ── Phase 0: Refresh dynamic key-pool allocation (weekly, self-gated) ──
+    try:
+        pool_result = await refresh_key_pools_task()
+        results["key_pool"] = pool_result
+    except Exception as e:
+        run_logger.exception(f"Phase 0 (key-pool refresh) failed: {e}")
+        results["key_pool_error"] = str(e)
+
+    # ── Phase 0b: Cull stale/low-score search-queue terms (Phase 2 decay) ──
+    try:
+        cull_result = await cull_search_queue_task()
+        results["search_queue_culled"] = cull_result.get("culled", 0)
+    except Exception as e:
+        run_logger.exception(f"Phase 0b (search-queue cull) failed: {e}")
+        results["search_queue_cull_error"] = str(e)
+
+    # ── Phase 0c: Flush staged transcripts/audio to the vault (Option A) ──
+    try:
+        flush_result = await vault_flush_task.fn(batch_size)
+        results["vault_flushed"] = flush_result.get("flushed", 0)
+        results["vault_failed"] = flush_result.get("failed", 0)
+    except Exception as e:
+        run_logger.exception(f"Phase 0c (vault flush) failed: {e}")
+        results["vault_flush_error"] = str(e)
+
     # ── Phase 1: Archive cold stats ───────────────────────────────────────
     if archive_stats and not dry_run:
         run_logger.info("Phase 1/3: Archiving cold stats...")
@@ -189,7 +329,7 @@ async def janitor_flow(
             stats_result = await archive_cold_stats_task(retention_days=7)
             results["stats_archived"] = stats_result["archived"]
         except Exception as e:
-            run_logger.error(f"Phase 1 (stats) failed: {e}")
+            run_logger.exception(f"Phase 1 (stats) failed: {e}")
             results["stats_error"] = str(e)
     else:
         run_logger.info(f"Phase 1/3: Skipped (archive_stats={archive_stats}, dry_run={dry_run})")
