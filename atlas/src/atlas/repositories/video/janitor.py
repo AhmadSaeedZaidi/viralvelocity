@@ -113,9 +113,7 @@ class VideoJanitorMixin(DatabaseAdapter):
                 "duration": video.duration,
                 "tags": video.tags,
                 "category_id": video.category_id,
-                "discovered_at": video.discovered_at.isoformat()
-                if video.discovered_at
-                else None,
+                "discovered_at": video.discovered_at.isoformat() if video.discovered_at else None,
                 "last_updated_at": video.last_updated_at.isoformat()
                 if video.last_updated_at
                 else None,
@@ -187,9 +185,7 @@ class VideoJanitorMixin(DatabaseAdapter):
                     await conn.execute(
                         "DELETE FROM video_stats_log WHERE video_id = %s", (video.id,)
                     )
-                    await conn.execute(
-                        "DELETE FROM transcripts WHERE video_id = %s", (video.id,)
-                    )
+                    await conn.execute("DELETE FROM transcripts WHERE video_id = %s", (video.id,))
 
                 archived_count += 1
 

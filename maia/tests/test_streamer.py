@@ -69,9 +69,7 @@ async def test_fetch_source_successful():
         mock_repo.release_to_pending = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
         # download_unified returns (audio_path, info_path).
-        mock_streamer_instance.download_unified = MagicMock(
-            return_value=(fake_path, None)
-        )
+        mock_streamer_instance.download_unified = MagicMock(return_value=(fake_path, None))
 
         result = await fetch_source_task.fn(video)
 
@@ -108,9 +106,7 @@ async def test_fetch_source_successful_with_meta():
         mock_repo = MockRepo.return_value
         mock_repo.mark_fetched = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
-        mock_streamer_instance.download_unified = MagicMock(
-            return_value=(fake_path, fake_info)
-        )
+        mock_streamer_instance.download_unified = MagicMock(return_value=(fake_path, fake_info))
 
         result = await fetch_source_task.fn(video)
 
@@ -189,16 +185,14 @@ async def test_run_streamer_cycle_batched_store():
         patch(
             "maia.streamer.flow.fetch_source_task",
             new_callable=AsyncMock,
-                side_effect=[
-                    ("VIDEO_001", "raw/VIDEO_001.webm", FAKE_BYTES, None),
-                    ("VIDEO_002", "raw/VIDEO_002.webm", FAKE_BYTES, None),
-                ],
+            side_effect=[
+                ("VIDEO_001", "raw/VIDEO_001.webm", FAKE_BYTES, None),
+                ("VIDEO_002", "raw/VIDEO_002.webm", FAKE_BYTES, None),
+            ],
         ),
         patch("maia.streamer.flow.VideoRepository") as MockRepo,
         patch("maia.streamer.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.streamer.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.streamer.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
         patch("maia.streamer.flow.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos
@@ -229,7 +223,7 @@ async def test_run_streamer_cycle_vault_failure_marks_failed():
         patch(
             "maia.streamer.flow.fetch_source_task",
             new_callable=AsyncMock,
-                return_value=("VIDEO_001", "raw/VIDEO_001.webm", FAKE_BYTES, None),
+            return_value=("VIDEO_001", "raw/VIDEO_001.webm", FAKE_BYTES, None),
         ),
         patch("maia.streamer.flow.VideoRepository") as MockRepo,
         patch("maia.streamer.flow.get_vault") as mock_get_vault,
@@ -265,8 +259,7 @@ def test_download_unified_salvages_audio_when_metadata_429(tmp_path):
         returncode = 1
         stdout = ""
         stderr = (
-            "ERROR: Unable to download video metadata for 'en': "
-            "HTTP Error 429: Too Many Requests"
+            "ERROR: Unable to download video metadata for 'en': HTTP Error 429: Too Many Requests"
         )
 
     with patch("maia.media.streamer.subprocess.run", return_value=_FailedRun()):

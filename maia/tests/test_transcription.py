@@ -33,9 +33,7 @@ def _patch_transcribers(grok_side=None, mistral_side=None):
     mistral_inst.transcribe = MagicMock(side_effect=mistral_side)
     return (
         patch("maia.scribe.transcription.GrokTranscriber", return_value=grok_inst),
-        patch(
-            "maia.scribe.transcription.MistralTranscriber", return_value=mistral_inst
-        ),
+        patch("maia.scribe.transcription.MistralTranscriber", return_value=mistral_inst),
     )
 
 

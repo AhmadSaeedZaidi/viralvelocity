@@ -81,7 +81,6 @@ def test_zero_views_fails_engagement():
 
 def test_custom_thresholds():
     now = datetime.now(UTC)
-    th = QualityThresholds(min_duration_seconds=1, min_views_per_hour=0.0,
-                           min_engagement_rate=0.0)
+    th = QualityThresholds(min_duration_seconds=1, min_views_per_hour=0.0, min_engagement_rate=0.0)
     r = evaluate_video(_item("PT10S", 5, 0, 0, _iso(now - timedelta(hours=5))), th)
     assert r.passed

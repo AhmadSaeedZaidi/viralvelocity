@@ -150,16 +150,20 @@ def evaluate_video(
     # ── Duration ──────────────────────────────────────────────────────────
     if duration < thresholds.min_duration_seconds:
         return QualityResult(
-            False, f"duration {duration}s < {thresholds.min_duration_seconds}s",
-            duration_seconds=duration, views=views,
+            False,
+            f"duration {duration}s < {thresholds.min_duration_seconds}s",
+            duration_seconds=duration,
+            views=views,
         )
 
     # ── AI-slop (title/description/tags denylist) ─────────────────────────
     ai_hit = _matches_ai(item, thresholds.ai_patterns)
     if ai_hit:
         return QualityResult(
-            False, f"ai-slop match: {ai_hit}",
-            duration_seconds=duration, views=views,
+            False,
+            f"ai-slop match: {ai_hit}",
+            duration_seconds=duration,
+            views=views,
         )
 
     # ── Velocity (views/hour) ─────────────────────────────────────────────
@@ -169,11 +173,13 @@ def evaluate_video(
         hours_since >= thresholds.velocity_grace_hours
         and views_per_hour < thresholds.min_views_per_hour
     ):
-            return QualityResult(
-                False,
-                f"velocity {views_per_hour:.2f} v/h < {thresholds.min_views_per_hour}",
-                duration_seconds=duration, views=views, views_per_hour=views_per_hour,
-            )
+        return QualityResult(
+            False,
+            f"velocity {views_per_hour:.2f} v/h < {thresholds.min_views_per_hour}",
+            duration_seconds=duration,
+            views=views,
+            views_per_hour=views_per_hour,
+        )
 
     # ── Engagement ────────────────────────────────────────────────────────
     engagement = (likes + comments) / views if views > 0 else 0.0
@@ -181,13 +187,19 @@ def evaluate_video(
         return QualityResult(
             False,
             f"engagement {engagement:.4f} < {thresholds.min_engagement_rate}",
-            duration_seconds=duration, views=views,
-            views_per_hour=views_per_hour, engagement_rate=engagement,
+            duration_seconds=duration,
+            views=views,
+            views_per_hour=views_per_hour,
+            engagement_rate=engagement,
         )
 
     return QualityResult(
-        True, "ok", duration_seconds=duration, views=views,
-        views_per_hour=views_per_hour, engagement_rate=engagement,
+        True,
+        "ok",
+        duration_seconds=duration,
+        views=views,
+        views_per_hour=views_per_hour,
+        engagement_rate=engagement,
     )
 
 
@@ -325,8 +337,7 @@ def evaluate_channel(
         if density > thresholds.max_videos_per_subscriber:
             return (
                 False,
-                f"channel videos/sub ratio {density:.1f} > "
-                f"{thresholds.max_videos_per_subscriber}",
+                f"channel videos/sub ratio {density:.1f} > {thresholds.max_videos_per_subscriber}",
             )
     return True, ""
 
@@ -394,7 +405,7 @@ async def filter_by_quality(
 
             async def _probe(
                 it: dict[str, Any], res: QualityResult
-            ) -> tuple[dict, QualityResult] | None:
+            ) -> tuple[dict[str, Any], QualityResult] | None:
                 vid = _vid_id_of(it)
                 if not vid:
                     return (it, res)
@@ -419,10 +430,7 @@ async def filter_by_quality(
 
     # ── 3. Channel-statistics gate (AI-farm / spam) ───────────────────────
     if evaluated:
-        channel_ids = list(
-            {it.get("snippet", {}).get("channelId") for it, _ in evaluated}
-            - {None}
-        )
+        channel_ids = list({it.get("snippet", {}).get("channelId") for it, _ in evaluated} - {None})
         stats_map = await _load_channel_stats(channel_ids, executor)
         final: list[dict[str, Any]] = []
         for it, _ in evaluated:
@@ -434,13 +442,10 @@ async def filter_by_quality(
                 rejected += 1
                 if logger:
                     logger.debug(f"Quality gate rejected {_vid_id_of(it)} (channel): {reason}")
-        evaluated = [(it, None) for it in final]
-
-    passing = [it for it, _ in evaluated]
+    passing = list(final)
     if logger:
         logger.info(
-            f"Quality gate: {len(passing)} passed / {rejected} rejected "
-            f"/ {len(enriched)} enriched"
+            f"Quality gate: {len(passing)} passed / {rejected} rejected / {len(enriched)} enriched"
         )
     return passing
 

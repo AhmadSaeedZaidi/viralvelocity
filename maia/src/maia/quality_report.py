@@ -16,4 +16,4 @@ logger = logging.getLogger(__name__)
 async def report_ingestion_quality() -> dict[str, Any]:
     """Return aggregate ingestion-quality statistics for the videos table."""
     repo = VideoRepository()
-    return await repo.quality_report()
+    return dict[str, Any](await repo.quality_report())

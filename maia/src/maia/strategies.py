@@ -43,9 +43,10 @@ class YouTubeSearchStrategy:
 
         async def make_request(api_key: str) -> dict[str, Any]:
             params_with_key: dict[str, Any] = {**params, "key": api_key}
-            async with aiohttp.ClientSession() as session, session.get(
-                url, params=params_with_key
-            ) as resp:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(url, params=params_with_key) as resp,
+            ):
                 if resp.status == 200:
                     result: dict[str, Any] = await resp.json()
                     return result
@@ -59,7 +60,8 @@ class YouTubeSearchStrategy:
                 run_logger.error(f"HTTP {resp.status} for {url}: {error_text[:200]}")
                 raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
 
-        return await self.executor.execute_async(make_request)
+        result = await self.executor.execute_async(make_request)
+        return dict[str, Any](result)
 
     async def search(self, params: dict[str, Any]) -> dict[str, Any] | None:
         """Perform a ``youtube/v3/search`` request.

@@ -63,9 +63,7 @@ async def hunt_history_task(year: int, month: int, strategy: YouTubeSearchStrate
             raw_items = data.get("items", [])
 
             # QUALITY GATE — enrich + filter before persisting / enriching.
-            items = await filter_by_quality(
-                raw_items, strategy.executor, logger=run_logger
-            )
+            items = await filter_by_quality(raw_items, strategy.executor, logger=run_logger)
 
             ingest_tasks = [
                 video_repo.ingest_video_metadata(item, priority_override=100) for item in items

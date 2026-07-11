@@ -6,13 +6,13 @@ Supports the ingestion-quality monitor and the short-video purge command.
 import logging
 from typing import Any
 
+from atlas.adapters import DatabaseAdapter
+
 logger = logging.getLogger("atlas.repositories.video.quality")
 
 
-class VideoQualityMixin:
-    async def find_short_video_ids(
-        self, max_duration: int, limit: int | None = None
-    ) -> list[str]:
+class VideoQualityMixin(DatabaseAdapter):
+    async def find_short_video_ids(self, max_duration: int, limit: int | None = None) -> list[str]:
         """Return IDs of videos shorter than ``max_duration`` seconds.
 
         Includes videos that already have artifacts (transcripts, frames, audio,
@@ -38,12 +38,8 @@ class VideoQualityMixin:
         """
         if not ids:
             return 0
-        await self._execute(
-            "DELETE FROM watchlist WHERE video_id = ANY(%s)", (ids,)
-        )
-        await self._execute(
-            "DELETE FROM videos WHERE id = ANY(%s)", (ids,)
-        )
+        await self._execute("DELETE FROM watchlist WHERE video_id = ANY(%s)", (ids,))
+        await self._execute("DELETE FROM videos WHERE id = ANY(%s)", (ids,))
         # Row count from the last statement (videos) is what we report.
         return len(ids)
 

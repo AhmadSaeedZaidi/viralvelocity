@@ -9,9 +9,7 @@ logger = logging.getLogger("atlas.repositories.video.ingestion")
 
 _ARCHIVAL_BATCH_SIZE = 100
 
-_ISO_DURATION_RE = re.compile(
-    r"^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$"
-)
+_ISO_DURATION_RE = re.compile(r"^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$")
 
 
 def _parse_iso_duration(value: Any) -> int | None:
@@ -138,9 +136,7 @@ class VideoIngestionMixin(DatabaseAdapter):
 
             # Duration comes from contentDetails when the item was enriched via
             # videos.list (search snippets don't include it).
-            duration = _parse_iso_duration(
-                video_data.get("contentDetails", {}).get("duration")
-            )
+            duration = _parse_iso_duration(video_data.get("contentDetails", {}).get("duration"))
 
             await conn.execute(
                 video_query,
@@ -160,4 +156,3 @@ class VideoIngestionMixin(DatabaseAdapter):
 
 
 _CHANNEL_TITLE_PENDING = "Pending channel index"
-

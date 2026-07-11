@@ -14,9 +14,7 @@ logger = logging.getLogger("atlas.repositories.search_queue")
 # NOTE: this depends on NOW() so it is not IMMUTABLE and cannot be indexed;
 # the janitor's cull keeps the table small enough that a sort is negligible.
 _SCORE_EXPR = (
-    "(mention_count * %s "
-    "- EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600.0 * %s "
-    "+ priority)"
+    "(mention_count * %s - EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600.0 * %s + priority)"
 )
 
 

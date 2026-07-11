@@ -86,7 +86,7 @@ def collect_service_status() -> dict[str, tuple[str, str]]:
 
 async def collect_pipeline_metrics() -> dict[str, Any]:
     """Gather pipeline counts from the database for the status report."""
-    return await VideoRepository().pipeline_snapshot()
+    return dict[str, Any](await VideoRepository().pipeline_snapshot())
 
 
 async def check_audio_api_health() -> tuple[str, str]:
@@ -143,9 +143,7 @@ async def check_audio_api_health() -> tuple[str, str]:
         return ("down", f"Audio API probe error: {e}")
 
 
-def _build_fields(
-    services: dict[str, tuple[str, str]], metrics: dict[str, Any]
-) -> dict[str, str]:
+def _build_fields(services: dict[str, tuple[str, str]], metrics: dict[str, Any]) -> dict[str, str]:
     """Build the Discord embed fields from service states and pipeline metrics."""
     icons = {"healthy": "🟢", "warn": "🟡", "down": "🔴"}
 
@@ -209,13 +207,9 @@ async def heartbeat_flow() -> dict[str, Any]:
 
     fields = _build_fields(services, metrics)
     audio_icons = {"healthy": "🟢", "degraded": "🟡", "down": "🔴"}
-    fields["Audio API"] = (
-        f"{audio_icons.get(audio_status, '🔴')} {audio_detail}"
-    )
+    fields["Audio API"] = f"{audio_icons.get(audio_status, '🔴')} {audio_detail}"
     if rate_limited:
-        fields["Quota"] = (
-            "⏳ Rate limited / quota exhausted: " + ", ".join(rate_limited)
-        )
+        fields["Quota"] = "⏳ Rate limited / quota exhausted: " + ", ".join(rate_limited)
 
     down = [u for u, (_, health) in services.items() if health == "down"]
     degraded = [u for u, (_, health) in services.items() if health == "warn"]
@@ -231,8 +225,9 @@ async def heartbeat_flow() -> dict[str, Any]:
         level = AlertLevel.INFO
         status_word = "Rate Limited"
         description = (
-            "Online — quota exhausted for: " + ", ".join(rate_limited) +
-            " (transcription/API paused; alerts rate-limited)"
+            "Online — quota exhausted for: "
+            + ", ".join(rate_limited)
+            + " (transcription/API paused; alerts rate-limited)"
         )
     elif degraded or audio_status != "healthy":
         level = AlertLevel.INFO

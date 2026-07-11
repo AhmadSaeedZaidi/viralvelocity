@@ -67,8 +67,10 @@ jobs:
         uses: actions/checkout@v4
 
       # Dependencies are already in the Docker image!
-      - name: Lint All Modules (ruff check + ruff format --check + mypy)
-        run: make lint
+      # Lint atlas + maia only. alkyone is intentionally unhooked from CI until
+      # its test strategy is settled (see docs/agent-consolidation-proposal.md, P4).
+      - name: Lint Modules (atlas + maia)
+        run: make -C atlas lint && make -C maia lint
 
   unit-tests:
     name: Unit Tests
@@ -88,87 +90,9 @@ jobs:
       - name: Run Unit Tests
         run: make test-unit
 
-  integration-tests:
-    name: Integration Tests
-    needs: unit-tests
-    runs-on: ubuntu-latest
-    environment: Development
-    timeout-minutes: 15
-    container:
-      image: ghcr.io/ahmadsaeedzaidi/pleiades/ci-env:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Manifest YouTube Cookies
-        run: |
-          echo "${{ secrets.YOUTUBE_COOKIES_TXT }}" > /tmp/youtube_cookies.txt
-          echo "YOUTUBE_COOKIES_PATH=/tmp/youtube_cookies.txt" >> "$GITHUB_ENV"
-
-      - name: Purge yt-dlp cache
-        run: rm -rf ~/.cache/yt-dlp || true
-
-      - name: Create Ephemeral Neon Branch
-        id: create-branch
-        uses: neondatabase/create-branch-action@v5
-        with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
-          branch_name: ci-run-${{ github.run_id }}-${{ github.run_attempt }}
-          username: ${{ vars.NEON_USERNAME }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-
-      - name: Run Integration Tests
-        env:
-          # Database (from ephemeral Neon branch)
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
-          
-          # YouTube API Keys
-          YOUTUBE_API_KEY_POOL_JSON: ${{ secrets.YOUTUBE_API_KEY_POOL_JSON }}
-          KEY_POOL_ARCHEOLOGY_SIZE: ${{ secrets.KEY_POOL_ARCHEOLOGY_SIZE }}
-          KEY_POOL_TRACKING_SIZE: ${{ secrets.KEY_POOL_TRACKING_SIZE }}
-          
-          # YouTube Cookies (manifested in earlier step)
-          YOUTUBE_COOKIES_PATH: ${{ env.YOUTUBE_COOKIES_PATH }}
-          
-          # Vault Configuration
-          VAULT_PROVIDER: ${{ vars.VAULT_PROVIDER || 'huggingface' }}
-          HF_DATASET_ID: ${{ secrets.HF_DATASET_ID }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          
-          # Prefect (optional)
-          PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY }}
-          PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
-          
-          # Discord Webhooks (optional)
-          DISCORD_WEBHOOK_ALERTS: ${{ secrets.DISCORD_WEBHOOK_ALERTS }}
-          
-          # Configuration Variables
-          ENV: ${{ vars.ENV || 'development' }}
-          COMPLIANCE_MODE: ${{ vars.COMPLIANCE_MODE || 'false' }}
-          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'DEBUG' }}
-          
-          # Agent Batch Sizes
-          HUNTER_BATCH_SIZE: ${{ vars.HUNTER_BATCH_SIZE || '10' }}
-          PAINTER_BATCH_SIZE: ${{ vars.PAINTER_BATCH_SIZE || '3' }}
-          SCRIBE_BATCH_SIZE: ${{ vars.SCRIBE_BATCH_SIZE || '5' }}
-          TRACKER_BATCH_SIZE: ${{ vars.TRACKER_BATCH_SIZE || '50' }}
-          
-          # Janitor Configuration
-          JANITOR_ENABLED: ${{ vars.JANITOR_ENABLED || 'true' }}
-          JANITOR_RETENTION_DAYS: ${{ vars.JANITOR_RETENTION_DAYS || '7' }}
-          JANITOR_SAFETY_CHECK: ${{ vars.JANITOR_SAFETY_CHECK || 'true' }}
-          
-          # Alerts
-          ALERT_ON_HYDRA_PROTOCOL: ${{ vars.ALERT_ON_HYDRA_PROTOCOL || 'true' }}
-        run: make test-int
-
-      - name: Cleanup (Delete Neon Branch)
-        if: always()
-        run: |
-          curl -X DELETE \
-            "https://console.neon.tech/api/v2/projects/${{ vars.NEON_PROJECT_ID }}/branches/${{ steps.create-branch.outputs.branch_id }}" \
-            -H 'Accept: application/json' \
-            -H "Authorization: Bearer ${{ secrets.NEON_API_KEY }}"
+  # ── alkyone (integration tests) ───────────────────────────────────────────
+  # Intentionally NOT run in CI. alkyone is the live integration/smoke suite
+  # that, on a 24/7 VPS, would hit the production Postgres / YouTube quota /
+  # HuggingFace vault. Its test strategy is being reworked (proposal P4) to use
+  # an isolated test DB + test vault with a prod-URL guard before it is wired
+  # back into CI. See docs/agent-consolidation-proposal.md.

@@ -25,4 +25,3 @@ def test_env() -> dict[str, str]:
         "JANITOR_ENABLED": os.getenv("JANITOR_ENABLED", "false"),
         "JANITOR_RETENTION_DAYS": os.getenv("JANITOR_RETENTION_DAYS", "7"),
     }
-

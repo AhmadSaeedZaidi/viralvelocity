@@ -79,9 +79,7 @@ async def fetch_source_task(
     tmpdir = tempfile.mkdtemp(prefix="streamer-raw-")
     try:
         streamer = StealthVideoStreamer()
-        audio_path, info_file = await asyncio.to_thread(
-            streamer.download_unified, vid_id, tmpdir
-        )
+        audio_path, info_file = await asyncio.to_thread(streamer.download_unified, vid_id, tmpdir)
         raw_bytes = await asyncio.to_thread(audio_path.read_bytes)
         raw_uri = f"raw/{audio_path.name}"
         run_logger.info(f"Fetched {len(raw_bytes)} bytes of audio for {vid_id}")
@@ -129,7 +127,7 @@ async def streamer_flow(batch_size: int) -> dict[str, Any]:
 
     sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
 
-    async def _bounded(video: Video):
+    async def _bounded(video: Video) -> Any:
         async with sem:
             result = await fetch_source_task(video)
             await asyncio.sleep(STREAMER_THROTTLE_SECONDS)
@@ -144,8 +142,7 @@ async def streamer_flow(batch_size: int) -> dict[str, Any]:
     fetched = [
         r
         for r in results
-        if isinstance(r, tuple)
-        and len(r) == 4  # (id, raw_uri, raw_bytes, meta_bytes)
+        if isinstance(r, tuple) and len(r) == 4  # (id, raw_uri, raw_bytes, meta_bytes)
     ]
 
     if fetched:
@@ -160,9 +157,7 @@ async def streamer_flow(batch_size: int) -> dict[str, Any]:
             await vault_op_with_retry(lambda: v.store_batch(items))  # type: ignore[arg-type]
             for _id, raw_uri, _rb, _mb in fetched:
                 await video_repo.mark_fetched(_id, raw_uri)
-            run_logger.info(
-                f"Batched {len(fetched)} videos' raw+meta into ONE vault commit"
-            )
+            run_logger.info(f"Batched {len(fetched)} videos' raw+meta into ONE vault commit")
         except Exception as e:
             run_logger.exception(f"Batched unified store failed ({len(fetched)} vids): {e}")
             for _id, *_ in fetched:

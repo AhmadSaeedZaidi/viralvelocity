@@ -121,8 +121,7 @@ class AdaptiveConcurrency:
                     _notify_rate_limit_downgrade(self._concurrency, new_conc, rate)
                 )
             logger.warning(
-                "AdaptiveConcurrency: failure rate %.1f%% (>%.0f%%) "
-                "→ lowering concurrency %d→%d",
+                "AdaptiveConcurrency: failure rate %.1f%% (>%.0f%%) → lowering concurrency %d→%d",
                 rate * 100,
                 self._max_failure_rate * 100,
                 self._concurrency,
@@ -157,9 +156,7 @@ async def notify_quota_exhausted(agent_name: str) -> None:
 
     mark_quota_exhausted(agent_name)
     if not should_send_quota_alert(agent_name):
-        logger.info(
-            f"Quota-exhausted alert for {agent_name} suppressed (within cooldown)."
-        )
+        logger.info(f"Quota-exhausted alert for {agent_name} suppressed (within cooldown).")
         return
 
     try:
@@ -187,6 +184,7 @@ async def notify_quota_exhausted(agent_name: str) -> None:
         record_quota_alert(agent_name)
     except Exception:
         logger.exception(f"Failed to send quota-exhausted notification for {agent_name}")
+
 
 T = TypeVar("T")
 

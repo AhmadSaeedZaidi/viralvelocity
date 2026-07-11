@@ -243,8 +243,7 @@ class HuggingFaceVault(VaultStrategy):
                 repo_type="dataset",
                 operations=operations,
                 commit_message=(
-                    f"Vault: Visual Evidence batch "
-                    f"({len(entries)} videos, {frame_count} frames)"
+                    f"Vault: Visual Evidence batch ({len(entries)} videos, {frame_count} frames)"
                 ),
             )
             logger.info(
@@ -535,9 +534,7 @@ class GCSVault(VaultStrategy):
                         blob.upload_from_file(data)
                     else:
                         blob = self.bucket.blob(path)
-                        blob.upload_from_string(
-                            json.dumps(data), content_type="application/json"
-                        )
+                        blob.upload_from_string(json.dumps(data), content_type="application/json")
                     uris.append(f"gs://{self.bucket_name}/{path}")
                 logger.info(f"Stored {len(items)} files to GCS vault")
                 return uris

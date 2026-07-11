@@ -139,9 +139,7 @@ async def test_store_audio_extraction_failure_marks_failed():
 
 @pytest.mark.asyncio
 async def test_run_singer_cycle_empty_queue():
-    with patch(
-        "maia.singer.flow.fetch_singer_targets_task", new_callable=AsyncMock
-    ) as mock_fetch:
+    with patch("maia.singer.flow.fetch_singer_targets_task", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = []
 
         await singer_flow.fn(batch_size=10)
@@ -157,9 +155,7 @@ async def test_run_singer_cycle_processes_batch():
     ]
 
     with (
-        patch(
-            "maia.singer.flow.fetch_singer_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
+        patch("maia.singer.flow.fetch_singer_targets_task", new_callable=AsyncMock) as mock_fetch,
         patch(
             "maia.singer.flow.store_audio_task",
             new_callable=AsyncMock,

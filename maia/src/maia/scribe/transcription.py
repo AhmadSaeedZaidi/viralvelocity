@@ -111,9 +111,7 @@ def transcribe_audio_path(
     try:
         return _transcribe_via_mistral_path(audio_path)
     except TranscriptionUnavailableError:
-        raise TranscriptExtractionError(
-            "No audio transcriber available for local audio"
-        ) from None
+        raise TranscriptExtractionError("No audio transcriber available for local audio") from None
     except MistralRateLimitError as e:
         raise TranscriptRateLimitError(f"Mistral rate-limited: {e}") from e
     except (AudioExtractionError, MistralTranscriptionError) as e:

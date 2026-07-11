@@ -148,9 +148,7 @@ async def test_run_muralist_cycle_batched_store():
         ),
         patch("maia.muralist.flow.VideoRepository") as MockRepo,
         patch("maia.muralist.flow.get_vault") as mock_get_vault,
-        patch(
-            "maia.muralist.flow.vault_op_with_retry", new_callable=AsyncMock
-        ) as mock_vault_retry,
+        patch("maia.muralist.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
         patch("maia.muralist.flow.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos

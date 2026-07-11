@@ -46,9 +46,12 @@ async def _execute_get(
 
     async def make_request(api_key: str) -> dict[str, Any]:
         params_with_key = {**params, "key": api_key}
-        async with aiohttp.ClientSession() as session, session.get(
-            url, params=params_with_key, timeout=aiohttp.ClientTimeout(total=30)
-        ) as resp:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                url, params=params_with_key, timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp,
+        ):
             text = await resp.text()
             if resp.status == 200:
                 result: dict[str, Any] = json.loads(text) if text else {}

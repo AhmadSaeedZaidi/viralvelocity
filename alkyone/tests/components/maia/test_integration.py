@@ -9,9 +9,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from atlas.utils import QuotaExhaustedError
 from maia.hunter import run_hunter_cycle
 from maia.tracker import run_tracker_cycle
-from atlas.utils import QuotaExhaustedError
 
 
 @pytest.mark.asyncio

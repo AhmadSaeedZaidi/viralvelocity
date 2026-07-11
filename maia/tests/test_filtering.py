@@ -117,24 +117,56 @@ class _FakeSession:
 
 @pytest.mark.asyncio
 async def test_is_youtube_short():
-    assert await is_youtube_short("SHORT1", timeout=1, session=_FakeSession({"SHORT1": 200})) is True  # noqa: E501
     assert (
-        await is_youtube_short("LONG1", timeout=1, session=_FakeSession({"LONG1": 303})) is False
-    )
+        await is_youtube_short("SHORT1", timeout=1, session=_FakeSession({"SHORT1": 200})) is True
+    )  # noqa: E501
+    assert await is_youtube_short("LONG1", timeout=1, session=_FakeSession({"LONG1": 303})) is False
     # Odd status / network error → unknown (not rejected).
     assert await is_youtube_short("X", timeout=1, session=_FakeSession({"X": 500})) is None
 
 
 @pytest.mark.asyncio
 async def test_filter_rejects_short_and_ai_and_lowsub(monkeypatch):
-    good = _item("PT5M", 100_000, 3000, 500, _iso(datetime.now(UTC) - timedelta(hours=10)),
-                 id="GOOD", title="A real documentary", channelId="CH_GOOD")
-    ai = _item("PT5M", 100_000, 3000, 500, _iso(datetime.now(UTC) - timedelta(hours=10)),
-               id="AI", title="made with AI voiceover", channelId="CH_AI")
-    short = _item("PT30S", 100, 5, 2, _iso(datetime.now(UTC) - timedelta(hours=10)),
-                  id="SHORT", title="quick clip", channelId="CH_SHORT")
-    lowsub = _item("PT5M", 100_000, 3000, 500, _iso(datetime.now(UTC) - timedelta(hours=10)),
-                   id="LOW", title="spam channel", channelId="CH_LOW")
+    good = _item(
+        "PT5M",
+        100_000,
+        3000,
+        500,
+        _iso(datetime.now(UTC) - timedelta(hours=10)),
+        id="GOOD",
+        title="A real documentary",
+        channelId="CH_GOOD",
+    )
+    ai = _item(
+        "PT5M",
+        100_000,
+        3000,
+        500,
+        _iso(datetime.now(UTC) - timedelta(hours=10)),
+        id="AI",
+        title="made with AI voiceover",
+        channelId="CH_AI",
+    )
+    short = _item(
+        "PT30S",
+        100,
+        5,
+        2,
+        _iso(datetime.now(UTC) - timedelta(hours=10)),
+        id="SHORT",
+        title="quick clip",
+        channelId="CH_SHORT",
+    )
+    lowsub = _item(
+        "PT5M",
+        100_000,
+        3000,
+        500,
+        _iso(datetime.now(UTC) - timedelta(hours=10)),
+        id="LOW",
+        title="spam channel",
+        channelId="CH_LOW",
+    )
 
     async def fake_videos(ids, executor=None, **kw):
         return [good, ai, short, lowsub]

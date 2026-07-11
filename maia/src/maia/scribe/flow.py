@@ -118,7 +118,7 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
         if audio_buf is not None:
             tmp = tempfile.mktemp(suffix=".opus")
             await asyncio.to_thread(Path(tmp).write_bytes, audio_buf.getvalue())
-            segs = await asyncio.to_thread(transcribe_audio_path, Path(tmp))
+            segs = (await asyncio.to_thread(transcribe_audio_path, Path(tmp))).segments
         else:
             segs = (await asyncio.to_thread(transcribe_audio_download, vid_id)).segments
         record_audio_usage(1)
@@ -126,9 +126,7 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
     except (TranscriptExtractionError, QuotaExhaustedError):
         raise
     except Exception as e:
-        raise TranscriptExtractionError(
-            f"Audio STT unavailable for {vid_id}: {e}"
-        ) from e
+        raise TranscriptExtractionError(f"Audio STT unavailable for {vid_id}: {e}") from e
 
 
 @flow(name="run_scribe_cycle")
@@ -160,9 +158,7 @@ async def scribe_flow(batch_size: int) -> dict[str, Any]:
             await process_transcript_task(video)
             await asyncio.sleep(SCRIBE_THROTTLE_SECONDS)
 
-    results = await asyncio.gather(
-        *[_bounded(v) for v in targets], return_exceptions=True
-    )
+    results = await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
     # Propagate any QuotaExhaustedError that was caught by return_exceptions
     quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
     if quota_errors:

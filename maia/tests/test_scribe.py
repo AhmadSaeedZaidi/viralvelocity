@@ -242,9 +242,7 @@ async def test_process_transcript_propagates_resiliency_strategy():
 @pytest.mark.asyncio
 async def test_run_scribe_cycle_empty_queue():
     """Test run_scribe_cycle handles empty queue gracefully."""
-    with patch(
-        "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
-    ) as mock_fetch:
+    with patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = []
 
         await scribe_flow.fn(batch_size=10)
@@ -262,12 +260,8 @@ async def test_run_scribe_cycle_processes_batch():
     ]
 
     with (
-        patch(
-            "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
-        patch(
-            "maia.scribe.flow.process_transcript_task", new_callable=AsyncMock
-        ) as mock_process,
+        patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch,
+        patch("maia.scribe.flow.process_transcript_task", new_callable=AsyncMock) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.return_value = None
@@ -293,12 +287,8 @@ async def test_run_scribe_cycle_continues_on_individual_failures():
         return None
 
     with (
-        patch(
-            "maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
-        patch(
-            "maia.scribe.flow.process_transcript_task", new_callable=AsyncMock
-        ) as mock_process,
+        patch("maia.scribe.flow.fetch_scribe_targets_task", new_callable=AsyncMock) as mock_fetch,
+        patch("maia.scribe.flow.process_transcript_task", new_callable=AsyncMock) as mock_process,
     ):
         mock_fetch.return_value = mock_videos
         mock_process.side_effect = mock_process_side_effect

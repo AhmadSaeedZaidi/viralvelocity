@@ -44,8 +44,10 @@ _YTDLP_BASE = [
     "yt_dlp",
     "--quiet",
     "--no-warnings",
-    "--remote-components", "ejs:github",
-    "--impersonate", "Chrome-131",
+    "--remote-components",
+    "ejs:github",
+    "--impersonate",
+    "Chrome-131",
 ]
 
 # Try to locate a JS runtime for BotGuard challenge solving (Deno preferred).
@@ -92,14 +94,14 @@ class TranscriptRateLimitError(TranscriptExtractionError):
     """
 
 
-def _resolve_cookies(cookies_path: str | None) -> list[str]:
+def _resolve_cookies(cookies_path: str | Path | None) -> list[str]:
     if cookies_path:
         return ["--cookies", str(cookies_path)]
     return []
 
 
 def yt_dlp_base(
-    cookies_path: str | None = None, extra: list[str] | None = None
+    cookies_path: str | Path | None = None, extra: list[str] | None = None
 ) -> list[str]:
     """Return the common yt-dlp argument list (module + PoToken + impersonation)."""
     cmd = list(_YTDLP_BASE) + _JS_RUNTIME + _resolve_cookies(cookies_path)
@@ -126,11 +128,13 @@ def _parse_json3_file(path: Path) -> list[dict[str, Any]]:
         segs = ev.get("segs") or []
         text = "".join(s.get("utf8", "") for s in segs).strip()
         if text:
-            segments.append({
-                "text": text,
-                "start": start / 1000.0,
-                "duration": dur / 1000.0,
-            })
+            segments.append(
+                {
+                    "text": text,
+                    "start": start / 1000.0,
+                    "duration": dur / 1000.0,
+                }
+            )
     return segments
 
 
@@ -188,12 +192,8 @@ class StealthVideoStreamer:
 
             if looks_like_rate_limit(stderr):
                 logger.warning(f"[yt-dlp] Rate-limit detected for {video_url}: {stderr[:120]}")
-                raise StreamRateLimitError(
-                    f"yt-dlp rate-limited for {video_url}: {stderr[:120]}"
-                )
-            raise yt_dlp.utils.DownloadError(
-                stderr or f"yt-dlp exited {result.returncode}"
-            )
+                raise StreamRateLimitError(f"yt-dlp rate-limited for {video_url}: {stderr[:120]}")
+            raise yt_dlp.utils.DownloadError(stderr or f"yt-dlp exited {result.returncode}")
 
         info: dict[str, Any] = json.loads(result.stdout)
         return info
@@ -220,12 +220,17 @@ class StealthVideoStreamer:
         cmd = yt_dlp_base(
             self.cookies_path,
             extra=[
-                "--extractor-args", f"youtube:player_client={player_clients}",
-                "-f", "bestaudio/best",
+                "--extractor-args",
+                f"youtube:player_client={player_clients}",
+                "-f",
+                "bestaudio/best",
                 "--extract-audio",
-                "--audio-format", "opus",
-                "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000 -b:a 32k",
-                "-o", f"{dest_dir}/%(id)s.%(ext)s",
+                "--audio-format",
+                "opus",
+                "--postprocessor-args",
+                "ffmpeg:-ac 1 -ar 16000 -b:a 32k",
+                "-o",
+                f"{dest_dir}/%(id)s.%(ext)s",
             ],
         )
         cmd.append(_YOUTUBE_URL.format(video_id=video_id))
@@ -234,16 +239,12 @@ class StealthVideoStreamer:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if result.returncode != 0:
             stderr = result.stderr.strip()
-            raise AudioExtractionError(
-                f"Audio extraction failed for {video_id}: {stderr[:200]}"
-            )
+            raise AudioExtractionError(f"Audio extraction failed for {video_id}: {stderr[:200]}")
 
         for f in Path(dest_dir).iterdir():
             if f.suffix == ".opus" and video_id in f.stem:
                 return f
-        raise AudioExtractionError(
-            f"yt-dlp exited OK but no audio file found for {video_id}"
-        )
+        raise AudioExtractionError(f"yt-dlp exited OK but no audio file found for {video_id}")
 
     def download_unified(
         self,
@@ -281,14 +282,18 @@ class StealthVideoStreamer:
         cmd = yt_dlp_base(
             self.cookies_path,
             extra=[
-                "--extractor-args", f"youtube:player_client={player_clients}",
+                "--extractor-args",
+                f"youtube:player_client={player_clients}",
                 # Audio-only: the singer re-encodes this to opus locally, so we
                 # never download the (heavy) muxed video. The painter's frame
                 # source comes from the stream URLs in the info.json below.
-                "-f", "bestaudio/best",
+                "-f",
+                "bestaudio/best",
                 "--write-info-json",
-                "-o", f"{dest_dir}/%(id)s.%(ext)s",
-                "--paths", f"infojson:{meta_dir}",
+                "-o",
+                f"{dest_dir}/%(id)s.%(ext)s",
+                "--paths",
+                f"infojson:{meta_dir}",
             ],
         )
         cmd.append(_YOUTUBE_URL.format(video_id=video_id))
@@ -305,8 +310,7 @@ class StealthVideoStreamer:
             # audio has usually already been downloaded — salvage it instead of
             # failing the whole fetch and stalling the singer downstream.
             audio_path = next(
-                (f for f in Path(dest_dir).iterdir()
-                 if f.is_file() and video_id in f.stem),
+                (f for f in Path(dest_dir).iterdir() if f.is_file() and video_id in f.stem),
                 None,
             )
             if audio_path is None:
@@ -315,17 +319,14 @@ class StealthVideoStreamer:
                     raise StreamRateLimitError(
                         f"yt-dlp rate-limited for {video_id}: {stderr[:120]}"
                     )
-                raise AudioExtractionError(
-                    f"Unified fetch failed for {video_id}: {stderr[:200]}"
-                )
+                raise AudioExtractionError(f"Unified fetch failed for {video_id}: {stderr[:200]}")
             logger.warning(
                 f"[yt-dlp] Audio salvaged for {video_id} but metadata failed "
                 f"(continuing): {stderr[:160]}"
             )
         else:
             audio_path = next(
-                (f for f in Path(dest_dir).iterdir()
-                 if f.is_file() and video_id in f.stem),
+                (f for f in Path(dest_dir).iterdir() if f.is_file() and video_id in f.stem),
                 None,
             )
 
@@ -335,9 +336,7 @@ class StealthVideoStreamer:
             None,
         )
         if audio_path is None:
-            raise AudioExtractionError(
-                f"yt-dlp exited OK but no audio file found for {video_id}"
-            )
+            raise AudioExtractionError(f"yt-dlp exited OK but no audio file found for {video_id}")
         return audio_path, info_path
 
     def download_raw(
@@ -353,9 +352,12 @@ class StealthVideoStreamer:
         cmd = yt_dlp_base(
             self.cookies_path,
             extra=[
-                "--extractor-args", f"youtube:player_client={player_clients}",
-                "-f", "bestaudio/best",
-                "-o", f"{dest_dir}/%(id)s.%(ext)s",
+                "--extractor-args",
+                f"youtube:player_client={player_clients}",
+                "-f",
+                "bestaudio/best",
+                "-o",
+                f"{dest_dir}/%(id)s.%(ext)s",
             ],
         )
         cmd.append(_YOUTUBE_URL.format(video_id=video_id))
@@ -368,23 +370,15 @@ class StealthVideoStreamer:
 
             if looks_like_rate_limit(stderr):
                 logger.warning(f"[yt-dlp] Rate-limit for {video_id}: {stderr[:120]}")
-                raise StreamRateLimitError(
-                    f"yt-dlp rate-limited for {video_id}: {stderr[:120]}"
-                )
-            raise AudioExtractionError(
-                f"Raw fetch failed for {video_id}: {stderr[:200]}"
-            )
+                raise StreamRateLimitError(f"yt-dlp rate-limited for {video_id}: {stderr[:120]}")
+            raise AudioExtractionError(f"Raw fetch failed for {video_id}: {stderr[:200]}")
 
         for f in sorted(Path(dest_dir).iterdir()):
             if f.is_file() and video_id in f.stem:
                 return f
-        raise AudioExtractionError(
-            f"yt-dlp exited OK but no file found for {video_id}"
-        )
+        raise AudioExtractionError(f"yt-dlp exited OK but no file found for {video_id}")
 
-    def extract_video(
-        self, video_id: str, dest_dir: str, height: int = 720
-    ) -> Path:
+    def extract_video(self, video_id: str, dest_dir: str, height: int = 720) -> Path:
         """Download *video_id*'s source video (<= *height*, no re-encode).
 
         Prefers YouTube's own pre-encoded progressive stream (or merges the best
@@ -399,9 +393,12 @@ class StealthVideoStreamer:
         cmd = yt_dlp_base(
             self.cookies_path,
             extra=[
-                "-f", fmt,
-                "--merge-output-format", "mp4",
-                "-o", f"{dest_dir}/%(id)s.%(ext)s",
+                "-f",
+                fmt,
+                "--merge-output-format",
+                "mp4",
+                "-o",
+                f"{dest_dir}/%(id)s.%(ext)s",
             ],
         )
         cmd.append(_YOUTUBE_URL.format(video_id=video_id))
@@ -410,20 +407,14 @@ class StealthVideoStreamer:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             stderr = result.stderr.strip()
-            raise VideoExtractionError(
-                f"Video extraction failed for {video_id}: {stderr[:200]}"
-            )
+            raise VideoExtractionError(f"Video extraction failed for {video_id}: {stderr[:200]}")
 
         for f in sorted(Path(dest_dir).iterdir()):
             if f.is_file() and video_id in f.stem:
                 return f
-        raise VideoExtractionError(
-            f"yt-dlp exited OK but no video file found for {video_id}"
-        )
+        raise VideoExtractionError(f"yt-dlp exited OK but no video file found for {video_id}")
 
-    def extract_captions(
-        self, video_id: str, client: str, tmpdir: str
-    ) -> list[dict[str, Any]]:
+    def extract_captions(self, video_id: str, client: str, tmpdir: str) -> list[dict[str, Any]]:
         """Download JSON3 captions for *video_id* via player *client*.
 
         Raises:
@@ -435,11 +426,16 @@ class StealthVideoStreamer:
             extra=[
                 "--skip-download",
                 "--write-auto-subs",
-                "--sub-format", "json3",
-                "--sub-langs", "en",
-                "--extractor-args", f"youtube:player_client={client}",
-                "--paths", f"subtitle:{tmpdir}",
-                "--output", f"subtitle:{tmpdir}/%(id)s.%(ext)s",
+                "--sub-format",
+                "json3",
+                "--sub-langs",
+                "en",
+                "--extractor-args",
+                f"youtube:player_client={client}",
+                "--paths",
+                f"subtitle:{tmpdir}",
+                "--output",
+                f"subtitle:{tmpdir}/%(id)s.%(ext)s",
             ],
         )
         cmd.append(_YOUTUBE_URL.format(video_id=video_id))
@@ -455,12 +451,9 @@ class StealthVideoStreamer:
                     f"yt-dlp rate-limited for {video_id} [{client}]: {stderr[:120]}"
                 )
             if "subtitles" in stderr.lower() and "not" in stderr.lower():
-                raise TranscriptExtractionError(
-                    f"No subtitles available for {video_id}"
-                )
+                raise TranscriptExtractionError(f"No subtitles available for {video_id}")
             raise TranscriptExtractionError(
-                f"yt-dlp failed for {video_id} [{client}]: "
-                f"{stderr or result.stdout.strip()}"
+                f"yt-dlp failed for {video_id} [{client}]: {stderr or result.stdout.strip()}"
             )
 
         sub_file = _find_json3_file(tmpdir, video_id)
@@ -484,16 +477,25 @@ def extract_audio_ffmpeg(src: Path, dst: Path, timeout: int = 180) -> Path:
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg", "-y", "-i", str(src),
-        "-ac", "1", "-ar", "16000", "-b:a", "32k",
-        "-f", "opus", str(dst),
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(src),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "32k",
+        "-f",
+        "opus",
+        str(dst),
     ]
     logger.info(f"[ffmpeg] Extracting audio: {dst.name}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
         raise AudioExtractionError(
-            f"ffmpeg audio extraction failed for {dst.name}: "
-            f"{result.stderr.strip()[:200]}"
+            f"ffmpeg audio extraction failed for {dst.name}: {result.stderr.strip()[:200]}"
         )
     if not dst.exists():
         raise AudioExtractionError(f"ffmpeg produced no file for {dst.name}")

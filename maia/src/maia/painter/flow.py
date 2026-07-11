@@ -52,7 +52,7 @@ FRAME_HEIGHT = 720
 # is universally supported by ML/vision tooling.
 FRAME_FORMAT = "webp"
 FRAME_WEBP_QUALITY = 80  # libwebp -quality (0–100)
-FRAME_JPEG_QUALITY = 3   # ffmpeg -q:v fallback when FRAME_FORMAT="jpg" (≈ q90)
+FRAME_JPEG_QUALITY = 3  # ffmpeg -q:v fallback when FRAME_FORMAT="jpg" (≈ q90)
 # Prefer a source stream at or just above the target height to minimise download.
 # Prefer an efficient codec (AV1/VP9) for the frame source, but keep it at full
 # 720p — keyframes are analysed at native resolution, not downscaled.
@@ -136,7 +136,7 @@ def select_stream_url(
 async def fetch_painter_targets_task(batch_size: int) -> list[Video]:
     """Fetch videos that need visual processing."""
     video_repo = VideoRepository()
-    return await video_repo.claim_painter_batch(batch_size)
+    return list[Video](await video_repo.claim_painter_batch(batch_size))
 
 
 def _is_valid_image(data: bytes, ext: str) -> bool:
@@ -187,11 +187,16 @@ def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> bytes | None:
             "ffmpeg",
             "-y",
             "-hide_banner",
-            "-loglevel", "error",
-            "-ss", str(timestamp),
-            "-i", stream_url,
-            "-frames:v", "1",
-            "-vf", scale,
+            "-loglevel",
+            "error",
+            "-ss",
+            str(timestamp),
+            "-i",
+            stream_url,
+            "-frames:v",
+            "1",
+            "-vf",
+            scale,
             *codec_args,
             out_path,
         ]
@@ -209,9 +214,7 @@ def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> bytes | None:
             data = fh.read()
 
         if not _is_valid_image(data, FRAME_FORMAT):
-            logger.warning(
-                f"FFmpeg produced an invalid {FRAME_FORMAT} frame at {timestamp}s"
-            )
+            logger.warning(f"FFmpeg produced an invalid {FRAME_FORMAT} frame at {timestamp}s")
             return None
 
         return data
@@ -406,9 +409,7 @@ async def painter_flow(batch_size: int) -> dict[str, Any]:
             await asyncio.sleep(random.uniform(0.5, 2.0))
             return await process_frames_task(video)
 
-    results = await asyncio.gather(
-        *[protected_process(v) for v in targets], return_exceptions=True
-    )
+    results = await asyncio.gather(*[protected_process(v) for v in targets], return_exceptions=True)
     # Propagate any QuotaExhaustedError that was caught by return_exceptions
     quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
     if quota_errors:
@@ -431,9 +432,7 @@ async def painter_flow(batch_size: int) -> dict[str, Any]:
             await vault_op_with_retry(lambda: v.store_visual_evidence_batch(entries))
             for vid, _ in extracted:
                 await video_repo.mark_visuals_safe(vid)
-            run_logger.info(
-                f"Batched {len(extracted)} videos' frames into ONE vault commit"
-            )
+            run_logger.info(f"Batched {len(extracted)} videos' frames into ONE vault commit")
         except Exception as e:
             run_logger.exception(f"Batched frame store failed ({len(extracted)} vids): {e}")
             for vid, _ in extracted:

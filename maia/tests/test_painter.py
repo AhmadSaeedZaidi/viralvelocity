@@ -369,9 +369,7 @@ async def test_run_painter_cycle_handles_vault_failure():
     mock_videos = [Video(id="VIDEO_001", title="Test Video")]
 
     with (
-        patch(
-            "maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock
-        ) as mock_fetch,
+        patch("maia.painter.flow.fetch_painter_targets_task", new_callable=AsyncMock) as mock_fetch,
         patch(
             "maia.painter.flow.process_frames_task",
             new_callable=AsyncMock,

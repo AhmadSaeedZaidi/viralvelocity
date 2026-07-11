@@ -33,9 +33,7 @@ def test_api_keys_compliance_mode_preserves_rotation(monkeypatch):
     resilience must always be preserved.
     """
     monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
-    monkeypatch.setenv(
-        "YOUTUBE_API_KEY_POOL_JSON", '["test_key_1", "test_key_2", "test_key_3"]'
-    )
+    monkeypatch.setenv("YOUTUBE_API_KEY_POOL_JSON", '["test_key_1", "test_key_2", "test_key_3"]')
     monkeypatch.setenv("VAULT_PROVIDER", "huggingface")
     monkeypatch.setenv("HF_DATASET_ID", "test/dataset")
     monkeypatch.setenv("HF_TOKEN", "hf_test_token")

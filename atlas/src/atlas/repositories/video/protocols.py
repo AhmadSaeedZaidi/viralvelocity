@@ -59,7 +59,9 @@ class VideoRepositoryProtocol(DatabaseAdapterProtocol, Protocol):
     async def mark_visuals_safe(self, video_id: str) -> None: ...
 
     async def mark_fetched(
-        self, video_id: str, raw_uri: str,
+        self,
+        video_id: str,
+        raw_uri: str,
     ) -> None: ...
 
     async def mark_audio_safe(self, video_id: str) -> None: ...

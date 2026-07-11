@@ -83,8 +83,7 @@ async def process_video_task(video: Video) -> tuple[str, bytes, str] | None:
         )
         video_bytes = await asyncio.to_thread(video_path_local.read_bytes)
         run_logger.info(
-            f"Downloaded {vid_id} → {len(video_bytes) / 1048576:.1f} MB "
-            f"({video_path_local.suffix})"
+            f"Downloaded {vid_id} → {len(video_bytes) / 1048576:.1f} MB ({video_path_local.suffix})"
         )
         return (vid_id, video_bytes, video_path_local.suffix.lstrip("."))
     except QuotaExhaustedError:
@@ -126,9 +125,7 @@ async def muralist_flow(batch_size: int, height: int = DEFAULT_HEIGHT) -> dict[s
             await asyncio.sleep(MURALIST_THROTTLE_SECONDS)
             return result
 
-    results = await asyncio.gather(
-        *[_bounded(v) for v in targets], return_exceptions=True
-    )
+    results = await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
     # Propagate any QuotaExhaustedError that was caught by return_exceptions.
     quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
     if quota_errors:
@@ -139,16 +136,12 @@ async def muralist_flow(batch_size: int, height: int = DEFAULT_HEIGHT) -> dict[s
     if extracted:
         video_repo = VideoRepository()
         v = get_vault()
-        items = [
-            (video_path(vid, ext), io.BytesIO(b)) for vid, b, ext in extracted
-        ]
+        items = [(video_path(vid, ext), io.BytesIO(b)) for vid, b, ext in extracted]
         try:
             await vault_op_with_retry(lambda: v.store_batch(items))  # type: ignore[arg-type]
             for vid, _, _ in extracted:
                 await video_repo.mark_video_safe(vid)
-            run_logger.info(
-                f"Batched {len(extracted)} source clips into ONE vault commit"
-            )
+            run_logger.info(f"Batched {len(extracted)} source clips into ONE vault commit")
         except Exception as e:
             run_logger.exception(f"Batched video store failed ({len(extracted)} vids): {e}")
             for vid, _, _ in extracted:

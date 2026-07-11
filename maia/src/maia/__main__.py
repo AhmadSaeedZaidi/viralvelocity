@@ -181,9 +181,7 @@ def _print_quality_report(report: dict[str, Any]) -> None:
     total = report.get("total_videos", 0)
     shorts = report.get("shorts_under_3m", 0)
     pct = (
-        (shorts / report["total_with_duration"] * 100)
-        if report.get("total_with_duration")
-        else 0.0
+        (shorts / report["total_with_duration"] * 100) if report.get("total_with_duration") else 0.0
     )
     print("=== Pleiades Ingestion Quality ===")
     print(f"Total videos           : {total}")

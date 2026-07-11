@@ -92,6 +92,4 @@ def test_is_quota_error_not_triggered_by_bare_403(fixed_key_rings):
     ex = ResiliencyExecutor(KeyRing("hunting"), "tester")
     assert ex._is_quota_error(RuntimeError("429 Too Many Requests")) is True
     assert ex._is_quota_error(RuntimeError("quotaExceeded")) is True
-    assert (
-        ex._is_quota_error(RuntimeError("403 Forbidden: video is private")) is False
-    )
+    assert ex._is_quota_error(RuntimeError("403 Forbidden: video is private")) is False

@@ -111,9 +111,7 @@ class DatabaseManager:
             for stmt in statements:
                 is_hypertable = "create_hypertable" in stmt.lower()
                 if is_hypertable and not timescale_available:
-                    logger.warning(
-                        "Skipping hypertable conversion (TimescaleDB unavailable)"
-                    )
+                    logger.warning("Skipping hypertable conversion (TimescaleDB unavailable)")
                     continue
                 try:
                     await conn.execute(stmt + ";")

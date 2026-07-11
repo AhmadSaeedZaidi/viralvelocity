@@ -67,9 +67,7 @@ async def store_audio_task(video: Video) -> tuple[str, bytes] | None:
     v = get_vault()
     raw_buf = await asyncio.to_thread(v.fetch_binary, video.raw_uri)
     if raw_buf is None:
-        run_logger.error(
-            f"Raw artifact missing for {vid_id} at {video.raw_uri} — marking failed"
-        )
+        run_logger.error(f"Raw artifact missing for {vid_id} at {video.raw_uri} — marking failed")
         await video_repo.mark_failed(vid_id)
         return None
 
@@ -112,7 +110,7 @@ async def singer_flow(batch_size: int) -> dict[str, Any]:
 
     sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
 
-    async def _bounded(video: Video):
+    async def _bounded(video: Video) -> Any:
         async with sem:
             result = await store_audio_task(video)
             await asyncio.sleep(SINGER_THROTTLE_SECONDS)

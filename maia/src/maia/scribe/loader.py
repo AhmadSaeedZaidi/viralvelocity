@@ -15,6 +15,12 @@ from maia.media.streamer import (
     TranscriptRateLimitError,
 )
 
+__all__ = [
+    "TranscriptLoader",
+    "TranscriptExtractionError",
+    "TranscriptRateLimitError",
+]
+
 logger = logging.getLogger(__name__)
 
 # Caption cascade: YouTube throttles the `timedtext` endpoint per IP, but the

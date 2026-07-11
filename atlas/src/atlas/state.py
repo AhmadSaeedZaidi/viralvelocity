@@ -27,7 +27,7 @@ QUOTA_EXHAUSTED_TTL_S = 6 * 3600
 
 def _read() -> dict[str, Any]:
     try:
-        return json.loads(_STATE_PATH.read_text())
+        return dict[str, Any](json.loads(_STATE_PATH.read_text()))
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
@@ -61,9 +61,7 @@ def quota_exhausted_agents() -> list[str]:
     marks = state.get("quota_exhausted", {})
     now = time.time()
     expired = [
-        a
-        for a, e in marks.items()
-        if now - float(e.get("since", 0)) >= QUOTA_EXHAUSTED_TTL_S
+        a for a, e in marks.items() if now - float(e.get("since", 0)) >= QUOTA_EXHAUSTED_TTL_S
     ]
     if expired:
         for a in expired:
@@ -123,7 +121,7 @@ def audio_cap_reached() -> bool:
     """True if today's audio-fallback usage has hit the daily cap."""
     cap = _daily_audio_cap()
     state = _read()
-    used = state.get("audio_usage", {}).get(_today(), 0)
+    used: int = state.get("audio_usage", {}).get(_today(), 0)
     return used >= cap
 
 

@@ -120,13 +120,10 @@ class VideoTrackingMixin(DatabaseAdapter):
         with_visuals = (
             await self._fetch_scalar("SELECT COUNT(*) FROM videos WHERE has_visuals") or 0
         )
-        audios = (
-            await self._fetch_scalar("SELECT COUNT(*) FROM videos WHERE has_audio") or 0
-        )
+        audios = await self._fetch_scalar("SELECT COUNT(*) FROM videos WHERE has_audio") or 0
         ingested_1h = (
             await self._fetch_scalar(
-                "SELECT COUNT(*) FROM videos "
-                "WHERE discovered_at > NOW() - INTERVAL '1 hour'"
+                "SELECT COUNT(*) FROM videos WHERE discovered_at > NOW() - INTERVAL '1 hour'"
             )
             or 0
         )
@@ -139,4 +136,3 @@ class VideoTrackingMixin(DatabaseAdapter):
             "audios": audios,
             "ingested_1h": ingested_1h,
         }
-
