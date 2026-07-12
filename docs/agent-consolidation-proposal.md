@@ -61,9 +61,10 @@ overloaded boolean flags, which causes a real race:
   muralist claims the row with `raw_uri = NULL` and has no input. Muralist silently starves.
   This is exactly the failure you noticed. (Compounded by muralist being *manual-only* per
   `registry.py` — in production it may never run, so `raw` is reclaimed out from under it.)
-- **Scribe has the same class of bug:** `claim_scribe_batch` (`:14`) only checks
-  `has_transcript = FALSE` — it does **not** require `has_audio = TRUE` / `fetched = TRUE`.
-  So scribe can claim a video before audio exists and either fail or re-hit YouTube (429 risk).
+- **Scribe is intentionally audio-independent:** `claim_scribe_batch` (`:14`) only checks
+   `has_transcript = FALSE` — it does **not** require `has_audio = TRUE` / `fetched = TRUE`.
+   This is correct, not a bug: scribe's primary path is YouTube captions (free), and audio STT
+   is only a paid fallback, so it must claim without waiting for the singer.
 
 Root cause: **boolean flags encode both "artifact available" and "artifact consumed", with no
 explicit DAG.** Reclamation is keyed on subtask completion, not "all dependent consumers done."
@@ -123,7 +124,9 @@ real data and burning quota. That ambiguity is what makes alkyone feel orphaned.
 
 ### P1 — Fix producer/consumer coordination (do the minimal correct fix first)
 **Phase 1a (targeted, this sprint):**
-- `claim_scribe_batch` → add `AND has_audio = TRUE` (scribe consumes audio; singer produces it).
+- `claim_scribe_batch` → **do NOT gate on `has_audio`**: scribe is caption-first (free
+   YouTube captions) with audio STT only as a fallback, so it must claim independently of the
+   singer. Gating it on audio would block transcripts for any video still in the singer's queue.
 - `claim_muralist_batch` → add `AND raw_uri IS NOT NULL` (safety gate; no input, no claim).
 - `reclaim_raw_if_complete` → only reclaim when
   `has_audio AND has_visuals AND (has_video OR raw_age > raw_ttl)`.
@@ -137,8 +140,9 @@ currently inferred from a conjunction of boolean flags, which hides the real sha
 pipeline — a **fan-out / fan-in** topology (codelit/databricks "fan-out fan-in"):
 
 - The `raw` artifact is the **fan-out point**: after `FETCHED`, three consumers derive from it
-  **in parallel** — `singer` (audio), `painter` (visuals), `muralist` (clip). `scribe`
-  (transcript) runs after `singer` (needs audio). None of these blocks the others.
+   **in parallel** — `singer` (audio), `painter` (visuals), `muralist` (clip). `scribe`
+   (transcript) is **audio-independent** (caption-first, STT fallback) and also runs in parallel.
+   None of these blocks the others.
 - The **fan-in / join** is the point at which `raw` may be reclaimed: only once *every*
   raw-consuming step is `DONE` (or the muralist's TTL window expires, since muralist is
   manual-only and may never run).

@@ -46,7 +46,8 @@ Used `gh` (installed via apt, authed with a PAT) to inspect live logs.
 ## 1. P1a — Producer/Consumer coordination fix (shipped)
 Fixes the muralist-starvation race at its root.
 
-- `claim_scribe_batch` now requires `has_audio = TRUE` (scribe consumes audio the singer produces).
+- `claim_scribe_batch` is **audio-independent** (scribe is caption-first; audio STT is only a
+  paid fallback) — it must NOT be gated on `has_audio`.
 - `claim_muralist_batch` now requires `raw_uri IS NOT NULL` (no input → no claim).
 - `reclaim_raw_if_complete` only reclaims once `has_audio AND has_visuals`, and only when
   `has_video` is set **or** raw aged past `RAW_TTL_HOURS` (default 48h).

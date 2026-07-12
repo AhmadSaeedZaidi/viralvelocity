@@ -19,7 +19,6 @@ class VideoStateMixin(DatabaseAdapter):
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
                   AND has_transcript = FALSE
-                  AND has_audio = TRUE
                 ORDER BY discovered_at ASC
                 LIMIT %s
                 FOR UPDATE SKIP LOCKED

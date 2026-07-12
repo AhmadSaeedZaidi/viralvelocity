@@ -249,14 +249,17 @@ async def run_painter_cycle():
 ```
 
 #### 5. Scribe (Transcript / Caption Extraction)
-Owns captions: pulls audio (from singer's `audio/{id}.opus` or a YouTube
-fallback), transcribes via the Grok → Mistral cascade, stores the transcript
-and sets `has_transcript`:
+Owns transcripts. Its **primary** path fetches YouTube captions directly via
+yt-dlp (`TranscriptLoader`) — free, and needs no audio. Only when no captions
+exist does it fall back to speech-to-text on the singer's stored audio (or a
+YouTube audio download as a last resort), transcribed via the Grok → Mistral
+cascade. It sets `has_transcript`. Scribe is intentionally **audio-independent**
+and is claimed without waiting for the singer:
 
 ```python
 @flow(name="run_scribe_cycle")
 async def run_scribe_cycle():
-    videos = await video_repo.claim_scribe_batch()   # requires has_audio = TRUE
+    videos = await video_repo.claim_scribe_batch()   # audio-independent
     for video in videos:
         transcript = await transcribe(video)
         await vault.store_transcript(video.id, transcript)
@@ -273,8 +276,9 @@ The audio and video media now flow through a small producer/consumer set
   **not** set `has_audio` / `has_visuals` itself.
 - **Singer** (consumer) — extracts the speech track from the stored `raw` locally
   (no YouTube rate limit), stores `audio/{id}.opus`, and sets `has_audio`.
-- **Scribe** (consumer) — transcribes that audio via the Grok → Mistral cascade
-  and sets `has_transcript` (see above).
+- **Scribe** (consumer) — fetches YouTube captions directly (free), falling back
+  to STT on the singer's audio only when captions are missing; sets
+  `has_transcript`. It is **not** serialized behind the singer.
 - **Muralist** (consumer, manual-only) — archives the full source clip to
   `videos/{id}.mp4` (`has_video`); not fleet-scheduled (storage-heavy). It
   consumes the `raw` artifact, so `raw` is only reclaimed after muralist runs

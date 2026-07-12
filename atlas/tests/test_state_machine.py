@@ -247,13 +247,14 @@ async def test_get_pipeline_phase_selects_frontier():
 
 
 @pytest.mark.asyncio
-async def test_claim_scribe_batch_requires_audio():
-    """Scribe consumes audio (produced by singer) — never claim before it."""
+async def test_claim_scribe_batch_does_not_require_audio():
+    """Scribe gets captions from YouTube directly; audio STT is only a paid
+    fallback. It must NOT be gated on the singer's audio being present."""
     s = FakeState()
     s._fetch_all.return_value = []
     await s.claim_scribe_batch(5)
     sql = s._fetch_all.call_args[0][0]
-    assert "has_audio = TRUE" in sql
+    assert "has_audio = TRUE" not in sql
     assert "has_transcript = FALSE" in sql
 
 
