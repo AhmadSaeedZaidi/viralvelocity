@@ -28,13 +28,13 @@ jobs:
       needs-build: ${{ steps.filter.outputs.any_changed }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Check for dependency changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           base: ${{ github.event.repository.default_branch }}
           filters: |
@@ -67,7 +67,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Dependencies are already in the Docker image!
       # Lint atlas + maia only. alkyone is intentionally unhooked from CI until
@@ -87,7 +87,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Dependencies are already in the Docker image!
       - name: Run Unit Tests
