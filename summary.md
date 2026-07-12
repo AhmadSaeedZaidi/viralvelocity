@@ -4,7 +4,22 @@ Branch: `hy3-work` (pushed to `origin`). Latest commits:
 - `a4762b7` — P1a producer/consumer coordination fix
 - `0fe96b4` — CI cleanup + make `make lint` green
 - `871db16` — CI fix: grant `packages: write` to `build-env` caller job
-- (HEAD) — Bump mypy → 2.x, regenerate poetry locks, enforce lock in CI
+- `76a9b06` — Bump mypy → 2.x, regenerate poetry locks, enforce lock in CI
+- `0a7de7c` — CI fix: drop alkyone from CI env image (`/alkyone: not found`)
+
+## 6. CI is GREEN (verified via `gh run view 29185062767`)
+Used `gh` (installed via apt, authed with a PAT) to inspect live logs.
+- Build CI Environment ✓ (4m57s) — failed before on `/alkyone: not found`
+  because `.dockerignore` excludes `alkyone/` (separate build context) yet
+  `ci.Dockerfile` COPY'd + poetry-installed it. Fixed by dropping alkyone
+  from the image (it's also unhooked from the CI jobs — proposal P4).
+- Quality (Linting & Type Checking) ✓ (1m10s) — mypy 2.2.0 + ruff clean.
+- Unit Tests ✓ (4m1s).
+
+### Outstanding (non-blocking) warning
+- Node.js 20 deprecation annotations on `actions/checkout@v4`,
+  `dorny/paths-filter@v3`, `docker/*@v6/v3/v5/v3`. Bump to v5/v7 to clear
+  (warnings only, not failures).
 
 ## 5. mypy 2.x migration + lock enforcement (latest)
 - Bumped mypy pin `>=1.8.0,<2.0.0` → `>=2.0.0,<3.0.0` in atlas/maia/alkyone
