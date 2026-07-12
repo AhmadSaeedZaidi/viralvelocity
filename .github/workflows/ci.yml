@@ -50,6 +50,9 @@ jobs:
     if: needs.check-changes.outputs.needs-build == 'true'
     uses: ./.github/workflows/build-env.yml
     secrets: inherit
+    permissions:
+      contents: read
+      packages: write
 
   quality:
     name: Quality (Linting & Type Checking)
