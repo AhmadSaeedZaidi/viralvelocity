@@ -269,3 +269,101 @@ $$;
 
 COMMENT ON FUNCTION enforce_table_row_limit(REGCLASS, BIGINT) IS
 'Delete oldest rows once table exceeds max_rows. Returns count of rows removed.';
+
+-- ===========================================================================
+-- P1b migration: explicit per-step state (fan-out / fan-in join barrier)
+-- Each artifact in the `raw -> {singer, painter, muralist}` fan-out and the
+-- downstream `scribe` gets its OWN phase column instead of a conjunction of
+-- booleans. `pipeline_phase` is a *derived* frontier (a video's progress
+-- readable as a state, not inferred from booleans) for ops/monitoring only —
+-- it does NOT drive claim selection, so the parallel topology is preserved.
+-- The legacy booleans (fetched/has_audio/...) stay as a transitional seam kept
+-- in sync by `sync_step_phases`; they are removed in P3
+-- (docs/agent-consolidation-proposal.md). All statements are idempotent so
+-- `provision_schema` can re-apply them on every agent startup.
+-- ===========================================================================
+
+DO $$ BEGIN
+    CREATE TYPE step_phase AS ENUM ('PENDING', 'PROCESSING', 'DONE', 'FAILED');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS raw_phase step_phase DEFAULT 'PENDING';
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS audio_phase step_phase DEFAULT 'PENDING';
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS visuals_phase step_phase DEFAULT 'PENDING';
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS transcript_phase step_phase DEFAULT 'PENDING';
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS clip_phase step_phase DEFAULT 'PENDING';
+
+-- Frontier = the earliest step still not DONE (pipeline order). IMMUTABLE so it
+-- can back a generated column.
+CREATE OR REPLACE FUNCTION pipeline_frontier(
+    raw step_phase, audio step_phase, visuals step_phase,
+    transcript step_phase, clip step_phase
+) RETURNS VARCHAR LANGUAGE sql IMMUTABLE AS $$
+    SELECT CASE
+        WHEN raw <> 'DONE' THEN 'RAW'
+        WHEN audio <> 'DONE' THEN 'AUDIO'
+        WHEN visuals <> 'DONE' THEN 'VISUALS'
+        WHEN transcript <> 'DONE' THEN 'TRANSCRIPT'
+        WHEN clip <> 'DONE' THEN 'CLIP'
+        ELSE 'DONE'
+    END;
+$$;
+
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS pipeline_phase VARCHAR GENERATED ALWAYS AS (
+    pipeline_frontier(raw_phase, audio_phase, visuals_phase, transcript_phase, clip_phase)
+) STORED;
+
+-- Backfill phase columns from the legacy booleans — only rows where a boolean
+-- is TRUE but its phase is not yet DONE (i.e. pre-migration data). Genuinely
+-- pending rows (boolean FALSE, phase PENDING) are intentionally left alone so
+-- this is a no-op after the first run.
+UPDATE videos SET
+    raw_phase        = CASE WHEN fetched        THEN 'DONE' ELSE raw_phase END,
+    audio_phase      = CASE WHEN has_audio       THEN 'DONE' ELSE audio_phase END,
+    visuals_phase    = CASE WHEN has_visuals     THEN 'DONE' ELSE visuals_phase END,
+    transcript_phase = CASE WHEN has_transcript  THEN 'DONE' ELSE transcript_phase END,
+    clip_phase       = CASE WHEN has_video       THEN 'DONE' ELSE clip_phase END
+WHERE (fetched AND raw_phase <> 'DONE')
+   OR (has_audio AND audio_phase <> 'DONE')
+   OR (has_visuals AND visuals_phase <> 'DONE')
+   OR (has_transcript AND transcript_phase <> 'DONE')
+   OR (has_video AND clip_phase <> 'DONE');
+
+-- Bidirectional sync: keep booleans and phase columns consistent regardless of
+-- which code path writes which. Old agents that only touch booleans still keep
+-- phases correct; new code that drives phases keeps booleans correct.
+CREATE OR REPLACE FUNCTION sync_step_phases() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.fetched IS DISTINCT FROM OLD.fetched THEN
+        NEW.raw_phase := CASE WHEN NEW.fetched THEN 'DONE'::step_phase ELSE 'PENDING'::step_phase END;
+    ELSIF NEW.raw_phase IS DISTINCT FROM OLD.raw_phase THEN
+        NEW.fetched := (NEW.raw_phase = 'DONE');
+    END IF;
+    IF NEW.has_audio IS DISTINCT FROM OLD.has_audio THEN
+        NEW.audio_phase := CASE WHEN NEW.has_audio THEN 'DONE'::step_phase ELSE 'PENDING'::step_phase END;
+    ELSIF NEW.audio_phase IS DISTINCT FROM OLD.audio_phase THEN
+        NEW.has_audio := (NEW.audio_phase = 'DONE');
+    END IF;
+    IF NEW.has_visuals IS DISTINCT FROM OLD.has_visuals THEN
+        NEW.visuals_phase := CASE WHEN NEW.has_visuals THEN 'DONE'::step_phase ELSE 'PENDING'::step_phase END;
+    ELSIF NEW.visuals_phase IS DISTINCT FROM OLD.visuals_phase THEN
+        NEW.has_visuals := (NEW.visuals_phase = 'DONE');
+    END IF;
+    IF NEW.has_transcript IS DISTINCT FROM OLD.has_transcript THEN
+        NEW.transcript_phase := CASE WHEN NEW.has_transcript THEN 'DONE'::step_phase ELSE 'PENDING'::step_phase END;
+    ELSIF NEW.transcript_phase IS DISTINCT FROM OLD.transcript_phase THEN
+        NEW.has_transcript := (NEW.transcript_phase = 'DONE');
+    END IF;
+    IF NEW.has_video IS DISTINCT FROM OLD.has_video THEN
+        NEW.clip_phase := CASE WHEN NEW.has_video THEN 'DONE'::step_phase ELSE 'PENDING'::step_phase END;
+    ELSIF NEW.clip_phase IS DISTINCT FROM OLD.clip_phase THEN
+        NEW.has_video := (NEW.clip_phase = 'DONE');
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS sync_step_phases_trigger ON videos;
+CREATE TRIGGER sync_step_phases_trigger
+    BEFORE INSERT OR UPDATE ON videos
+    FOR EACH ROW EXECUTE FUNCTION sync_step_phases();

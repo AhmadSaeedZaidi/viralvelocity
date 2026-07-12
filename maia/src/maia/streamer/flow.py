@@ -76,6 +76,13 @@ async def fetch_source_task(
     run_logger = get_run_logger()
     vid_id = video.id
 
+    # Idempotent: a video whose raw is already fetched is never re-pulled
+    # (P1b per-step state). The claim gate already excludes it; this guards
+    # manual / out-of-band reruns from a redundant YouTube fetch.
+    if video.raw_phase == "DONE":
+        run_logger.info(f"Raw already fetched for {vid_id} — skipping")
+        return None
+
     tmpdir = tempfile.mkdtemp(prefix="streamer-raw-")
     try:
         streamer = StealthVideoStreamer()

@@ -68,6 +68,17 @@ class VideoRepositoryProtocol(DatabaseAdapterProtocol, Protocol):
 
     async def mark_video_safe(self, video_id: str) -> None: ...
 
+    # ── P1b per-step state (fan-out / fan-in) ──────────────────────────────
+    async def begin_step(
+        self, video_id: str, step: str, phase: str = "PROCESSING"
+    ) -> None: ...
+
+    async def mark_step_phase(
+        self, video_id: str, step: str, phase: str
+    ) -> None: ...
+
+    async def get_pipeline_phase(self, video_id: str) -> str | None: ...
+
     async def mark_done(self, video_id: str) -> None: ...
 
     async def record_transcript(

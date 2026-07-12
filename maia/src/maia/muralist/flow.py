@@ -75,6 +75,13 @@ async def process_video_task(video: Video) -> tuple[str, bytes, str] | None:
     run_logger = get_run_logger()
     vid_id = video.id
 
+    # Idempotent: a video whose clip is already archived is never re-downloaded
+    # (P1b per-step state). Prevents a manual muralist rerun from double-writing
+    # the full source clip to the vault. The claim gate already excludes it.
+    if video.clip_phase == "DONE":
+        run_logger.info(f"Clip already archived for {vid_id} — skipping")
+        return None
+
     tmpdir = tempfile.mkdtemp(prefix="muralist-")
     try:
         streamer = StealthVideoStreamer()

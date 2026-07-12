@@ -10,7 +10,7 @@
 | Phase | State | Notes |
 |---|---|---|
 | P1a | Done | `a4762b7`: claim gates + TTL reclamation + `raw_stored_at` + 13 tests; live DB migrated |
-| P1b | Pending | `pipeline_phase` enum migration (deferred per plan) |
+| P1b | In Progress | per-step state + join barrier + idempotent consumers **landed & live-migrated**; booleans kept as transitional seam (removed in P3) |
 | P2  | Pending | `BaseBatchAgent` + remove legacy cruft |
 | P3  | Pending | decompose the five oversized files |
 | P4  | Partial | alkyone unhooked from CI (jobs + image) ✓; `architecture.md` → Repository pattern ✓. TODO: alkyone isolated test infra + prod-URL guard, maia unit-test DRY, `testing.md` VPS rewrite |
@@ -164,8 +164,32 @@ instead:
 Grounded in **Fan-out/Fan-in** (parallel consumers + a join) and the **Saga** pattern
 (microservices.io) — specifically *choreography*: each consumer updates its step state, the join
 reacts; the existing `FOR UPDATE SKIP LOCKED` claim already supplies the saga's required isolation
-countermeasure. **Recommended to defer** until P2/P3 land (it is a schema migration, not a bug
-fix), but it is now correctly specified and parallelism-safe.
+  countermeasure. **Recommended to defer** until P2/P3 land (it is a schema
+  migration, not a bug fix), but it is now correctly specified and parallelism-safe.
+
+#### P1b implementation checklist (status 2026-07-12)
+- [x] **Schema**: `step_phase` enum + `raw/audio/visuals/transcript/clip` phase
+      columns + a derived `pipeline_phase` generated column (the frontier). Fully
+      idempotent (re-applies on every `provision_schema`). Live DB migrated
+      (12,385 rows backfilled; 0 phase/boolean mismatches afterward).
+- [x] **Bidirectional sync trigger** (`sync_step_phases`): booleans and phase
+      columns stay consistent regardless of which code path writes which. This is
+      the transitional Strangler-Fig seam that lets agents running old code keep
+      working until they are redeployed on the new code.
+- [x] **Join barrier**: `reclaim_raw_if_complete` now reclaims raw only when
+      `audio=DONE AND visuals=DONE AND (clip=DONE OR raw_age > RAW_TTL_HOURS)` —
+      expressed over phase columns, i.e. the explicit fan-in of the `raw` fan-out.
+- [x] **Idempotent `mark_*` transitions**: `mark_fetched/audio/visuals/
+      transcript/video_safe` are no-ops once their step is `DONE`.
+- [x] **Idempotent consumers**: each flow (`streamer/singer/painter/scribe/
+      muralist`) skips when its step is already `DONE`, so a manual rerun cannot
+      double-write (resolves Gaps #1, esp. the muralist clip).
+- [x] **Derived frontier API**: `get_pipeline_phase` + `mark_step_phase` /
+      `begin_step` helpers (monitoring + future P2 scaffolding).
+- [x] **Tests**: atlas `test_state_machine` extended (phases, join barrier,
+      idempotency, frontier helpers); maia consumer suites green.
+- [ ] **P3 cleanup**: drop the legacy booleans + `sync_step_phases` trigger once
+      every consumer is redeployed on the new code (Strangler-Fig seam removal).
 
 ### P2 — `BaseBatchAgent` to kill the ×9 duplication
 Introduce a small base in `maia/agent.py` (or `maia/base.py`):
@@ -237,7 +261,11 @@ unit-test philosophy. Instead:
 1. **Muralist model:** is muralist meant to stay manual-only (→ TTL reclamation in P1a), or
    should it become a scheduled consumer that runs *before* `raw` reclamation? This decides
    whether P1a needs the TTL branch at all.
+   *Resolved by P1b:* the join barrier keeps the TTL branch (manual-only-safe) **and** the
+   `clip=DONE` fast path, so either muralist model works without further change.
 2. **P1b scope:** approve the `pipeline_phase` enum migration now, or strictly defer until P2/P3?
+   *Approved and implemented (2026-07-12):* shipped as per-step phase columns + join barrier,
+   not a single linear `pipeline_phase` enum (which would serialize the fan-out).
 3. **alkyone cadence:** on-demand only, or a throttled scheduled job (e.g. nightly, against the
    isolated test DB)?
 4. **Doc ownership:** may I update `docs/architecture.md` + `docs/testing.md` as part of Phase 0/4?

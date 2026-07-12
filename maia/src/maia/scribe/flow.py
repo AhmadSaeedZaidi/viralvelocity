@@ -67,6 +67,13 @@ async def process_transcript_task(video: Video) -> None:
     run_logger = get_run_logger()
     vid_id = video.id
 
+    # Idempotent: a video whose transcript is already DONE is never
+    # re-transcribed (P1b per-step state). The claim gate already excludes it;
+    # this guards manual / out-of-band reruns from redundant STT/quota use.
+    if video.transcript_phase == "DONE":
+        run_logger.info(f"Transcript already done for {vid_id} — skipping")
+        return
+
     try:
         segments = await _transcribe(video)
         transcript_repo = TranscriptRepository()

@@ -280,6 +280,14 @@ async def process_frames_task(video: Video) -> tuple[str, list[tuple[int, bytes]
     run_logger = get_run_logger()
     vid_id = video.id
 
+    # Idempotent: a video whose visuals are already extracted is never
+    # re-processed (P1b per-step state). The claim gate already excludes it;
+    # this guards manual / out-of-band reruns (incl. `repaint` resets it to
+    # PENDING so genuine recollection is unaffected).
+    if video.visuals_phase == "DONE":
+        run_logger.info(f"Visuals already extracted for {vid_id} — skipping")
+        return None
+
     tmpdir = tempfile.mkdtemp(prefix="painter-raw-")
     try:
         v = get_vault()

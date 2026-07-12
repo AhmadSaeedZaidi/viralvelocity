@@ -59,6 +59,13 @@ async def store_audio_task(video: Video) -> tuple[str, bytes] | None:
     run_logger = get_run_logger()
     vid_id = video.id
 
+    # Idempotent: a video whose audio is already stored is never re-extracted
+    # (P1b per-step state). The claim gate already excludes it; this guards
+    # manual / out-of-band reruns from a redundant ffmpeg + vault write.
+    if video.audio_phase == "DONE":
+        run_logger.info(f"Audio already stored for {vid_id} — skipping")
+        return None
+
     if not video.raw_uri:
         run_logger.error(f"No raw_uri for {vid_id} though fetched=TRUE — marking failed")
         await video_repo.mark_failed(vid_id)

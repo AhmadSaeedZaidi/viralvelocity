@@ -14,7 +14,7 @@ class VideoStateMixin(DatabaseAdapter):
     async def claim_scribe_batch(self, batch_size: int = 10) -> list[Video]:
         rows = await self._fetch_all(
             """
-            UPDATE videos SET status = 'PROCESSING'
+            UPDATE videos SET status = 'PROCESSING', transcript_phase = 'PROCESSING'
             WHERE id IN (
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
@@ -36,7 +36,7 @@ class VideoStateMixin(DatabaseAdapter):
         # already been fetched (fetched = TRUE).
         rows = await self._fetch_all(
             """
-            UPDATE videos SET status = 'PROCESSING'
+            UPDATE videos SET status = 'PROCESSING', visuals_phase = 'PROCESSING'
             WHERE id IN (
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
@@ -60,7 +60,7 @@ class VideoStateMixin(DatabaseAdapter):
         """
         rows = await self._fetch_all(
             """
-            UPDATE videos SET status = 'PROCESSING'
+            UPDATE videos SET status = 'PROCESSING', raw_phase = 'PROCESSING'
             WHERE id IN (
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
@@ -84,7 +84,7 @@ class VideoStateMixin(DatabaseAdapter):
         """
         rows = await self._fetch_all(
             """
-            UPDATE videos SET status = 'PROCESSING'
+            UPDATE videos SET status = 'PROCESSING', audio_phase = 'PROCESSING'
             WHERE id IN (
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
@@ -103,7 +103,7 @@ class VideoStateMixin(DatabaseAdapter):
     async def claim_muralist_batch(self, batch_size: int = 5) -> list[Video]:
         rows = await self._fetch_all(
             """
-            UPDATE videos SET status = 'PROCESSING'
+            UPDATE videos SET status = 'PROCESSING', clip_phase = 'PROCESSING'
             WHERE id IN (
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
@@ -129,7 +129,7 @@ class VideoStateMixin(DatabaseAdapter):
             SET has_transcript = TRUE,
                 last_updated_at = %s,
                 status = CASE WHEN has_visuals THEN 'PROCESSED' ELSE status END
-            WHERE id = %s
+            WHERE id = %s AND transcript_phase <> 'DONE'
             """,
             (now, video_id),
         )
@@ -142,7 +142,7 @@ class VideoStateMixin(DatabaseAdapter):
             SET has_visuals = TRUE,
                 last_updated_at = %s,
                 status = CASE WHEN has_transcript THEN 'PROCESSED' ELSE status END
-            WHERE id = %s
+            WHERE id = %s AND visuals_phase <> 'DONE'
             """,
             (now, video_id),
         )
@@ -161,40 +161,44 @@ class VideoStateMixin(DatabaseAdapter):
                 raw_uri = %s,
                 raw_stored_at = %s,
                 last_updated_at = %s
-            WHERE id = %s
+            WHERE id = %s AND raw_phase <> 'DONE'
             """,
             (raw_uri, now, now, video_id),
         )
 
     async def reclaim_raw_if_complete(self, video_id: str) -> int:
-        """Delete the raw artifact once BOTH consumers have derived from it.
+        """Delete the raw artifact once every raw-consuming step has joined.
 
-        The unified ``raw`` file is shared by the singer (audio) and painter
-        (frames). It is only safe to reclaim once ``has_audio`` AND
-        ``has_visuals`` are both TRUE — otherwise the second consumer would find
-        its input gone. Returns the number of files reclaimed (0 or 1).
+        This is the **join barrier** of the ``raw → {singer, painter, muralist}``
+        fan-out (see proposals docs). The raw is only safe to reclaim once the
+        parallel consumers that read it are all ``DONE`` — ``audio`` (singer) and
+        ``visuals`` (painter) are mandatory; ``clip`` (muralist) is mandatory too
+        *unless* the muralist is manual-only and the raw has aged past
+        ``RAW_TTL_HOURS`` (so disk stays bounded). Returns files reclaimed (0/1).
         """
         from atlas.config import settings
 
         row = await self._fetch_one(
             """
-            SELECT raw_uri, has_audio, has_visuals, has_video, raw_stored_at
+            SELECT raw_uri, audio_phase, visuals_phase, clip_phase, raw_stored_at
             FROM videos WHERE id = %s
             """,
             (video_id,),
         )
-        # Reclaim only once BOTH derived consumers are done. Requiring
-        # `has_audio` (singer) and `has_visuals` (painter) before touching the
-        # raw prevents reclaiming the input out from under a still-pending
+        # Join barrier: reclaim only once BOTH mandatory derived consumers are
+        # DONE. Requiring `audio` (singer) + `visuals` (painter) before touching
+        # the raw prevents reclaiming the input out from under a still-pending
         # consumer — the root cause of the muralist starvation bug.
-        if not row or not row["raw_uri"] or not (row["has_audio"] and row["has_visuals"]):
+        if not row or not row["raw_uri"]:
+            return 0
+        if not (row["audio_phase"] == "DONE" and row["visuals_phase"] == "DONE"):
             return 0
 
         # Keep the raw bounded when the muralist (clip producer) is disabled or
-        # manual-only: reclaim as soon as the clip exists, otherwise only after
+        # manual-only: reclaim as soon as the clip is DONE, otherwise only after
         # the raw has aged past RAW_TTL_HOURS. A NULL raw_stored_at (rows that
-        # predate this column) is never reclaimed via age — only via has_video.
-        has_video = row["has_video"]
+        # predate this column) is never reclaimed via age — only via clip DONE.
+        clip_done = row["clip_phase"] == "DONE"
         raw_stored_at = row["raw_stored_at"]
         raw_age_hours = (
             (datetime.now(UTC) - raw_stored_at).total_seconds() / 3600.0
@@ -202,7 +206,7 @@ class VideoStateMixin(DatabaseAdapter):
             else None
         )
         ttl_hours = settings.RAW_TTL_HOURS
-        if not has_video and not (raw_age_hours is not None and raw_age_hours > ttl_hours):
+        if not clip_done and not (raw_age_hours is not None and raw_age_hours > ttl_hours):
             return 0
 
         from atlas.vault import get_vault, meta_path
@@ -218,6 +222,41 @@ class VideoStateMixin(DatabaseAdapter):
         logger.info(f"Reclaimed {deleted} raw artifacts for {video_id}")
         return deleted
 
+    # ── P1b per-step state helpers (fan-out / fan-in) ──────────────────────
+
+    _STEP_COLUMNS = frozenset({"raw", "audio", "visuals", "transcript", "clip"})
+
+    async def begin_step(
+        self, video_id: str, step: str, phase: str = "PROCESSING"
+    ) -> None:
+        """Mark a step as in-progress. Idempotent: a DONE step is never
+        downgraded back to PROCESSING (so a re-claim of a finished row cannot
+        clobber its completed state)."""
+        await self.mark_step_phase(video_id, step, phase)
+
+    async def mark_step_phase(self, video_id: str, step: str, phase: str) -> None:
+        """Set a single step's phase column (PENDING/PROCESSING/DONE/FAILED).
+
+        The ``sync_step_phases`` trigger keeps the legacy boolean in sync, so
+        callers may drive either the phase or the boolean. Unknown step names
+        raise ``ValueError``.
+        """
+        if step not in self._STEP_COLUMNS:
+            raise ValueError(f"Unknown pipeline step: {step!r}")
+        now = datetime.now(UTC)
+        await self._execute(
+            f"UPDATE videos SET {step}_phase = %s::step_phase, last_updated_at = %s "
+            f"WHERE id = %s AND {step}_phase <> 'DONE'",
+            (phase, now, video_id),
+        )
+
+    async def get_pipeline_phase(self, video_id: str) -> str | None:
+        """Return the derived frontier (RAW/AUDIO/VISUALS/TRANSCRIPT/CLIP/DONE)."""
+        row = await self._fetch_one(
+            "SELECT pipeline_phase FROM videos WHERE id = %s", (video_id,)
+        )
+        return row["pipeline_phase"] if row else None
+
     async def mark_audio_safe(self, video_id: str) -> None:
         now = datetime.now(UTC)
         await self._execute(
@@ -225,7 +264,7 @@ class VideoStateMixin(DatabaseAdapter):
             UPDATE videos
             SET has_audio = TRUE,
                 last_updated_at = %s
-            WHERE id = %s
+            WHERE id = %s AND audio_phase <> 'DONE'
             """,
             (now, video_id),
         )
@@ -237,7 +276,7 @@ class VideoStateMixin(DatabaseAdapter):
             UPDATE videos
             SET has_video = TRUE,
                 last_updated_at = %s
-            WHERE id = %s
+            WHERE id = %s AND clip_phase <> 'DONE'
             """,
             (now, video_id),
         )

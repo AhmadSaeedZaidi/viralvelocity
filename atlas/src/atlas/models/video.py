@@ -5,6 +5,14 @@ from pydantic import BaseModel, ConfigDict
 
 VideoStatus = Literal["PENDING", "PROCESSING", "PROCESSED", "ARCHIVED", "FAILED"]
 
+# Per-step state for the fan-out / fan-in pipeline (P1b). Each derived artifact
+# has its own phase so a video's progress reads as a state, not a conjunction of
+# booleans. `raw` is the fan-out source produced by the streamer; `audio`
+# (singer), `visuals` (painter), `transcript` (scribe) and `clip` (muralist) are
+# the consumers. The legacy booleans remain as a transitional seam (kept in sync
+# by the `sync_step_phases` trigger) until P3.
+StepPhase = Literal["PENDING", "PROCESSING", "DONE", "FAILED"]
+
 
 class Video(BaseModel):  # type: ignore[misc]
     id: str
@@ -26,6 +34,15 @@ class Video(BaseModel):  # type: ignore[misc]
     has_video: bool = False
     fetched: bool = False
     raw_uri: str | None = None
+    # ── P1b per-step phases ──
+    raw_phase: StepPhase = "PENDING"
+    audio_phase: StepPhase = "PENDING"
+    visuals_phase: StepPhase = "PENDING"
+    transcript_phase: StepPhase = "PENDING"
+    clip_phase: StepPhase = "PENDING"
+    # Derived frontier (see `pipeline_frontier` in schema.sql); queryable for
+    # ops/monitoring, never drives claim selection.
+    pipeline_phase: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
