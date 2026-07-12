@@ -140,23 +140,30 @@ async def test_fetch_source_handles_extraction_failure():
 
 
 @pytest.mark.asyncio
-async def test_fetch_source_propagates_quota():
+async def test_fetch_source_releases_quota_to_pending():
+    """Quota exhaustion releases the video to PENDING instead of crashing the
+    whole service (which would crash-loop on the auto-restart during bulk
+    healing)."""
     from atlas.models import Video
 
     video = Video(id="VIDEO_001", title="Test Video")
 
     with (
-        patch("maia.streamer.flow.VideoRepository"),
+        patch("maia.streamer.flow.VideoRepository") as MockRepo,
         patch("maia.streamer.flow.StealthVideoStreamer") as MockStreamer,
         patch("maia.streamer.flow.notify_quota_exhausted", new_callable=AsyncMock),
     ):
+        mock_repo = MockRepo.return_value
+        mock_repo.release_to_pending = AsyncMock()
         mock_streamer_instance = MockStreamer.return_value
         mock_streamer_instance.download_unified = MagicMock(
             side_effect=QuotaExhaustedError("All keys exhausted")
         )
 
-        with pytest.raises(QuotaExhaustedError):
-            await fetch_source_task.fn(video)
+        result = await fetch_source_task.fn(video)
+
+        assert result is None
+        mock_repo.release_to_pending.assert_awaited_once_with("VIDEO_001")
 
 
 @pytest.mark.asyncio

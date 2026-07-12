@@ -118,6 +118,44 @@ def _find_json3_file(tmpdir: str, video_id: str) -> Path | None:
     return None
 
 
+# yt-dlp side artifacts that must NEVER be treated as the audio stream. These
+# routinely coexist in the temp dir alongside the real audio file (metadata
+# JSON, partial downloads, captions) and a naive "any file containing the id"
+# scan would wrongly pick them up — pointing the singer at JSON/partial data.
+_METADATA_EXTS = {
+    ".json", ".json3", ".info", ".part", ".tmp", ".ytdl",
+    ".jpg", ".png", ".vtt", ".srt", ".sbv", ".ass",
+}
+# Container extensions that can carry the audio stream we want.
+_AUDIO_MEDIA_EXTS = {
+    ".webm", ".m4a", ".opus", ".mp3", ".aac", ".ogg", ".oga",
+    ".flac", ".mka", ".wav", ".mp4", ".mkv",
+}
+
+
+def _find_audio_file(dest_dir: str | Path, video_id: str) -> Path | None:
+    """Robustly locate the downloaded audio artifact in *dest_dir*.
+
+    Ignores yt-dlp metadata (``.info.json``, ``.json3``), partial downloads
+    (``.part``) and other side artifacts so the singer is never pointed at
+    non-audio data. Returns ``None`` only when no media file is present (caller
+    then treats the fetch as failed and releases the video for retry).
+    """
+    candidates = [
+        f
+        for f in Path(dest_dir).iterdir()
+        if f.is_file()
+        and video_id in f.stem
+        and f.suffix.lower() not in _METADATA_EXTS
+        and f.suffix.lower() in _AUDIO_MEDIA_EXTS
+    ]
+    if not candidates:
+        return None
+    # Deterministic selection.
+    candidates.sort(key=lambda p: p.name)
+    return candidates[0]
+
+
 def _parse_json3_file(path: Path) -> list[dict[str, Any]]:
     """Parse a yt-dlp JSON3 subtitle file into ``[{text, start, duration}]``."""
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -223,7 +261,7 @@ class StealthVideoStreamer:
                 "--extractor-args",
                 f"youtube:player_client={player_clients}",
                 "-f",
-                "bestaudio/best",
+                "bestaudio",
                 "--extract-audio",
                 "--audio-format",
                 "opus",
@@ -288,7 +326,7 @@ class StealthVideoStreamer:
                 # never download the (heavy) muxed video. The painter's frame
                 # source comes from the stream URLs in the info.json below.
                 "-f",
-                "bestaudio/best",
+                "bestaudio",
                 "--write-info-json",
                 "-o",
                 f"{dest_dir}/%(id)s.%(ext)s",
@@ -309,10 +347,7 @@ class StealthVideoStreamer:
             # is missing). If YouTube rate-limits the metadata endpoint, the
             # audio has usually already been downloaded — salvage it instead of
             # failing the whole fetch and stalling the singer downstream.
-            audio_path = next(
-                (f for f in Path(dest_dir).iterdir() if f.is_file() and video_id in f.stem),
-                None,
-            )
+            audio_path = _find_audio_file(dest_dir, video_id)
             if audio_path is None:
                 if looks_like_rate_limit(stderr):
                     logger.warning(f"[yt-dlp] Rate-limit for {video_id}: {stderr[:120]}")
@@ -325,10 +360,7 @@ class StealthVideoStreamer:
                 f"(continuing): {stderr[:160]}"
             )
         else:
-            audio_path = next(
-                (f for f in Path(dest_dir).iterdir() if f.is_file() and video_id in f.stem),
-                None,
-            )
+            audio_path = _find_audio_file(dest_dir, video_id)
 
         # Locate the produced metadata artifact.
         info_path = next(

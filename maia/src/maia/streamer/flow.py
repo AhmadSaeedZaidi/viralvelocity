@@ -97,8 +97,12 @@ async def fetch_source_task(
 
         return (vid_id, raw_uri, raw_bytes, meta_bytes)
     except QuotaExhaustedError:
+        # Quota exhaustion: release this video to PENDING for a later cycle
+        # instead of re-raising (which would crash the whole service and
+        # crash-loop on the auto-restart).
         await notify_quota_exhausted("streamer")
-        raise
+        await video_repo.release_to_pending(vid_id)
+        return None
     except StreamRateLimitError as e:
         # Transient — release back to PENDING so it retries on a later cycle.
         run_logger.warning(f"Rate-limited on {vid_id}, releasing: {e}")
