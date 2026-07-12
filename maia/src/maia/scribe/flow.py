@@ -33,12 +33,10 @@ from .transcription import (
 
 logger = logging.getLogger(__name__)
 
-# Concurrent transcripts — kept low because the VPS egress IP is flagged by
-# YouTube; aggressive concurrency triggers HTTP 429 (Too Many Requests).
+# Kept low because the VPS egress IP is flagged by YouTube; high concurrency triggers HTTP 429.
 MAX_CONCURRENT_TRANSCRIPTS = 2
 
-# Pacing delay (seconds) between transcript fetches to stay under YouTube's
-# per-IP rate limits.
+# Pacing delay (seconds) between transcript fetches to stay under YouTube's per-IP rate limits.
 SCRIBE_THROTTLE_SECONDS = 1.5
 
 
@@ -54,22 +52,17 @@ async def fetch_scribe_targets_task(batch_size: int) -> list[Video]:
 
 @task(name="process_transcript")
 async def process_transcript_task(video: Video) -> None:
-    """Transcribe a video and *stage* it locally for the janitor to persist.
+    """Transcribe a video and stage it locally for the janitor to persist.
 
-    The Scribe is the single owner of caption fetching. It fetches via the
-    shared multi-client cascade (with 429-release-to-PENDING backoff), and only
-    if no captions exist does it fall back to speech-to-text on the singer's
-    stored audio (read from the vault — no extra YouTube fetch), downloading
-    audio from YouTube as a last resort. The Streamer no longer touches
-    captions, so the `timedtext` throttle surface lives only here.
+    Idempotent on DONE. Releases to PENDING on rate-limit (for retry) and marks
+    the video safe when no transcript is available.
     """
     video_repo = VideoRepository()
     run_logger = get_run_logger()
     vid_id = video.id
 
-    # Idempotent: a video whose transcript is already DONE is never
-    # re-transcribed (P1b per-step state). The claim gate already excludes it;
-    # this guards manual / out-of-band reruns from redundant STT/quota use.
+    # Idempotent: a DONE video is never re-transcribed, guarding manual reruns
+    # from redundant STT/quota use (the claim gate already excludes it).
     if video.transcript_phase == "DONE":
         run_logger.info(f"Transcript already done for {vid_id} — skipping")
         return
@@ -106,16 +99,15 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
     """Return transcript segments, preferring vault artifacts over YouTube."""
     vid_id = video.id
 
-    # 1) YouTube caption fetch via the Scribe's multi-client cascade + 429
-    #    release-to-PENDING backoff. This is the ONLY place that hits the
-    #    `timedtext` endpoint, so the throttle surface is centralized here.
+    # This is the ONLY place that hits the `timedtext` endpoint, so the throttle
+    # surface is centralized here.
     try:
         return TranscriptLoader().fetch(vid_id)
     except TranscriptExtractionError:
         pass  # no captions available — try audio STT below
 
-    # 2) Audio STT (paid Grok/Mistral fallback). Gated by our OWN daily cap so
-    #    we never blow the budget — captions above are free and preferred.
+    # Audio STT (paid Grok/Mistral fallback), gated by our own daily cap so we
+    # never blow the budget (captions above are free and preferred).
     if audio_cap_reached():
         raise TranscriptExtractionError(
             f"Daily audio-transcription cap reached; skipping paid STT for {vid_id}"
@@ -138,14 +130,12 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
 
 @flow(name="run_scribe_cycle")
 async def scribe_flow(batch_size: int) -> dict[str, Any]:
-    """
-    Execute a complete Scribe cycle: fetch videos, download transcripts, store to Vault.
+    """Execute a complete Scribe cycle: fetch videos, transcribe, store to Vault.
 
     Args:
-        batch_size: Number of videos to process
+        batch_size: Number of videos to process.
 
-    Returns:
-        Dictionary with cycle statistics
+    Returns a dict with cycle statistics.
     """
     run_logger = get_run_logger()
     run_logger.info("=== Starting Scribe Cycle ===")
@@ -179,11 +169,7 @@ async def scribe_flow(batch_size: int) -> dict[str, Any]:
 
 
 class ScribeAgent:
-    """
-    Scribe Agent: Transcript extraction and storage.
-
-    Implements the Agent protocol for polymorphic command dispatch.
-    """
+    """Scribe Agent: transcript extraction and storage."""
 
     name = "scribe"
 
@@ -202,16 +188,7 @@ class ScribeAgent:
         )
 
     async def run(self, batch_size: int = 10, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute a complete Scribe cycle.
-
-        Args:
-            batch_size: Number of videos to process
-            **kwargs: Additional arguments (ignored)
-
-        Returns:
-            Dictionary with cycle statistics
-        """
+        """Execute a complete Scribe cycle and return its statistics dict."""
         result: dict[str, Any] = await scribe_flow(batch_size=batch_size)
         return result
 

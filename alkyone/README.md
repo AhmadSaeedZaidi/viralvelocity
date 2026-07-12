@@ -344,6 +344,11 @@ When adding new features to Atlas or Maia:
 - [ ] Security testing
 - [ ] Contract testing between components
 
+## Design notes
+
+- **Vault routing override in `fixtures.py`:** Tests force-set `os.environ["HF_DATASET_ID"]` to the test vault (`Rolaficus/pleiades-vault-test`) *before* any `atlas` module is imported. Atlas's Pydantic `BaseSettings` reads `os.environ` before `.env`, and `HuggingFaceVault.__init__` snapshots `repo_id` from settings at construction time, so setting the value late would still write to production. Override the target via `HF_DATASET_ID_TEST`, or set `PLEIADES_USE_PRODUCTION_VAULT=1` to run a named E2E against the real vault.
+- **Mirroring settings back into `os.environ`:** `_mirror_settings_to_environ()` copies loaded `atlas.config.settings` values into `os.environ` because some libraries (e.g. `huggingface_hub`) and tests read `os.environ` directly, whereas Pydantic `BaseSettings` only updates the Settings object — not `os.environ` — when reading from `.env`.
+
 ---
 
 **Version**: 0.1.0  

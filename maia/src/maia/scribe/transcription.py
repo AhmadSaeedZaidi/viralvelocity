@@ -1,22 +1,8 @@
 """Transcription orchestration.
 
-Two distinct consumers of YouTube speech:
-
-* **Scribe** — captions only. It reads official/auto captions via the shared
-  ``StealthVideoStreamer`` (``transcribe_video`` → :class:`TranscriptLoader`).
-  It never downloads audio, so there is no STT-quota cost and no risk of
-  colliding with the streamer's single audio fetch.
-
-* **Singer** — audio only. It transcribes audio that the *streamer* producer has
-  already extracted and stored in the vault. ``transcribe_audio_path`` takes a
-  local audio file (fetched back from the vault) and runs the Grok → Mistral
-  cascade. Keeping audio extraction in one place (the streamer) means every
-  video is fetched from YouTube exactly once for its audio track.
-
-All paths return the vault schema ``[{text, start, duration}]`` and raise the
-scribe's shared exceptions so the flows' existing handlers apply:
-  * :class:`TranscriptRateLimitError` → release the video to PENDING (retry later)
-  * :class:`TranscriptExtractionError` → genuinely no transcript (mark done)
+The Scribe fetches captions only (no STT-quota cost); the Singer transcribes
+audio that the streamer already extracted and stored. Keeping audio extraction
+in the streamer means each video is fetched from YouTube exactly once.
 """
 
 import logging
@@ -56,9 +42,6 @@ class TranscriptResult:
     audio_ext: str = "opus"
 
 
-# ── Local-audio (already extracted to disk) ──────────────────────────────────
-
-
 def _transcribe_via_mistral_path(audio_path: Path) -> TranscriptResult:
     """Transcribe a local audio file with Voxtral."""
     segments = MistralTranscriber().transcribe(audio_path)
@@ -76,19 +59,13 @@ def transcribe_audio_path(
     strategy: str | None = None,
     language: str | None = None,
 ) -> TranscriptResult:
-    """Transcribe a *local* audio file according to the configured strategy.
+    """Transcribe a *local* audio file per the configured strategy.
 
-    Used by the **singer** consumer, which fetches the audio the streamer
-    already stored in the vault and writes it to a temp file before calling
-    this. Strategy (``settings.SCRIBE_TRANSCRIBER``):
-
-      * ``grok``    — audio → Grok STT only.
-      * ``mistral`` — audio → Voxtral only.
-      * ``auto``     — audio → Grok, falling back to audio → Voxtral.
-
-    Raises:
-        TranscriptRateLimitError: all available paths were rate-limited.
-        TranscriptExtractionError: no transcript could be produced.
+    Used by the **singer** consumer, which fetches the audio the streamer stored
+    in the vault. Strategy (``settings.SCRIBE_TRANSCRIBER``): ``grok`` (Grok only),
+    ``mistral`` (Voxtral only), or ``auto`` (Grok first, Mistral fallback).
+    Raises ``TranscriptRateLimitError`` if all paths were rate-limited, or
+    ``TranscriptExtractionError`` if no transcript could be produced.
     """
     from atlas.config import get_settings
 
@@ -140,9 +117,6 @@ def _grok_only_path(audio_path: Path) -> TranscriptResult:
         raise TranscriptExtractionError(f"Audio transcription failed: {e}") from e
 
 
-# ── Captions-only (Scribe) ───────────────────────────────────────────────────
-
-
 def transcribe_video(
     video_id: str,
     strategy: str | None = None,
@@ -150,10 +124,9 @@ def transcribe_video(
 ) -> TranscriptResult:
     """Transcribe *video_id* via official/auto **captions** only (Scribe).
 
-    The Scribe is captions-only by design: audio is extracted and stored
-    separately by the streamer producer, then transcribed by the singer
-    consumer. This keeps the YouTube audio fetch in one place and makes the
-    Scribe free of STT-quota cost / rate limits.
+    The Scribe is captions-only by design: audio is extracted and stored by the
+    streamer, then transcribed by the singer, keeping the Scribe free of
+    STT-quota cost and rate limits.
 
     Raises:
         TranscriptRateLimitError: captions were throttled on every client.
@@ -170,9 +143,6 @@ def transcribe_video(
     return TranscriptResult(TranscriptLoader().fetch(video_id), "captions")
 
 
-# Keep the YouTube-audio-download path available for ad-hoc/standalone use
-# (e.g. the manually-runnable muralist capability). It mirrors the local-audio
-# cascade but first downloads the audio via the shared streamer.
 def transcribe_audio_download(
     video_id: str,
     strategy: str | None = None,
@@ -180,8 +150,7 @@ def transcribe_audio_download(
 ) -> TranscriptResult:
     """Download *video_id*'s audio then run the Grok→Mistral cascade.
 
-    Used only by standalone tooling that is not part of the streamer/singer
-    fleet (the fleet stores audio via the streamer instead).
+    Used only by standalone tooling not part of the streamer/singer fleet.
     """
     from atlas.config import get_settings
 

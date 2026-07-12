@@ -16,8 +16,6 @@ from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponenti
 
 logger = logging.getLogger(__name__)
 
-# ── Rate-limit detection patterns ────────────────────────────────────────────
-
 YT_RATE_LIMIT_PATTERNS = [
     re.compile(r"429", re.IGNORECASE),
     re.compile(r"too many requests", re.IGNORECASE),
@@ -32,9 +30,6 @@ YT_RATE_LIMIT_PATTERNS = [
 def looks_like_rate_limit(stderr: str) -> bool:
     """Heuristic check — does *stderr* contain known YouTube rate-limit signals?"""
     return any(p.search(stderr) for p in YT_RATE_LIMIT_PATTERNS)
-
-
-# ── Adaptive concurrency controller ──────────────────────────────────────────
 
 
 async def _notify_rate_limit_downgrade(old_conc: int, new_conc: int, rate: float) -> None:
@@ -64,18 +59,11 @@ async def _notify_rate_limit_downgrade(old_conc: int, new_conc: int, rate: float
 
 
 class AdaptiveConcurrency:
-    """Sliding-window rate-limit monitor that dynamically lowers concurrency.
+    """Sliding-window monitor that lowers concurrency under sustained failure.
 
-    Tracks 429-like failures in a rolling time window.  If the failure rate
-    exceeds *max_failure_rate* the concurrency is halved (min 1).  After a
-    quiet period the concurrency is slowly restored.
-
-    Usage::
-
-        acc = AdaptiveConcurrency(max_concurrent=5, window_secs=300)
-        async with acc.sem:
-            ok = await do_work(...)
-        acc.record(ok)
+    Tracks 429-like failures in a rolling window; if the failure rate exceeds
+    *max_failure_rate* the concurrency is halved (min 1) and slowly restored
+    after a quiet period.
     """
 
     def __init__(
@@ -103,11 +91,9 @@ class AdaptiveConcurrency:
     def record(self, ok: bool) -> None:
         now = time.monotonic()
         self._window.append((now, not ok))
-        # Purge entries older than the window
         cutoff = now - self._window_secs
         self._window = [(ts, f) for ts, f in self._window if ts > cutoff]
 
-        # Compute failure rate
         if len(self._window) < 10:
             return
         failures = sum(1 for _, f in self._window if f)
@@ -115,7 +101,6 @@ class AdaptiveConcurrency:
 
         if rate > self._max_failure_rate and self._concurrency > 1:
             new_conc = max(1, self._concurrency // 2)
-            # Send Discord alert on first downgrade (cooldown 10 min)
             if now - self._last_downgrade > 600:
                 asyncio.ensure_future(
                     _notify_rate_limit_downgrade(self._concurrency, new_conc, rate)
@@ -131,7 +116,6 @@ class AdaptiveConcurrency:
             self._sem = asyncio.Semaphore(self._concurrency)
             self._last_downgrade = now
         elif rate < self._max_failure_rate / 2 and self._concurrency < self._max_concurrent:
-            # Slowly recover
             new_conc = min(self._concurrency + self._recovery_step, self._max_concurrent)
             self._concurrency = new_conc
             self._sem = asyncio.Semaphore(self._concurrency)
@@ -140,13 +124,9 @@ class AdaptiveConcurrency:
 async def notify_quota_exhausted(agent_name: str) -> None:
     """Send a Discord alert that all API keys are exhausted for *agent_name*.
 
-    The alert is **rate-limited**: it fires at most once per cooldown window
-    (``atlas.state.QUOTA_ALERT_COOLDOWN_S``) per agent, so the resiliency
-    restart/retry loop does not spam Discord on every attempt. The exhausted
-    state is also recorded so the heartbeat can show a "rate limited" status.
-
-    On a VPS with no container rotation this is the only signal — the
-    caller should back off for a period rather than retrying immediately.
+    Rate-limited to one per cooldown window per agent (so the resiliency
+    restart/retry loop does not spam Discord); the exhausted state is also
+    recorded so the heartbeat can show a "rate limited" status.
     """
     from atlas.state import (
         mark_quota_exhausted,
@@ -189,9 +169,6 @@ async def notify_quota_exhausted(agent_name: str) -> None:
 T = TypeVar("T")
 
 
-# ── Executor helpers ─────────────────────────────────────────────────────────
-
-
 def run_in_executor(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any, T]]:
     """Decorator that runs a **synchronous** function in the default executor.
 
@@ -207,26 +184,16 @@ def run_in_executor(func: Callable[..., T]) -> Callable[..., Coroutine[Any, Any,
     return wrapper
 
 
-# ── Vault retry helper ───────────────────────────────────────────────────────
-
-
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     before_sleep=before_sleep_log(logger, logging.WARNING),
 )
 async def vault_op_with_retry(fn: Callable[[], Any]) -> Any:
-    """Execute a synchronous Vault operation in a thread-pool with retry.
+    """Run a blocking Vault operation in a thread-pool, retrying on failure.
 
-    Wraps any blocking ``vault.*`` call so it runs off the event loop and
-    is retried up to 3 times with exponential back-off on any exception
-    (typically network failures to HuggingFace / GCS).
-
-    Usage::
-
-        from atlas.vault import get_vault
-        v = get_vault()
-        await vault_op_with_retry(lambda: v.store_transcript(vid, data))
+    Retries up to 3 times with exponential back-off (typically network
+    failures to HuggingFace / GCS).
     """
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, fn)

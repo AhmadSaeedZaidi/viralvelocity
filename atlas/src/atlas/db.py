@@ -61,38 +61,24 @@ class DatabaseManager:
             yield conn
 
     async def provision_schema(self) -> None:
-        """
-        Provision the production database schema.
+        """Provision the production database schema.
 
-        Mirrors :meth:`setup_test_schema` in being resilient to environments
-        (e.g. Neon, RDS, Crunchy) where the ``timescaledb`` / ``vector``
-        extensions are unavailable: extension creation and ``create_hypertable``
-        calls are best-effort, while ``CREATE TABLE`` statements are mandatory.
-        Unlike the old ``SchemaManager.provision`` (which executed the raw
-        ``schema.sql`` verbatim and crashed on managed Postgres), this will
-        succeed even without TimescaleDB by skipping hypertable conversion.
+        Resilient to managed Postgres (Neon/RDS/Crunchy) without TimescaleDB/
+        vector: extension creation and create_hypertable are best-effort while
+        CREATE TABLE statements remain mandatory.
         """
         await self._apply_schema(include_extensions=False)
 
     async def setup_test_schema(self) -> None:
-        """
-        Initialize database schema for tests.
-
-        Resilient to environments (e.g. Neon) where ``timescaledb`` or
-        ``vector`` extensions are unavailable: extension creation and
-        ``create_hypertable`` calls are best-effort, while CREATE TABLE
-        statements are mandatory.
-        """
+        """Initialize database schema for tests (TimescaleDB/vector best-effort)."""
         await self._apply_schema(include_extensions=False)
 
     async def _apply_schema(self, *, include_extensions: bool) -> None:
         from psycopg.errors import UndefinedFunction
 
         timescale_available = True
-        # Each extension is attempted in its own connection/transaction. On a
-        # managed Postgres without the extension packages installed, the CREATE
-        # fails; we must not let that abort a shared transaction (which would
-        # otherwise poison every subsequent statement). Best-effort: skip it.
+        # Each extension is attempted in its own connection/transaction so a
+        # managed Postgres without the package can't poison a shared transaction.
         for ext_sql in (
             "CREATE EXTENSION IF NOT EXISTS vector;",
             "CREATE EXTENSION IF NOT EXISTS timescaledb;",

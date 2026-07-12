@@ -1,24 +1,6 @@
 import os
 
-# ============================================================================
-# CRITICAL VAULT ROUTING — MUST RUN BEFORE ANY ``atlas.*`` IMPORT
-# ============================================================================
-# Production ``.env`` sets ``HF_DATASET_ID`` to the production vault
-# (Rolaficus/pleiades-vault). Tests MUST route writes to the test vault
-# (Rolaficus/pleiades-vault-test) to avoid polluting production.
-#
-# This override force-sets ``os.environ["HF_DATASET_ID"]`` BEFORE any module
-# from ``atlas`` is imported. Atlas's Pydantic ``BaseSettings`` reads
-# ``os.environ`` first (before ``.env``), so this guarantees:
-#   1. ``settings.HF_DATASET_ID`` is the test value when first instantiated.
-#   2. ``HuggingFaceVault.__init__`` (which snapshots ``self.repo_id`` from
-#      settings at construction time) writes to the test vault.
-#
-# Override may be customised via ``HF_DATASET_ID_TEST`` env var.
-# Set ``PLEIADES_USE_PRODUCTION_VAULT=1`` to run a named E2E against the real
-# ``HF_DATASET_ID`` from ``.env`` (default: ``Rolaficus/pleiades-vault``). All
-# other tests keep using the test dataset.
-# ============================================================================
+# Must run before any atlas import: atlas settings snapshot HF_DATASET_ID at import time.
 _TEST_VAULT_DEFAULT = "Rolaficus/pleiades-vault-test"
 _USE_PROD_VAULT = os.getenv("PLEIADES_USE_PRODUCTION_VAULT", "").lower() in (
     "1",
@@ -43,12 +25,7 @@ logger.info(f"Test session vault: {settings.HF_DATASET_ID}")
 
 
 def _mirror_settings_to_environ() -> None:
-    """Mirror loaded ``atlas.config.settings`` values back into ``os.environ``.
-
-    Required because some libraries (e.g. ``huggingface_hub``) and tests still
-    look at ``os.environ`` directly, but Pydantic BaseSettings only updates the
-    Settings object — not ``os.environ`` — when reading from ``.env``.
-    """
+    """Mirror loaded ``atlas.config.settings`` values back into ``os.environ``."""
     pairs: list[tuple[str, str]] = []
 
     if settings.DATABASE_URL and not os.getenv("DATABASE_URL"):
@@ -85,7 +62,6 @@ def _mirror_settings_to_environ() -> None:
 
 _mirror_settings_to_environ()
 
-# Test-runtime overrides (do not pollute production)
 os.environ["ENV"] = os.getenv("ENV", "development")
 os.environ["COMPLIANCE_MODE"] = os.getenv("COMPLIANCE_MODE", "False")
 
@@ -101,11 +77,7 @@ _uploaded_files: list[str] = []
 
 @pytest_asyncio.fixture(scope="session")
 async def system_init() -> AsyncGenerator[None, None]:
-    """
-    Session-level setup.
-    Validates that HuggingFace credentials are configured for integration tests.
-    Note: DB pool is now managed per-test by fresh_db fixture.
-    """
+    """Session-level setup that validates HuggingFace credentials for integration tests."""
     logger.info("Alkyone: Initializing System for Testing...")
 
     if not os.getenv("HF_TOKEN"):
@@ -127,9 +99,7 @@ async def system_init() -> AsyncGenerator[None, None]:
 
 @pytest_asyncio.fixture(scope="function")
 async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
-    """
-    Function-level fixture that provides a clean database for each test.
-    """
+    """Function-level fixture that provides a clean database for each test."""
     if db._pool is not None:
         await db.close()
         db._pool = None
@@ -143,7 +113,6 @@ async def fresh_db(system_init: Any) -> AsyncGenerator[None, None]:
         yield
 
     finally:
-        # Always close pool after test completes
         await db.close()
         db._pool = None
 
@@ -197,9 +166,6 @@ async def _cleanup_hf_uploads() -> None:
         logger.warning("huggingface_hub not installed, skipping cleanup")
     except Exception as e:
         logger.error(f"Error during HuggingFace cleanup: {e}")
-
-
-# --- TEST DATA FIXTURES ---
 
 
 @pytest.fixture

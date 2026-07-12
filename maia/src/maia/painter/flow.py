@@ -31,31 +31,22 @@ from maia.utils import notify_quota_exhausted, vault_op_with_retry
 
 logger = logging.getLogger(__name__)
 
-# CONCURRENCY CONTROL
-# The VPS egress IP is flagged by YouTube, so keep concurrency low to avoid
-# HTTP 429 (Too Many Requests). Each video also issues many FFmpeg range
-# requests, compounding the per-IP load.
+# The VPS egress IP is flagged by YouTube, so keep concurrency low to avoid HTTP 429.
 MAX_CONCURRENT_VIDEOS = 2
 
 # ── Frame-extraction policy ───────────────────────────────────────────────────
-# Frames are sampled on a uniform grid (one every FRAME_INTERVAL_SECONDS) and
-# augmented with chapter starts and "most replayed" heatmap peaks, then clamped
-# to [MIN_FRAMES, MAX_FRAMES]. Frames are downscaled to FRAME_HEIGHT (never
-# upscaled) and JPEG-encoded at FRAME_JPEG_QUALITY. Frame grabs cost no API
-# quota — only bandwidth/CPU/storage — so density can be tuned freely.
 FRAME_INTERVAL_SECONDS = 15.0
 MIN_FRAMES = 4
 MAX_FRAMES = 60
 HEATMAP_PEAKS = 8
 FRAME_HEIGHT = 720
-# Stored frame format. WebP is ~50% smaller than JPEG at comparable quality and
-# is universally supported by ML/vision tooling.
+# WebP is ~50% smaller than JPEG at comparable quality and is universally
+# supported by ML/vision tooling.
 FRAME_FORMAT = "webp"
 FRAME_WEBP_QUALITY = 80  # libwebp -quality (0–100)
 FRAME_JPEG_QUALITY = 3  # ffmpeg -q:v fallback when FRAME_FORMAT="jpg" (≈ q90)
-# Prefer a source stream at or just above the target height to minimise download.
-# Prefer an efficient codec (AV1/VP9) for the frame source, but keep it at full
-# 720p — keyframes are analysed at native resolution, not downscaled.
+# Prefer a source stream at/just above the target height and an efficient codec
+# (AV1/VP9) to minimise download; keyframes are analysed at native resolution.
 STREAM_TARGET_HEIGHT = 720
 
 
@@ -154,24 +145,12 @@ def _is_valid_image(data: bytes, ext: str) -> bool:
 
 
 def _ffmpeg_extract_frame(stream_url: str, timestamp: float) -> bytes | None:
-    """
-    SURGICAL EXTRACTION: Uses FFmpeg to seek and grab a single frame.
+    """Grab a single frame via FFmpeg (faster than OpenCV for remote streams).
 
-    Much faster than OpenCV for remote streams because FFmpeg handles HTTP Range
-    requests and network seeking optimally. Only downloads the bytes needed for
-    a single frame instead of buffering the entire video.
-
-    The frame is encoded to a *temp file*, never piped to stdout. The WebP muxer
-    requires a seekable output, so piping WebP to ``-`` corrupts the RIFF
-    container — that was producing invalid images in the vault. JPEG also pipes
-    unreliably, so a temp file is used for both formats.
-
-    Args:
-        stream_url: Direct stream URL (mp4 preferred for seeking)
-        timestamp: Target timestamp in seconds
-
-    Returns:
-        Encoded image bytes (webp/jpeg) or None if extraction failed
+    Encodes to a temp file, never piped to stdout: the WebP muxer needs a
+    seekable output, so piping WebP to ``-`` corrupts the RIFF container
+    (which was producing invalid vault images); JPEG pipes unreliably too.
+    Returns encoded image bytes or None on failure.
     """
     fd, out_path = tempfile.mkstemp(suffix=f".{FRAME_FORMAT}")
     os.close(fd)
@@ -263,27 +242,18 @@ def _extract_frames_surgical(
 async def process_frames_task(video: Video) -> tuple[str, list[tuple[int, bytes]]] | None:
     """Extract keyframes for a single video (FFmpeg surgical extraction).
 
-    **Preferred path (no extra YouTube session):** read the ``info.json`` the
-    unified streamer stashed in the vault (``meta/{id}.info.json``), pick a
-    low-res AV1/VP9 stream URL, and pull frames via **HTTP range requests**
-    straight from YouTube's CDN. This keeps the whole pipeline to a single
-    YouTube session (the streamer's) while staying bandwidth-light.
-
-    **Fallback path:** legacy rows with no vault metadata get a fresh YouTube
-    ``extract_info`` (the only other YouTube touch) to obtain a current stream
-    URL; the stashed CDN URL is also refreshed once if it has expired.
-
-    Returns ``(video_id, frames_to_vault)`` on success, or ``None`` on hard
-    failure (video marked FAILED). Storage is deferred to the flow level.
+    Preferred path: read the streamer's stashed ``meta/{id}.info.json`` from the
+    vault and pull frames via HTTP range requests from YouTube's CDN (one YouTube
+    session). Legacy rows with no vault metadata fall back to a fresh YouTube
+    ``extract_info``. Returns ``(video_id, frames_to_vault)`` or ``None`` on hard
+    failure. Storage is deferred to the flow level.
     """
     video_repo = VideoRepository()
     run_logger = get_run_logger()
     vid_id = video.id
 
-    # Idempotent: a video whose visuals are already extracted is never
-    # re-processed (P1b per-step state). The claim gate already excludes it;
-    # this guards manual / out-of-band reruns (incl. `repaint` resets it to
-    # PENDING so genuine recollection is unaffected).
+    # Idempotent: a DONE video is never re-processed; this guards manual reruns
+    # (the claim gate already excludes it, and `repaint` resets to PENDING).
     if video.visuals_phase == "DONE":
         run_logger.info(f"Visuals already extracted for {vid_id} — skipping")
         return None
@@ -296,11 +266,9 @@ async def process_frames_task(video: Video) -> tuple[str, list[tuple[int, bytes]
         chapters: list[float] = []
         heatmap: list[float] = []
 
-        # Preferred path: the unified streamer stashed the video's *stream URLs*
-        # (and metadata) in the vault as meta/{id}.info.json. We pull frames via
-        # HTTP range requests straight from YouTube's CDN — no full download and
-        # no second YouTube metadata session. (The raw artifact is audio-only and
-        # is consumed by the singer, not the painter.)
+        # Preferred path: the unified streamer stashed the video's stream URLs
+        # and metadata in the vault as meta/{id}.info.json, so we pull frames via
+        # HTTP range requests from YouTube's CDN (no second YouTube session).
         meta_buf = await asyncio.to_thread(v.fetch_binary, meta_path(vid_id))
         info: dict[str, Any] | None = None
         if meta_buf is not None:
@@ -347,8 +315,8 @@ async def process_frames_task(video: Video) -> tuple[str, list[tuple[int, bytes]
         )
 
         if not frames_to_vault:
-            # The stashed CDN URL is signed and short-TTL; it may have expired.
-            # Retry once with a fresh YouTube metadata pull before giving up.
+            # The stashed CDN URL is signed and short-TTL; it may have expired,
+            # so retry once with a fresh YouTube metadata pull before giving up.
             if meta_buf is not None:
                 run_logger.warning(
                     f"Frame pull failed for {vid_id} via vault URL (likely expired); refreshing"
@@ -391,11 +359,10 @@ async def process_frames_task(video: Video) -> tuple[str, list[tuple[int, bytes]
 
 @flow(name="run_painter_cycle")
 async def painter_flow(batch_size: int) -> dict[str, Any]:
-    """
-    Execute a complete Painter cycle with PARALLEL processing.
+    """Execute a complete Painter cycle with parallel processing.
 
-    Uses a semaphore to control concurrency (default: 5 concurrent videos).
-    Each video is processed independently with FFmpeg surgical extraction.
+    Uses a semaphore (``MAX_CONCURRENT_VIDEOS``) to bound concurrency; each video
+    is processed independently with FFmpeg surgical extraction.
     """
     run_logger = get_run_logger()
     run_logger.info(
@@ -423,11 +390,8 @@ async def painter_flow(batch_size: int) -> dict[str, Any]:
     if quota_errors:
         raise quota_errors[0]
 
-    # Collect successfully-extracted frames and write the WHOLE batch to the
-    # vault in a SINGLE commit (instead of 1 commit per video). This keeps us
-    # far under HuggingFace's 128-commits/hour account cap during bulk
-    # recollection. Any video whose extraction failed has already been marked
-    # FAILED/RELEASED inside process_frames_task and is absent from `extracted`.
+    # Write the whole batch to the vault in ONE commit to stay under HuggingFace's
+    # 128-commits/hour account cap; failed/RELEASED videos are absent here.
     extracted: list[tuple[str, list[tuple[int, bytes]]]] = [
         r for r in results if isinstance(r, tuple)
     ]
@@ -455,7 +419,7 @@ async def painter_flow(batch_size: int) -> dict[str, Any]:
 
 
 class PainterAgent:
-    """Painter Agent: Video keyframe extraction."""
+    """Painter Agent: video keyframe extraction."""
 
     name = "painter"
 

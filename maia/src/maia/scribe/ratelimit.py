@@ -1,9 +1,7 @@
 """Process-wide client-side pacing for paid STT providers (Grok/Mistral).
 
-We never rely on the provider's own 429 alone: we pace our own calls so we
-stay well under their per-minute quotas and never blow the daily budget.
-Thread-safe and synchronous — these transcribers run inside
-``asyncio.to_thread`` workers, so a threading lock is the right primitive.
+Paces our own calls so we stay under provider per-minute quotas rather than
+relying on their 429 alone. Thread-safe — used inside ``asyncio.to_thread`` workers.
 """
 
 import threading

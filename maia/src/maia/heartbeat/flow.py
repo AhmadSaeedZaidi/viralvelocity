@@ -1,14 +1,7 @@
 """Maia Heartbeat: periodic fleet online-status reporter.
 
-Runs as a lightweight polling daemon (systemd), like the other agents: it
-collects service liveness + pipeline metrics once per cycle, posts a status
+Collects service liveness + pipeline metrics once per cycle, posts a status
 embed to Discord, and exits (systemd restarts it on its timer).
-
-The status embed answers "is Pleiades online and making progress?" at a glance:
-  * which systemd units are active (agents + PO-token provider)
-  * pipeline counts by lifecycle status
-  * transcript / visual coverage
-  * ingestion in the last hour
 """
 
 import argparse
@@ -24,8 +17,8 @@ from atlas.state import quota_exhausted_agents
 logger = logging.getLogger(__name__)
 
 # systemd units that make up the fleet (agents + PO-token provider).
-# NOTE: `muralist` is intentionally NOT listed — it is a manual-only capability
-# with no systemd unit, so there is nothing for the heartbeat to probe.
+# `muralist` is intentionally NOT listed — it is a manual-only capability with
+# no systemd unit, so there is nothing for the heartbeat to probe.
 FLEET_UNITS = [
     "pleiades-hunter",
     "pleiades-archeologist",
@@ -42,11 +35,10 @@ FLEET_UNITS = [
 def _unit_state(unit: str) -> tuple[str, str]:
     """Return ``(label, health)`` for *unit* (best-effort, no sudo).
 
-    ``health`` is one of ``healthy`` / ``warn`` / ``down``. The polling agents
-    are oneshot loops: they run a short cycle, exit 0, then sit in
-    ``activating (auto-restart)`` until the next ``RestartSec`` tick. That is a
-    *healthy* steady state — only a non-zero last exit or a ``failed`` unit is a
-    real problem.
+    ``health`` is ``healthy`` / ``warn`` / ``down``. The polling agents are
+    oneshot loops: they run a short cycle, exit 0, then sit in
+    ``activating (auto-restart)`` until the next ``RestartSec`` tick — a *healthy*
+    steady state. Only a non-zero last exit or a ``failed`` unit is a real problem.
     """
     try:
         result = subprocess.run(
@@ -92,13 +84,10 @@ async def collect_pipeline_metrics() -> dict[str, Any]:
 async def check_audio_api_health() -> tuple[str, str]:
     """Probe the configured speech-to-text endpoint for liveness.
 
-    Returns ``(status, detail)`` where ``status`` is ``healthy`` / ``degraded`` /
-    ``down``. We issue a tiny OPTIONS/GET-style probe to the Grok STT (or Mistral
-    Voxtral) endpoint using the configured key; a 401/403 means the service is
-    reachable but the key is bad, a 2xx/4xx (non-timeout) means reachable, and a
-    connection error means the endpoint is down.
-
-    Best-effort: never raises — a failure is reported as a degraded status.
+    Returns ``(status, detail)`` with status ``healthy`` / ``degraded`` / ``down``.
+    Issues a tiny probe using the configured key; a 401/403 means reachable but
+    bad key, a 2xx/4xx (non-timeout) means reachable, a connection error means
+    down. Best-effort: never raises.
     """
     from atlas.config import get_settings
 

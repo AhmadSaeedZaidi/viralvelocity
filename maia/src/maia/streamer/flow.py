@@ -1,17 +1,9 @@
 """Maia Streamer: YouTube source fetcher (network pull only).
 
-FIRST half of the streamer/singer split. The streamer does the network-heavy,
-rate-limit-prone YouTube download of a video's best audio stream and stores it
-to the vault as a raw artifact at ``raw/{id}.{ext}``, then flags the video
-``fetched``. It does NOT extract audio or call any STT API.
-
-The **singer** consumer later fetches that raw artifact and runs ffmpeg
-locally to extract the speech track into ``audio/{id}.opus`` — keeping the
-YouTube rate-limit surface confined to this single agent.
-
-Keeping the YouTube fetch here — and only here — means each video is pulled
-from YouTube exactly once for its speech track, instead of the Scribe
-re-downloading audio per video (which is what triggered per-IP 429s before).
+The streamer does the network-heavy, rate-limit-prone YouTube download of a
+video's best audio stream and stores it to the vault as a raw artifact, then
+flags the video ``fetched``. The singer later extracts speech locally, keeping
+the YouTube rate-limit surface confined to this single agent.
 """
 
 import argparse
@@ -61,24 +53,18 @@ async def fetch_source_task(
 ) -> tuple[str, str, bytes, bytes | None] | None:
     """Unified YouTube fetch for *video*; return ``(id, raw_uri, raw_bytes, meta_bytes)``.
 
-    Calls the shared streamer's single ingress (``download_unified``) which
-    pulls the audio + metadata (incl. stream URLs) in ONE YouTube session.
-    Captions are intentionally NOT fetched here — that is owned by the Scribe.
-    Storage is deferred to the flow level so an entire batch is written to the
-    vault in ONE commit, keeping us under HuggingFace's 128-commits/hour cap.
-    Returns ``None`` on failure (the video has already been released/marked).
-
-    ``QuotaExhaustedError`` and ``StreamRateLimitError`` are re-raised so the
-    flow can apply backoff / retry policy.
+    Calls the shared streamer's single ingress (``download_unified``) which pulls
+    the audio + metadata in ONE YouTube session. Captions are NOT fetched here
+    (owned by the Scribe); storage is deferred to the flow level so a batch is
+    written in ONE commit. Returns ``None`` on failure.
     """
 
     video_repo = VideoRepository()
     run_logger = get_run_logger()
     vid_id = video.id
 
-    # Idempotent: a video whose raw is already fetched is never re-pulled
-    # (P1b per-step state). The claim gate already excludes it; this guards
-    # manual / out-of-band reruns from a redundant YouTube fetch.
+    # Idempotent: a DONE video is never re-pulled; this guards manual reruns
+    # from a redundant YouTube fetch (the claim gate already excludes it).
     if video.raw_phase == "DONE":
         run_logger.info(f"Raw already fetched for {vid_id} — skipping")
         return None
@@ -97,9 +83,8 @@ async def fetch_source_task(
 
         return (vid_id, raw_uri, raw_bytes, meta_bytes)
     except QuotaExhaustedError:
-        # Quota exhaustion: release this video to PENDING for a later cycle
-        # instead of re-raising (which would crash the whole service and
-        # crash-loop on the auto-restart).
+        # Release to PENDING for a later cycle instead of re-raising (which would
+        # crash the whole service and crash-loop on the auto-restart).
         await notify_quota_exhausted("streamer")
         await video_repo.release_to_pending(vid_id)
         return None

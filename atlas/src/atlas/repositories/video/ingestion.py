@@ -134,8 +134,8 @@ class VideoIngestionMixin(DatabaseAdapter):
                 await conn.commit()
                 return
 
-            # Duration comes from contentDetails when the item was enriched via
-            # videos.list (search snippets don't include it).
+            # Duration only comes from contentDetails, present when enriched via
+            # videos.list (search snippets omit it).
             duration = _parse_iso_duration(video_data.get("contentDetails", {}).get("duration"))
 
             await conn.execute(

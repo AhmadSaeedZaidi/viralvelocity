@@ -1,9 +1,7 @@
 """Audio extraction for speech-to-text transcription.
 
-Downloads a compact, speech-optimised audio track for a video via the shared
-:class:`~maia.media.streamer.StealthVideoStreamer` — the same yt-dlp + Deno
-PoToken path the Painter uses — so there is a single YouTube stream path across
-the whole system.
+Downloads a compact, speech-optimised audio track via the shared
+:class:`~maia.media.streamer.StealthVideoStreamer`.
 """
 
 import logging

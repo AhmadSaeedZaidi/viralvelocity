@@ -17,11 +17,9 @@ _STATE_PATH = Path("/var/lib/pleiades/agent_state.json")
 # Suppress repeat quota alerts for the same agent within this window (seconds).
 QUOTA_ALERT_COOLDOWN_S = 6 * 3600
 
-# A quota-exhausted mark auto-expires after this long (seconds) even if the agent
-# never reports a success. Quota recovers on its own (YouTube Data API = daily,
-# HuggingFace commits = hourly), and without a TTL a single historical mark would
-# be reported by the heartbeat forever. Agents also clear their own mark on a
-# successful cycle (see clear_quota_exhausted), so this is just a safety net.
+# A quota-exhausted mark auto-expires after this long (seconds): quota recovers on
+# its own (YouTube daily, HF hourly), so without a TTL a stale mark would be
+# reported by the heartbeat forever. Agents also clear their own mark on success.
 QUOTA_EXHAUSTED_TTL_S = 6 * 3600
 
 
@@ -101,7 +99,6 @@ def record_quota_alert(agent_name: str) -> None:
     _write(state)
 
 
-# ── Daily audio-transcription cap ──────────────────────────────────────────
 # Paid STT (Grok/Mistral) has a daily quota; once hit we fall back to
 # captions-only for the rest of the day so we don't blow the budget.
 def _daily_audio_cap() -> int:
@@ -129,7 +126,6 @@ def record_audio_usage(count: int = 1) -> None:
     """Increment today's audio-fallback usage counter."""
     state = _read()
     usage = state.setdefault("audio_usage", {})
-    # roll over: drop days older than today
     today = _today()
     usage = {d: c for d, c in usage.items() if d >= today}
     usage[today] = usage.get(today, 0) + count

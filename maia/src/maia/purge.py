@@ -1,18 +1,7 @@
 """Purge short / low-quality videos from the database and the vault.
 
-The Hunter quality gate now stops *new* Shorts / AI-slop at ingestion, but the
-corpus may already contain low-value clips. This command removes videos shorter
-than a duration threshold (default 3 minutes) — including any artifacts they
-already produced (audio, frames, full video, transcript, metadata JSON).
-
-Overwrite-on-reprocess: video IDs are the primary key everywhere and every vault
-artifact path is derived deterministically from the video ID
-(``audio/{id}.opus``, ``frames/{id}/...``, ``videos/{id}.mp4``,
-``transcripts/{id}.json``, ``metadata/{date}/{id}.json``). So if a purged video
-is rediscovered, re-ingestion recreates the DB row (``ON CONFLICT DO UPDATE``)
-and the agents overwrite the *same* vault paths in place — no duplicate writes,
-exactly the "overwrite the bits" behaviour requested. The purge simply clears
-the stale low-quality copy first.
+Removes videos shorter than a duration threshold (default 3 min) and any
+artifacts they produced (audio, frames, video, transcript, metadata).
 """
 
 import logging
@@ -35,12 +24,10 @@ def collect_artifact_paths(
     video_ids: list[str],
     metadata_files: list[str] | None = None,
 ) -> list[str]:
-    """Return every *existing* vault path associated with the given video IDs.
+    """Return every existing vault path associated with the given video IDs.
 
-    Only paths that are actually present in the vault are returned, so the
-    subsequent delete does not 404 on artifacts that were never stored (e.g. a
-    video with no extracted audio). Existence is checked per prefix via
-    ``list_files`` rather than probing each speculative path.
+    Paths are checked per prefix via ``list_files`` rather than probed
+    individually, so the delete never 404s on artifacts that were never stored.
     """
     paths: list[str] = []
 
@@ -134,18 +121,13 @@ async def purge_transcripts(
 ) -> dict[str, Any]:
     """Reset (uncheck) transcripts for a scoped set of videos.
 
-    This is the "uncheck / mark-as-unprocessed + organic overwrite" reset, *not*
-    a destructive delete. The videos are returned to ``PENDING`` with
-    ``has_transcript = FALSE``; the transcript *rows are left in place*. When the
-    Scribe re-claims them it ``record_transcript`` upserts (``ON CONFLICT DO
-    UPDATE``), overwriting the stale content in place — no fragile
-    delete-then-insert and no window where data is nulled before being rewritten.
+    A non-destructive "uncheck + organic overwrite" reset: videos go back to
+    ``PENDING`` with ``has_transcript = FALSE`` but their transcript rows stay
+    in place, so the Scribe re-upserts over them (``ON CONFLICT DO UPDATE``)
+    instead of a delete-then-insert.
 
-    Scopes:
-      - ``all``            : every video with a transcript.
-      - ``without_visuals``: transcript present but no stored visuals (default).
-      - ``without_audio``  : transcript present but no stored audio.
-      - ``pending``        : transcript present but still PENDING (unvetted).
+    Scopes: ``all``, ``without_visuals`` (default), ``without_audio``,
+    ``pending``.
 
     Args:
         scope: Which transcripts to reset (see above).

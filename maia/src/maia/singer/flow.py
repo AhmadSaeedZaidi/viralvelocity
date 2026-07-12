@@ -1,15 +1,10 @@
 """Maia Singer: local audio extractor + vault storer (no STT).
 
-SECOND half of the streamer/singer split. For every video the **streamer** has
-fetched (``fetched`` TRUE, raw artifact stored at ``raw/{id}.{ext}``) but which
-still lacks stored audio, the singer fetches that raw artifact, runs ffmpeg
-*locally* to extract the speech track into ``audio/{id}.opus``, stores it to the
-vault, and flips ``has_audio``.
-
-Crucially the singer performs NO YouTube network call and NO speech-to-text API
-call (Grok/Mistral). Transcription is a separate concern handled by the scribe
-(with those providers as STT fallbacks). This keeps all rate-limit-prone work in
-the streamer and all paid STT work out of this agent.
+For every video the **streamer** has fetched but which still lacks stored audio,
+the singer fetches that raw artifact, runs ffmpeg *locally* to extract the speech
+track into ``audio/{id}.opus``, stores it to the vault, and flips ``has_audio``.
+The singer performs NO YouTube call and NO speech-to-text API call — transcription
+is handled separately by the scribe.
 """
 
 import argparse
@@ -59,9 +54,8 @@ async def store_audio_task(video: Video) -> tuple[str, bytes] | None:
     run_logger = get_run_logger()
     vid_id = video.id
 
-    # Idempotent: a video whose audio is already stored is never re-extracted
-    # (P1b per-step state). The claim gate already excludes it; this guards
-    # manual / out-of-band reruns from a redundant ffmpeg + vault write.
+    # Idempotent: a DONE video is never re-extracted; this guards manual reruns
+    # from a redundant ffmpeg + vault write (the claim gate already excludes it).
     if video.audio_phase == "DONE":
         run_logger.info(f"Audio already stored for {vid_id} — skipping")
         return None

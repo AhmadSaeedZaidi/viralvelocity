@@ -1,19 +1,10 @@
 """Shared YouTube stream machinery for Maia (Painter + Scribe).
 
-Every agent that touches a YouTube media or caption stream (the Painter grabs
-video frames, the Scribe downloads audio for speech-to-text and official
-captions) must solve YouTube's BotGuard/PoToken challenge the *same* way. This
-module is the single source of truth for that yt-dlp + Deno invocation, so the
-anti-rate-limit flags (``--js-runtimes deno:...``, ``--remote-components
-ejs:github``, ``--impersonate``) live in exactly one place and cannot drift.
-
-Design note — "scribe asks painter for the stream": both agents now go through
-this one :class:`StealthVideoStreamer`. The Scribe no longer builds its own
-yt-dlp command; it calls :meth:`StealthVideoStreamer.extract_audio` and
-:meth:`StealthVideoStreamer.extract_captions`, which use the identical
-invocation shape the Painter uses. (A future step can have the Painter fetch a
-single muxed stream and split out audio/captions for the Scribe to avoid two
-network fetches entirely.)
+Every agent that touches a YouTube media/caption stream must solve YouTube's
+BotGuard/PoToken challenge the same way, so this module is the single source of
+truth for the yt-dlp + Deno invocation — the anti-rate-limit flags
+(``--js-runtimes deno:...``, ``--remote-components ejs:github``,
+``--impersonate``) live in exactly one place and cannot drift.
 """
 
 import json
@@ -50,9 +41,8 @@ _YTDLP_BASE = [
     "Chrome-131",
 ]
 
-# Try to locate a JS runtime for BotGuard challenge solving (Deno preferred).
-# yt-dlp 2026 renamed ``--js-runtime`` -> ``--js-runtimes`` and requires Deno
-# >= 2.3.0; this is the single place that fact is encoded.
+# yt-dlp 2026 renamed --js-runtime -> --js-runtimes and requires Deno >= 2.3.0;
+# this is the single place that fact is encoded.
 _JS_RUNTIME: list[str] = []
 for _candidate in (
     shutil.which("deno"),
@@ -65,7 +55,7 @@ for _candidate in (
 
 
 class StreamRateLimitError(Exception):
-    """Raised when yt-dlp is rate-limited (HTTP 429 / bot check).
+    """Raised on yt-dlp rate-limit (HTTP 429 / bot check).
 
     Deliberately NOT a subclass of ``DownloadError`` so the tenacity retry on
     ``extract_info`` does not re-hammer YouTube; the caller releases the video
@@ -86,11 +76,11 @@ class TranscriptExtractionError(Exception):
 
 
 class TranscriptRateLimitError(TranscriptExtractionError):
-    """Raised when yt-dlp is rate-limited (HTTP 429 / bot check).
+    """Raised on yt-dlp rate-limit (HTTP 429 / bot check).
 
     Distinct from :class:`TranscriptExtractionError` so the flow can release the
-    video back to PENDING for a later retry instead of permanently marking it as
-    having no transcript.
+    video back to PENDING for a later retry instead of marking it as having no
+    transcript.
     """
 
 
@@ -118,18 +108,37 @@ def _find_json3_file(tmpdir: str, video_id: str) -> Path | None:
     return None
 
 
-# yt-dlp side artifacts that must NEVER be treated as the audio stream. These
-# routinely coexist in the temp dir alongside the real audio file (metadata
-# JSON, partial downloads, captions) and a naive "any file containing the id"
-# scan would wrongly pick them up — pointing the singer at JSON/partial data.
+# yt-dlp side artifacts (metadata JSON, partial downloads, captions) routinely
+# coexist with the real audio file; a naive "any file containing the id" scan
+# would wrongly point the singer at JSON/partial data, so they are excluded.
 _METADATA_EXTS = {
-    ".json", ".json3", ".info", ".part", ".tmp", ".ytdl",
-    ".jpg", ".png", ".vtt", ".srt", ".sbv", ".ass",
+    ".json",
+    ".json3",
+    ".info",
+    ".part",
+    ".tmp",
+    ".ytdl",
+    ".jpg",
+    ".png",
+    ".vtt",
+    ".srt",
+    ".sbv",
+    ".ass",
 }
 # Container extensions that can carry the audio stream we want.
 _AUDIO_MEDIA_EXTS = {
-    ".webm", ".m4a", ".opus", ".mp3", ".aac", ".ogg", ".oga",
-    ".flac", ".mka", ".wav", ".mp4", ".mkv",
+    ".webm",
+    ".m4a",
+    ".opus",
+    ".mp3",
+    ".aac",
+    ".ogg",
+    ".oga",
+    ".flac",
+    ".mka",
+    ".wav",
+    ".mp4",
+    ".mkv",
 }
 
 
@@ -199,8 +208,6 @@ class StealthVideoStreamer:
             else:
                 logger.warning(f"Cookies file not found: {p}. Proceeding without auth.")
 
-    # ── Extraction ───────────────────────────────────────────────────────
-
     def _build_cmd(self, video_url: str) -> list[str]:
         cmd = yt_dlp_base(self.cookies_path) + ["--dump-json", "--no-download"]
         cmd.append(video_url)
@@ -246,8 +253,6 @@ class StealthVideoStreamer:
         sorted_points = sorted(valid_points, key=lambda x: x.get("value", 0), reverse=True)
         return [p.get("start_time", 0.0) for p in sorted_points[:top_n]]
 
-    # ── Shared media paths used by the Scribe ────────────────────────────
-
     def extract_audio(
         self, video_id: str, dest_dir: str, player_clients: str = "default,tv"
     ) -> Path:
@@ -290,24 +295,15 @@ class StealthVideoStreamer:
         dest_dir: str,
         player_clients: str = "default,tv",
     ) -> tuple[Path, Path | None]:
-        """Unified YouTube ingress: download the *audio* + metadata for
-        *video_id* in a SINGLE yt-dlp invocation.
+        """Unified YouTube ingress: download the audio + metadata for *video_id*
+        in a SINGLE yt-dlp invocation.
 
-        This is the one and only YouTube network call in the pipeline. It
-        produces, in *dest_dir*:
-
-        * the audio stream (``<id>.<ext>``) — the singer extracts speech from it
-          locally (no re-download),
-        * ``meta/<id>.info.json`` — yt-dlp metadata **including every format's
-          stream URL**, so the painter can pull frames via HTTP range requests
-          straight from YouTube's CDN (again with no extra YouTube session).
-
-        Captions are deliberately NOT fetched here: the ``timedtext`` endpoint is
-        the one YouTube surface that throttles this VPS's egress IP (HTTP 429),
-        and bolting it onto the audio download poisons the whole fetch. Caption
-        ownership is centralized in the Scribe (multi-client cascade + 429
-        release-to-PENDING backoff, plus an audio-STT fallback), so the audio
-        path is never endangered by caption throttling. Returns
+        Produces the audio stream (the singer extracts speech from it locally)
+        and ``meta/<id>.info.json`` (every format's stream URL, so the painter
+        pulls frames via HTTP range requests from YouTube's CDN). Captions are
+        deliberately NOT fetched here: the ``timedtext`` endpoint is the one
+        YouTube surface that throttles this VPS's egress IP, and bolting it onto
+        the audio download poisons the whole fetch. Returns
         ``(audio_path, info_path | None)``.
 
         Raises:
@@ -322,9 +318,9 @@ class StealthVideoStreamer:
             extra=[
                 "--extractor-args",
                 f"youtube:player_client={player_clients}",
-                # Audio-only: the singer re-encodes this to opus locally, so we
-                # never download the (heavy) muxed video. The painter's frame
-                # source comes from the stream URLs in the info.json below.
+                # Audio-only: the singer re-encodes to opus locally, so we never
+                # download the heavy muxed video (the painter's frame source comes
+                # from the stream URLs in the info.json).
                 "-f",
                 "bestaudio",
                 "--write-info-json",
@@ -342,11 +338,10 @@ class StealthVideoStreamer:
             stderr = result.stderr.strip()
             from maia.utils import looks_like_rate_limit
 
-            # The audio is the critical artifact; the info.json is best-effort
-            # (the painter falls back to its own YouTube metadata fetch when it
-            # is missing). If YouTube rate-limits the metadata endpoint, the
-            # audio has usually already been downloaded — salvage it instead of
-            # failing the whole fetch and stalling the singer downstream.
+            # The audio is the critical artifact; info.json is best-effort (the
+            # painter falls back to its own YouTube metadata fetch). If YouTube
+            # rate-limits the metadata endpoint, the audio has usually already
+            # been downloaded — salvage it instead of failing the whole fetch.
             audio_path = _find_audio_file(dest_dir, video_id)
             if audio_path is None:
                 if looks_like_rate_limit(stderr):

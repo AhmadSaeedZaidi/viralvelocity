@@ -84,9 +84,8 @@ class VideoTrackingMixin(DatabaseAdapter):
         """
         now = datetime.now(UTC)
 
-        # Batch both statements into two round-trips instead of 2*N, and let
-        # the server reuse the prepared plan (PostgreSQL Engineering: batch
-        # queries / avoid N+1).
+        # Batch both statements into two round-trips (not 2*N) so the server
+        # reuses the prepared plan.
         ts_params = [(now, u["id"]) for u in updates]
         log_params = [
             (

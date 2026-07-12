@@ -51,7 +51,6 @@ class Settings(BaseSettings):  # type: ignore[misc]
         True, description="Verify data exists in Vault before deletion"
     )
 
-    # ── Raw artifact reclaim (streamer → singer/painter/muralist) ─────────────
     RAW_TTL_HOURS: int = Field(
         48,
         description=(
@@ -72,7 +71,6 @@ class Settings(BaseSettings):  # type: ignore[misc]
         description="Raw Netscape cookies.txt content (written to temp file at startup)",
     )
 
-    # ── Transcription (Scribe) ──────────────────────────────────────────────
     MISTRAL_API_KEY: SecretStr | None = Field(
         None, description="Mistral API key for Voxtral speech-to-text transcription"
     )
@@ -104,7 +102,6 @@ class Settings(BaseSettings):  # type: ignore[misc]
         description="Persist the extracted audio (opus) to the vault after transcription.",
     )
 
-    # ── Heuristic quality gate (pre-ingestion) ──────────────────────────────
     QUALITY_GATE_ENABLED: bool = Field(
         True, description="Reject low-value videos before ingest / snowball."
     )
@@ -118,9 +115,7 @@ class Settings(BaseSettings):  # type: ignore[misc]
         0.005, description="Minimum (likes+comments)/views engagement ratio."
     )
 
-    # ── Shorts detection (HEAD probe) ──────────────────────────────────────
-    # The Data API has no `isShort` flag, so we probe the Shorts URL: a 200
-    # means it is a Short, a 3xx redirect to /watch means it is long-form.
+    # The Data API has no `isShort` flag, so we HEAD-probe /shorts/{id} (200=Short, 3xx=long-form).
     QUALITY_SHORTS_HEAD_ENABLED: bool = Field(
         True,
         description="Detect Shorts via HEAD probe to /shorts/{id} (200=Short, 3xx=long-form).",
@@ -134,9 +129,8 @@ class Settings(BaseSettings):  # type: ignore[misc]
         8, description="Max concurrent HEAD probes per batch."
     )
 
-    # ── AI-slop / AI-generated detection (no API flag exists) ───────────────
-    # Conservative phrases indicating the *video itself* is AI-generated
-    # (not videos merely *about* AI). Tunable; empty list disables.
+    # No API flag marks AI-generated videos, so we match conservative regexes on
+    # title/description/tags (tunable; empty disables).
     QUALITY_AI_DENYLIST: list[str] = Field(
         default_factory=lambda: [
             r"\b(ai[- ]?generated|ai[- ]?created|ai[- ]?made)\b",
@@ -149,7 +143,6 @@ class Settings(BaseSettings):  # type: ignore[misc]
         description="Regexes (title/description/tags) indicating AI-generated content.",
     )
 
-    # ── Channel-statistics gate (AI-farm / spam filter) ─────────────────────
     QUALITY_MIN_SUBSCRIBERS: int = Field(
         50,
         description=(
@@ -176,10 +169,6 @@ class Settings(BaseSettings):  # type: ignore[misc]
         ),
     )
 
-    # ── Search-queue dynamic scoring & decay ────────────────────────────────
-    # Score = mention_count * MENTION_WEIGHT
-    #       - hours_in_queue * DECAY_PER_HOUR
-    #       + priority (manual boost)
     SEARCH_QUEUE_MENTION_WEIGHT: float = Field(
         1.5, description="Weight applied to mention_count in the queue score."
     )
@@ -210,10 +199,8 @@ class Settings(BaseSettings):  # type: ignore[misc]
                 keys_list = keys_parsed
 
             if self.COMPLIANCE_MODE:
-                # Compliance mode enforces policy limits (e.g. via logging /
-                # attribution), but it must NOT collapse the key pool — doing
-                # so silently disables rotation and guarantees exhaustion on the
-                # first quota error. Rotation and resilience are always kept.
+                # Compliance mode must never collapse the key pool — that would
+                # disable rotation and guarantee quota exhaustion on the first 429.
                 logger.warning(
                     "COMPLIANCE_MODE is enabled: applying conservative API policy "
                     "enforcement, but all keys remain available for rotation."
@@ -225,10 +212,9 @@ class Settings(BaseSettings):  # type: ignore[misc]
     def effective_pool_sizes(self) -> tuple[int, int]:
         """Return ``(tracking_size, archeology_size)`` in effect.
 
-        A cached dynamic allocation (written weekly by the janitor based on the
-        corpus size) takes precedence; otherwise the static ``.env`` sizes are
-        used. Reading the cache here keeps config free of any database
-        dependency — the corpus is only queried by the refresh job.
+        A cached dynamic allocation (written weekly by the janitor from the corpus
+        size) takes precedence; otherwise the static ``.env`` sizes are used. Reading
+        the cache keeps config free of any database dependency.
         """
         from atlas.key_pool import load_override
 
@@ -255,9 +241,8 @@ class Settings(BaseSettings):  # type: ignore[misc]
         archeology_keys = raw_keys[-archeology_size:]
         remaining = raw_keys[:-archeology_size]
 
-        # Hunting keeps the bulk of the remaining keys (and the 100/day
-        # search.list bucket makes it the ring that rate-limits first); tracking
-        # is the cheap videos.list ring and gets a protected, smaller slice.
+        # Hunter keeps the bulk (its 100/day search.list bucket rate-limits
+        # first); tracking is the cheap videos.list ring with a protected slice.
         hunting_size = total_keys - tracking_size - archeology_size
         hunting_keys = remaining[:hunting_size]
         tracking_keys = remaining[hunting_size:]
@@ -306,10 +291,10 @@ _settings_instance: Settings | None = None
 def get_settings() -> Settings:
     """Lazily initialised settings singleton.
 
-    ``from atlas.config import settings`` triggers ``__getattr__`` below
-    which calls this function on first access, so **no env vars are read or
-    validated at module-import time**.  Tests can replace ``_settings_instance``
-    directly or call ``reset_settings()`` before supplying their own env.
+    ``from atlas.config import settings`` triggers ``__getattr__`` below which
+    calls this on first access, so no env vars are read or validated at import
+    time. Tests can replace ``_settings_instance`` or call ``reset_settings()``
+    beforehand.
     """
     global _settings_instance
     if _settings_instance is None:

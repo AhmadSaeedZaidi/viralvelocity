@@ -86,12 +86,8 @@ class VaultStrategy(abc.ABC):
     def store_visual_evidence_batch(
         self, entries: list[tuple[str, list[tuple[int, bytes]], str]]
     ) -> None:
-        """Store keyframes for MANY videos in a SINGLE commit.
-
-        ``entries`` is a list of ``(video_id, frames, ext)`` tuples. Bundling
-        multiple videos into one HuggingFace commit keeps us far under the
-        128-commits/hour account cap during bulk recollection.
-        """
+        """Store keyframes for many videos in a single HF commit (stays under
+        the 128-commits/hour cap)."""
         pass
 
     @abc.abstractmethod
@@ -257,11 +253,9 @@ class HuggingFaceVault(VaultStrategy):
         return f"hf://datasets/{self.repo_id}/{path}"
 
     def delete_files(self, paths: list[str]) -> int:
-        """Delete the given repo-relative ``paths`` in batched commits.
-
-        Chunked (500/commit) so a large purge stays well under HuggingFace's
-        128-commits/hour account cap. Returns the number of files deleted.
-        """
+        """Delete the given repo-relative ``paths`` in batched commits (chunked
+        to stay under HF's 128-commits/hour cap). Returns the number of files
+        deleted."""
         if not paths:
             return 0
         total = 0
@@ -302,15 +296,9 @@ class HuggingFaceVault(VaultStrategy):
     def store_batch(
         self, items: list[tuple[str, Any]], max_attempts: int = 8, base_delay: float = 30.0
     ) -> list[str]:
-        """Write many files in a SINGLE commit (avoids the 128 commits/hour limit).
-
-        Retries internally on HTTP 429 (HuggingFace's account-wide commit cap),
-        backing off exponentially, so callers do not need their own retry
-        wrapper. ``items`` is a list of ``(path_in_repo, data)`` where ``data``
-        is either a JSON-serialisable object or an ``io.BytesIO`` (binary).
-
-        Returns the list of vault URIs, in input order.
-        """
+        """Write many files in a SINGLE commit (avoids HF's 128 commits/hour
+        cap); retries internally on 429 with exponential backoff. Returns vault
+        URIs in input order."""
         if not items:
             return []
         operations = []
@@ -372,16 +360,9 @@ class HuggingFaceVault(VaultStrategy):
         date: str | None = None,
         hour: str | None = None,
     ) -> None:
-        """
-        Append time-series metrics to partitioned Parquet files.
-
-        Each call writes an **individual batch file** (timestamped) rather than
-        reading, concatenating, and rewriting the accumulated file.  This avoids:
-        - **Lost updates** — concurrent calls each write their own file instead
-          of racing on a single shared file.
-        - **O(n²) overhead** — every append previously rewrote every row written
-          so far; now each batch is exactly its own size.
-        """
+        """Append time-series metrics as partitioned Parquet, writing each
+        call's batch to its own timestamped file (avoids lost updates and
+        O(n²) rewrites)."""
         if not data:
             logger.warning("No metrics data to append")
             return
@@ -570,13 +551,9 @@ class GCSVault(VaultStrategy):
         date: str | None = None,
         hour: str | None = None,
     ) -> None:
-        """
-        Append time-series metrics to partitioned Parquet files in GCS.
-
-        Each call writes an **individual batch file** (timestamped) rather than
-        reading, concatenating, and rewriting the accumulated file.  This avoids
-        lost updates (race on a single shared file) and O(n²) rewrite overhead.
-        """
+        """Append time-series metrics as partitioned Parquet, writing each
+        call's batch to its own timestamped file (avoids lost updates and
+        O(n²) rewrites)."""
         if not data:
             logger.warning("No metrics data to append")
             return

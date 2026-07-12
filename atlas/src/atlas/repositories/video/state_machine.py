@@ -9,8 +9,6 @@ logger = logging.getLogger("atlas.repositories.video.state_machine")
 
 
 class VideoStateMixin(DatabaseAdapter):
-    # ── State Machine: Claim methods (atomic PENDING → PROCESSING) ────────
-
     async def claim_scribe_batch(self, batch_size: int = 10) -> list[Video]:
         rows = await self._fetch_all(
             """
@@ -30,9 +28,7 @@ class VideoStateMixin(DatabaseAdapter):
         return [Video.model_validate(r) for r in rows]
 
     async def claim_painter_batch(self, batch_size: int = 5) -> list[Video]:
-        # Painter is now a *consumer*: it reads the raw artifact the unified
-        # streamer stored in the vault, so it only processes videos that have
-        # already been fetched (fetched = TRUE).
+        # Painter consumes the vault-stored raw, so it only processes already-fetched videos.
         rows = await self._fetch_all(
             """
             UPDATE videos SET status = 'PROCESSING', visuals_phase = 'PROCESSING'
@@ -52,10 +48,10 @@ class VideoStateMixin(DatabaseAdapter):
         return [Video.model_validate(r) for r in rows]
 
     async def claim_streamer_batch(self, batch_size: int = 5) -> list[Video]:
-        """Claim videos whose YouTube source has NOT yet been fetched.
+        """Claim videos whose YouTube source has not yet been fetched.
 
-        The streamer does the network pull only; the singer later extracts the
-        audio from the stored raw artifact.
+        The streamer does the network pull; the singer later extracts the audio
+        from the stored raw artifact.
         """
         rows = await self._fetch_all(
             """
@@ -75,11 +71,10 @@ class VideoStateMixin(DatabaseAdapter):
         return [Video.model_validate(r) for r in rows]
 
     async def claim_singer_batch(self, batch_size: int = 5) -> list[Video]:
-        """Claim videos that have been fetched but whose audio is not stored yet.
+        """Claim fetched videos whose audio is not stored yet.
 
-        The singer fetches the raw artifact, extracts the speech track locally
-        (no YouTube rate limit), stores ``audio/{id}.opus``, and flips
-        ``has_audio``.
+        The singer extracts the speech track locally (no YouTube rate limit),
+        stores ``audio/{id}.opus``, and flips ``has_audio``.
         """
         rows = await self._fetch_all(
             """
@@ -117,8 +112,6 @@ class VideoStateMixin(DatabaseAdapter):
             (batch_size,),
         )
         return [Video.model_validate(r) for r in rows]
-
-    # ── State Machine: Transition helpers ─────────────────────────────────
 
     async def mark_transcript_safe(self, video_id: str) -> None:
         now = datetime.now(UTC)
@@ -174,12 +167,7 @@ class VideoStateMixin(DatabaseAdapter):
     async def reclaim_raw_if_complete(self, video_id: str) -> int:
         """Delete the raw artifact once every raw-consuming step has joined.
 
-        This is the **join barrier** of the ``raw → {singer, painter, muralist}``
-        fan-out (see proposals docs). The raw is only safe to reclaim once the
-        parallel consumers that read it are all ``DONE`` — ``audio`` (singer) and
-        ``visuals`` (painter) are mandatory; ``clip`` (muralist) is mandatory too
-        *unless* the muralist is manual-only and the raw has aged past
-        ``RAW_TTL_HOURS`` (so disk stays bounded). Returns files reclaimed (0/1).
+        Returns files reclaimed (0/1).
         """
         from atlas.config import settings
 
@@ -190,19 +178,15 @@ class VideoStateMixin(DatabaseAdapter):
             """,
             (video_id,),
         )
-        # Join barrier: reclaim only once BOTH mandatory derived consumers are
-        # DONE. Requiring `audio` (singer) + `visuals` (painter) before touching
-        # the raw prevents reclaiming the input out from under a still-pending
-        # consumer — the root cause of the muralist starvation bug.
+        # Join barrier: reclaim only once both mandatory consumers (audio+visuals)
+        # are DONE, so we never pull the input out from under a pending consumer.
         if not row or not row["raw_uri"]:
             return 0
         if not (row["audio_phase"] == "DONE" and row["visuals_phase"] == "DONE"):
             return 0
 
-        # Keep the raw bounded when the muralist (clip producer) is disabled or
-        # manual-only: reclaim as soon as the clip is DONE, otherwise only after
-        # the raw has aged past RAW_TTL_HOURS. A NULL raw_stored_at (rows that
-        # predate this column) is never reclaimed via age — only via clip DONE.
+        # Reclaim when the clip is DONE, or once the raw has aged past RAW_TTL_HOURS
+        # (a NULL raw_stored_at is only reclaimed via clip DONE).
         clip_done = row["clip_phase"] == "DONE"
         raw_stored_at = row["raw_stored_at"]
         raw_age_hours = (
@@ -222,29 +206,20 @@ class VideoStateMixin(DatabaseAdapter):
         except Exception as e:  # noqa: BLE001
             logger.warning(f"raw reclamation failed for {video_id}: {e}")
             return 0
-        # Clear the pointer so we never try to reclaim twice.
         await self._execute("UPDATE videos SET raw_uri = NULL WHERE id = %s", (video_id,))
         logger.info(f"Reclaimed {deleted} raw artifacts for {video_id}")
         return deleted
 
-    # ── P1b per-step state helpers (fan-out / fan-in) ──────────────────────
-
     _STEP_COLUMNS = frozenset({"raw", "audio", "visuals", "transcript", "clip"})
 
-    async def begin_step(
-        self, video_id: str, step: str, phase: str = "PROCESSING"
-    ) -> None:
-        """Mark a step as in-progress. Idempotent: a DONE step is never
-        downgraded back to PROCESSING (so a re-claim of a finished row cannot
-        clobber its completed state)."""
+    async def begin_step(self, video_id: str, step: str, phase: str = "PROCESSING") -> None:
+        """Mark a step in-progress; idempotent so a DONE step is never downgraded."""
         await self.mark_step_phase(video_id, step, phase)
 
     async def mark_step_phase(self, video_id: str, step: str, phase: str) -> None:
         """Set a single step's phase column (PENDING/PROCESSING/DONE/FAILED).
 
-        The ``sync_step_phases`` trigger keeps the legacy boolean in sync, so
-        callers may drive either the phase or the boolean. Unknown step names
-        raise ``ValueError``.
+        Unknown step names raise ``ValueError``.
         """
         if step not in self._STEP_COLUMNS:
             raise ValueError(f"Unknown pipeline step: {step!r}")
@@ -257,9 +232,7 @@ class VideoStateMixin(DatabaseAdapter):
 
     async def get_pipeline_phase(self, video_id: str) -> str | None:
         """Return the derived frontier (RAW/AUDIO/VISUALS/TRANSCRIPT/CLIP/DONE)."""
-        row = await self._fetch_one(
-            "SELECT pipeline_phase FROM videos WHERE id = %s", (video_id,)
-        )
+        row = await self._fetch_one("SELECT pipeline_phase FROM videos WHERE id = %s", (video_id,))
         return row["pipeline_phase"] if row else None
 
     async def mark_audio_safe(self, video_id: str) -> None:
@@ -291,12 +264,8 @@ class VideoStateMixin(DatabaseAdapter):
         )
 
     async def repaint_all_videos(self) -> int:
-        """Reset every video so its visual evidence is recollected.
-
-        Sets ``status='PENDING'`` and ``has_visuals=FALSE`` for all rows so the
-        painter re-claims and re-archives frames on its next cycle. Used after a
-        corruption fix to force re-ingestion of already-stored (bad) frames.
-        """
+        """Reset every video to PENDING and clear has_visuals so the Painter
+        re-collects frames (used after a frame-corruption fix)."""
         now = datetime.now(UTC)
         rows = await self._fetch_all(
             """
@@ -309,13 +278,8 @@ class VideoStateMixin(DatabaseAdapter):
         return len(rows)
 
     async def reset_failed_to_pending(self) -> int:
-        """Release every ``FAILED`` video back to ``PENDING`` for reprocessing.
-
-        Also clears ``has_visuals`` so the Painter re-claims and re-collects
-        (and overwrites) any bad frames left in the vault. Used to recover from
-        a run of failed cycles (e.g. the frame-corruption bug, transient quota
-        exhaustion) reported by the heartbeat as "FAILED: N".
-        """
+        """Release every FAILED video back to PENDING and clear has_visuals so
+        the Painter re-collects (recovers from failed cycles)."""
         now = datetime.now(UTC)
         rows = await self._fetch_all(
             """
@@ -340,11 +304,8 @@ class VideoStateMixin(DatabaseAdapter):
         )
 
     async def release_to_pending(self, video_id: str) -> None:
-        """Release a claimed (PROCESSING) video back to PENDING for retry.
-
-        Used for transient failures (e.g. rate limiting) so the video is
-        re-claimed on a later cycle instead of being marked done or failed.
-        """
+        """Release a claimed (PROCESSING) video back to PENDING for retry on
+        transient failures (e.g. rate limiting)."""
         now = datetime.now(UTC)
         await self._execute(
             """
@@ -367,13 +328,8 @@ class VideoStateMixin(DatabaseAdapter):
         )
 
     async def unmark_transcript(self, video_id: str) -> None:
-        """Revert a video to needing a transcript so the Scribe re-extracts it.
-
-        Used by quality-control audits: a video whose stored transcript/audio is
-        found corrupt is unchecked (``has_transcript=FALSE``) and returned to
-        ``PENDING`` so the Scribe re-claims and re-extracts it. ``has_visuals``
-        is left untouched so the Painter does not needlessly re-run.
-        """
+        """Revert a video to needing a transcript so the Scribe re-extracts it
+        (has_visuals left untouched)."""
         now = datetime.now(UTC)
         await self._execute(
             """
@@ -387,11 +343,8 @@ class VideoStateMixin(DatabaseAdapter):
     async def find_transcript_video_ids(self, scope: str = "without_visuals") -> list[str]:
         """Return IDs of videos whose transcript should be reset, by *scope*.
 
-        Scopes:
-          - ``all``            : every video with a transcript (``has_transcript``).
-          - ``without_visuals``: transcript present but no stored visuals.
-          - ``without_audio``  : transcript present but no stored audio.
-          - ``pending``        : transcript present but still ``PENDING`` (unvetted).
+        Scopes: ``all`` (every transcript), ``without_visuals``, ``without_audio``,
+        ``pending`` (transcript present but still PENDING/unvetted).
         """
         if scope == "all":
             where = "has_transcript = TRUE"
@@ -407,14 +360,10 @@ class VideoStateMixin(DatabaseAdapter):
         return [r["id"] for r in rows]
 
     async def unmark_transcripts_batch(self, video_ids: list[str]) -> int:
-        """Batch-uncheck transcripts so the Scribe cleanly re-derives them.
+        """Batch-uncheck transcripts (return to PENDING, clear ``has_transcript``).
 
-        Implements the "uncheck / mark-as-unprocessed + organic overwrite" reset:
-        each video is returned to ``PENDING`` and ``has_transcript`` cleared, but
-        the row is NOT deleted. When the Scribe re-claims it, ``record_transcript``
-        upserts (``ON CONFLICT DO UPDATE``) — overwriting the stale content in place
-        rather than a fragile delete-then-insert. The stale ``vault_write_pending``
-        flag is cleared too, so the janitor does not flush the old content.
+        The Scribe re-derives them via upsert (not delete-then-insert), and the
+        stale ``vault_write_pending`` flag is cleared so the janitor doesn't flush old content.
         """
         if not video_ids:
             return 0

@@ -17,8 +17,6 @@ _ARCHIVAL_BATCH_SIZE = 100
 
 
 class VideoJanitorMixin(DatabaseAdapter):
-    # ── Janitor: Sweep Phase ──────────────────────────────────────────────
-
     async def sweep_archivable(self, batch_size: int = _ARCHIVAL_BATCH_SIZE) -> list[Video]:
         cutoff = datetime.now(UTC) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
         rows = await self._fetch_all(
@@ -67,18 +65,11 @@ class VideoJanitorMixin(DatabaseAdapter):
     async def archive_video_batch(
         self: "VideoRepositoryProtocol", videos: list[Video], dry_run: bool = False
     ) -> dict[str, Any]:
-        """Serialize video metadata + stats to vault, then mark ARCHIVED and purge.
+        """Serialize video metadata + stats to the vault, mark ARCHIVED, then purge.
 
-        Vault operations are offloaded to a thread-pool via ``asyncio.to_thread``
-        since the vault adapter is synchronous (HF/GCS SDK).
-
-        The mark-archived + purge of the hot-tier rows happens inside a single
-        transaction so a failure mid-purge cannot leave a video marked ARCHIVED
-        while its stats/transcript rows are still present (which the janitor
-        would then never reclaim).
-
-        On vault failure: emits a ``janitor.archive_failed`` event, logs the error,
-        and **leaves the hot DB record untouched** (rollback by omission).
+        Vault writes run off the event loop via ``asyncio.to_thread``; the mark +
+        purge happen in one transaction, and on vault failure the hot record is
+        left untouched for retry.
         """
         from atlas.events import events
         from atlas.vault import get_vault
@@ -99,9 +90,8 @@ class VideoJanitorMixin(DatabaseAdapter):
         failed_count = 0
         failed_ids: list[str] = []
 
-        # Build every video's metadata first, then write the WHOLE sub-batch to
-        # the vault in a SINGLE commit (instead of 1 commit/video). This is the
-        # heart of the HuggingFace 128-commits/hour strategy.
+        # Write the whole sub-batch to the vault in a single commit to stay
+        # within HuggingFace's 128-commits/hour limit.
         batch_items: list[tuple[str, dict[str, Any]]] = []
         date_keys: dict[str, str] = {}
         for video in videos:
@@ -156,13 +146,10 @@ class VideoJanitorMixin(DatabaseAdapter):
                 "failed_ids": failed_ids,
             }
 
-        # Vault write succeeded for the whole batch. Now verify + mark ARCHIVED +
-        # purge hot-tier rows per video, each in its own atomic transaction.
         for video in videos:
             try:
                 date_key = date_keys[video.id]
 
-                # Verification interlock
                 if settings.JANITOR_SAFETY_CHECK:
                     verified = await asyncio.to_thread(v.fetch_metadata, video.id, date_key)
                     if not verified:
@@ -171,7 +158,6 @@ class VideoJanitorMixin(DatabaseAdapter):
                             "metadata not found after write"
                         )
 
-                # Mark ARCHIVED + purge hot-tier rows atomically.
                 now = datetime.now(UTC)
                 async with self._connection() as conn, conn.transaction():
                     await conn.execute(
@@ -205,28 +191,12 @@ class VideoJanitorMixin(DatabaseAdapter):
             "failed_ids": failed_ids,
         }
 
-    # ── Cold stats archival ───────────────────────────────────────────────
-
     async def archive_cold_stats(self, retention_days: int = 7, batch_size: int = 5000) -> int:
-        """Move old ``video_stats_log`` rows to the vault and purge them from hot.
-
-        Two correctness issues from the previous implementation are fixed here:
-
-        1. The ``FOR UPDATE`` row lock is **released before** the (blocking,
-           synchronous) vault network write. Previously the lock was held for
-           the entire upload, blocking concurrent writers and pinning a pooled
-           connection. We read+lock inside a short transaction, commit to
-           release the lock, then perform the vault upload off the event loop.
-        2. The purge ``DELETE`` uses a pairwise ``unnest(a, b)`` form which is a
-           guaranteed zip in every PostgreSQL version (the old
-           ``SELECT unnest(a), unnest(b)`` was a Cartesian product on PG < 10,
-           deleting unrelated rows).
-        """
+        """Move old ``video_stats_log`` rows to the vault and purge them from hot."""
         from atlas.vault import get_vault
 
         cutoff_date = datetime.now(UTC) - timedelta(days=retention_days)
 
-        # Step 1: read + lock the candidates, then commit to release the lock.
         async with self._connection() as conn, conn.transaction():
             cur = await conn.execute(
                 """
@@ -268,7 +238,6 @@ class VideoJanitorMixin(DatabaseAdapter):
         v = get_vault()
         await asyncio.to_thread(self._append_cold_metrics, v, stats_by_date)
 
-        # Step 3: purge the archived rows in their own transaction.
         video_ids = [p[0] for p in pairs]
         timestamps = [p[1] for p in pairs]
         deleted = await self._delete_cold_stats(video_ids, timestamps)
@@ -282,7 +251,7 @@ class VideoJanitorMixin(DatabaseAdapter):
             vault.append_metrics(day_stats, date=date_str)
 
     async def _delete_cold_stats(self, video_ids: list[str], timestamps: list[Any]) -> int:
-        # Pairwise unnest (multi-argument) is a guaranteed zip on all PG versions.
+        # Pairwise unnest is a guaranteed zip on all PG versions.
         await self._execute(
             """
             DELETE FROM video_stats_log
@@ -305,9 +274,7 @@ class VideoJanitorMixin(DatabaseAdapter):
         if settings.JANITOR_SAFETY_CHECK:
             safety_clause = "AND (has_transcript = TRUE OR has_visuals = TRUE)"
 
-        # The only terminal states eligible for hard deletion are PROCESSED and
-        # ARCHIVED. (The previous 'DONE' literal matched no rows, so the janitor
-        # silently deleted nothing.)
+        # Only PROCESSED and ARCHIVED rows are eligible for hard deletion.
         count_result = await self._fetch_one(
             f"""
             SELECT COUNT(*) as total

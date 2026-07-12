@@ -109,18 +109,16 @@ async def hunt_history_task(year: int, month: int, strategy: YouTubeSearchStrate
 async def archeology_flow(
     start_year: int, end_year: int, strategy: YouTubeSearchStrategy
 ) -> dict[str, Any]:
-    """
-    Execute an archeology campaign to discover historical videos.
+    """Execute an archeology campaign to discover historical videos.
 
-    WARNING: This consumes massive quota. Run sparingly.
+    WARNING: consumes massive YouTube quota — run sparingly.
 
     Args:
-        start_year: Start year for historical campaign
-        end_year: End year for historical campaign
-        strategy: YouTubeSearchStrategy for API access
+        start_year: Start year for the historical campaign.
+        end_year: End year for the historical campaign.
+        strategy: YouTubeSearchStrategy for API access.
 
-    Returns:
-        Dictionary with campaign statistics
+    Returns a dict with campaign statistics.
     """
     run_logger = get_run_logger()
     run_logger.info("Starting Archeology Campaign...")
@@ -142,11 +140,7 @@ async def archeology_flow(
 
 
 class ArcheologistAgent:
-    """
-    Archeologist Agent: Historical video discovery from past years.
-
-    Implements the Agent protocol for polymorphic command dispatch.
-    """
+    """Archeologist Agent: historical video discovery from past years."""
 
     name = "archeologist"
 

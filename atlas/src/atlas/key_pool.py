@@ -1,25 +1,7 @@
-"""Dynamic API key-pool allocation (quota-math balanced).
+"""Dynamic API key-pool allocation driven by quota economics.
 
-The YouTube key pool is split across three rings: ``hunting`` (fresh discovery),
-``tracking`` (stats refresh) and ``archeology`` (historical discovery).
-
-Allocation is driven by quota economics, not a fixed bulk/sliver split:
-
-* A ``search.list`` call (hunter) costs **100** quota units; a ``videos.list``
-  call (tracker) costs **1** unit. So per key the hunter burns ~100x faster.
-* Each ring's share of keys is allocated **proportional to its daily quota
-  demand** (operations x unit cost), then clamped by safety floors so no ring is
-  starved. Because the hunter is both the heaviest consumer and holds the bulk of
-  keys, it is the ring that rate-limits *first* — discovery backs off before the
-  tracker, keeping stats fresh. (Invariant: hunter keys always rate-limit before
-  tracker keys.)
-* ``archeology`` is a fixed reserve (``KEY_POOL_ARCHEOLOGY_SIZE``), floored at 2.
-
-The allocation is recomputed on a slow cadence (weekly) by
-:func:`refresh_allocation` and cached to a small JSON override file so that the
-frequently-restarting agents read a stable value without hitting the database on
-every startup. :func:`load_override` returns ``None`` when no valid cache exists,
-in which case the static ``.env`` sizes are used.
+Splits the pool into hunting/tracking/archeology rings and caches the result to
+a JSON override so agents read a stable value without querying the database.
 """
 
 import json
@@ -42,20 +24,16 @@ DEFAULT_ALLOCATION_PATH = Path(
 # Recompute cadence: only refresh once the cache is older than this.
 REFRESH_INTERVAL_DAYS = 7
 
-# Quota economics (YouTube Data API v3):
-#   * videos.list  -> 1 quota unit per call, up to 50 video IDs per call.
-#     This is the CHEAPEST call and is what the tracker uses to refresh stats.
-#   * search.list  -> 1 quota unit per call but its OWN bucket of 100 calls/day
-#     per project. Discovery (the hunter) must use it, so the hunter is the
-#     inherent throttle point regardless of key count.
+# Quota economics (YouTube Data API v3): videos.list costs 1 unit (<=50 ids/call,
+# the tracker's cheap stats refresh); search.list costs 1 unit but has its own
+# 100-calls/day-per-key bucket, so the hunter is the inherent throttle point.
 QUOTA_PER_KEY = 10_000
 VIDEO_BATCH = 50
 VIDEOS_LIST_UNIT_COST = 1
 SEARCH_UNIT_COST = 1
 SEARCH_BUCKET_PER_KEY = 100  # search.list calls/day per project/key
 
-# Demand proxies (daily operations). Tunable knobs; the point is the RATIO
-# driven by quota cost, not the absolute numbers.
+# Demand proxies (daily operations); the point is the RATIO driven by quota cost.
 TRACKER_REFRESHES_PER_DAY = 4  # full-corpus stats refreshes / day
 HUNTER_SEARCHES_PER_DAY = 1_500  # discovery searches / day
 
@@ -84,25 +62,9 @@ def compute_sizes(
 ) -> PoolSizes:
     """Compute ring sizes from quota math, balanced so no ring is starved.
 
-    Keys are allocated proportional to each ring's daily quota demand
-    (operations x unit cost), then clamped by safety floors:
-
-    * ``archeology`` is a fixed reserve, floored at 2 (never starved).
-    * ``tracking`` is the cheap ring (videos.list, 1 unit / <=50 ids), so its
-      raw demand is tiny; a floor keeps it from ever being the first ring to
-      exhaust.
-    * ``hunting`` keeps the bulk (and the 100/day search bucket makes it the
-      natural point that rate-limits *first*), with a floor so it is not
-      starved either.
-
-    Args:
-        total_keys: Number of keys in the pool.
-        video_count: Current number of videos in the corpus.
-        archeology_size: Desired fixed reserve for the archeology ring.
-        hunter_searches_per_day: Hunter daily demand proxy (tunable).
-
-    Returns:
-        :class:`PoolSizes` with clamped, non-overlapping sizes.
+    Keys are allocated proportional to each ring's daily quota demand, then
+    clamped by safety floors; ``archeology`` is a fixed reserve and ``tracking``
+    (the cheap videos.list ring) is never the first to exhaust.
     """
     # Archeology reserve — never starve it.
     archeology = max(2, min(archeology_size, max(0, total_keys - 4)))
@@ -127,8 +89,8 @@ def compute_sizes(
     if hunting < hunting_floor:
         hunting = hunting_floor
         tracking = max(1, remaining - hunting)
+    # Floors can't both fit in a tiny pool — give each at least one key.
     if tracking + hunting > remaining:
-        # Floors can't both fit in a tiny pool — give each at least one key.
         tracking = max(1, remaining - 1)
         hunting = remaining - tracking
 

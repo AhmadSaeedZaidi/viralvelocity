@@ -1,17 +1,8 @@
-"""Lightweight async helpers for the YouTube Data API v3.
+"""Thin async wrappers over the YouTube Data API v3 with key rotation.
 
-Two thin wrappers are exposed:
-
-* :func:`lookup_videos`   — ``GET /youtube/v3/videos?part=snippet,contentDetails,statistics``
-* :func:`lookup_channels` — ``GET /youtube/v3/channels?part=snippet,statistics``
-
-Both helpers use a :class:`~atlas.utils.KeyRing` for key rotation and back off via
-:class:`~atlas.utils.ResiliencyExecutor` on quota / 429 / 403 errors.
-The atomic unit is a single API request; callers are expected to chunk
-``ids`` into ≤50-element batches (the YouTube API limit) before invoking.
-
-Returns the full ``items`` list from the API response (empty list if the API
-returned no items, e.g. video deleted or channel hidden).
+Exposes ``lookup_videos`` and ``lookup_channels`` (≤50 IDs per call; callers
+chunk ``ids``). Both use a KeyRing for rotation and back off via
+ResiliencyExecutor on quota/429/403 errors.
 """
 
 from __future__ import annotations
@@ -71,19 +62,8 @@ async def lookup_videos(
     key_ring_pool: str = "hunting",
     parts: str = "snippet,contentDetails,statistics",
 ) -> list[dict[str, Any]]:
-    """Resolve full metadata for a list of YouTube video IDs.
-
-    Args:
-        video_ids: List of 11-char YouTube video IDs (≤50 per call; chunked).
-        executor: Optional pre-built ResiliencyExecutor; otherwise a new one
-            is built from ``KeyRing(key_ring_pool)``.
-        key_ring_pool: Name of the key ring pool to use when ``executor`` is
-            ``None``. Defaults to ``"hunting"``.
-        parts: API ``part`` value. Default returns snippet+contentDetails+statistics.
-
-    Returns:
-        List of API ``items`` entries — each containing the requested ``parts``.
-    """
+    """Resolve full metadata for a list of YouTube video IDs (≤50 per call;
+    chunked). Returns the API ``items`` list."""
     if not video_ids:
         return []
 
@@ -110,17 +90,8 @@ async def lookup_channels(
     key_ring_pool: str = "hunting",
     parts: str = "snippet,statistics",
 ) -> list[dict[str, Any]]:
-    """Resolve full metadata for a list of YouTube channel IDs.
-
-    Args:
-        channel_ids: List of channel IDs (e.g. ``UC...``); ≤50 per call.
-        executor: Optional pre-built ResiliencyExecutor.
-        key_ring_pool: Name of the key ring pool. Defaults to ``"hunting"``.
-        parts: API ``part`` value. Default snippet+statistics.
-
-    Returns:
-        List of API ``items`` entries — each containing the requested ``parts``.
-    """
+    """Resolve full metadata for a list of YouTube channel IDs (≤50 per call;
+    chunked). Returns the API ``items`` list."""
     if not channel_ids:
         return []
 

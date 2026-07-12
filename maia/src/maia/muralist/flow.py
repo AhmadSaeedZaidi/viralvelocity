@@ -1,22 +1,13 @@
 """Maia Muralist: full-video archival consumer ("super painter").
 
-Consumer in the Producer-Consumer pipeline. For every video that has not yet had
-its source clip archived, it downloads the video at a compact native resolution
-(YouTube's own pre-encoded stream — **no CPU re-encode**) via the shared
-:class:`~maia.media.streamer.StealthVideoStreamer` and writes it to the vault at
-``videos/{video_id}.mp4`` (batched into a single commit), then marks
-``has_video``.
+For every video that still lacks its source clip, it downloads the video at a
+compact native resolution (YouTube's own pre-encoded stream — no CPU re-encode)
+via the shared :class:`~maia.media.streamer.StealthVideoStreamer` and writes it
+to the vault at ``videos/{video_id}.mp4``, then marks ``has_video``.
 
-**Status: manual-only.** There is deliberately *no* systemd unit for the muralist
-— it is not part of the polling Producer/Consumer loop. Archiving full source
-clips is storage-hungry (~80–150 MB per 5–10 min clip at 720p; ~13–17 MB at
-360p) and was historically avoided until the project could obtain HF storage.
-The muralist is kept as a runnable, claim-based capability so it can be switched
-on (fleet-scheduled) once storage allows. Run it manually:
-
-    python -m maia muralist                       # archive most recent un-archived video
-    python -m maia muralist --batch-size 10       # archive a batch
-    python -m maia muralist --height 480          # choose resolution
+Status: manual-only — there is no systemd unit, so it is not part of the polling
+loop. Archiving full clips is storage-hungry, and the muralist is kept as a
+runnable, claim-based capability to switch on once storage allows.
 """
 
 import argparse
@@ -39,9 +30,8 @@ from maia.utils import notify_quota_exhausted, vault_op_with_retry
 
 logger = logging.getLogger(__name__)
 
-# Default archival resolution. 720p keeps good visual fidelity while still using
-# YouTube's pre-encoded stream (no local transcode). Drop to 360/480 to hoard
-# more videos per TB.
+# Default archival resolution: 720p keeps good fidelity using YouTube's
+# pre-encoded stream (no local transcode). Drop to 360/480 to hoard more per TB.
 DEFAULT_HEIGHT = 720
 
 # Archival is bandwidth/heavy; keep concurrency low to avoid YouTube HTTP 429.
@@ -75,9 +65,8 @@ async def process_video_task(video: Video) -> tuple[str, bytes, str] | None:
     run_logger = get_run_logger()
     vid_id = video.id
 
-    # Idempotent: a video whose clip is already archived is never re-downloaded
-    # (P1b per-step state). Prevents a manual muralist rerun from double-writing
-    # the full source clip to the vault. The claim gate already excludes it.
+    # Idempotent: a DONE clip is never re-downloaded; this guards manual reruns
+    # from double-writing the full source clip (the claim gate excludes it).
     if video.clip_phase == "DONE":
         run_logger.info(f"Clip already archived for {vid_id} — skipping")
         return None

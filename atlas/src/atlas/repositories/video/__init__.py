@@ -20,12 +20,7 @@ class VideoRepository(
     TranscriptRepository,
     DatabaseAdapter,
 ):
-    """Repository for the ``videos`` table and its associated stats log.
-
-    The implementation is split into focused mixins (ingestion, tracking,
-    state machine, janitor, transcript) to keep each concern readable and
-    single-purpose; see the modules in ``atlas/repositories/video/``.
-    """
+    """Repository for the ``videos`` table and its associated stats log."""
 
 
 __all__ = ["VideoRepository", "TranscriptRepository"]

@@ -1,22 +1,7 @@
 """Heuristic quality gate for discovered videos (pre-ingestion).
 
-Rejects low-value videos *before* they hit the database or seed the snowball,
-using signals from a ``videos.list`` response (``contentDetails`` + ``statistics``)
-plus two signals the Data API does **not** expose natively:
-
-* **Duration**   — reject Shorts / sub-minute clips.
-* **Velocity**   — views per hour since publication (early/lifetime traction).
-* **Engagement** — ``(likes + comments) / views`` (filters bot traffic / clickbait).
-* **Shorts**     — the API has no ``isShort`` flag, so we HEAD-probe
-  ``/shorts/{id}``: a 200 means it is a Short, a 3xx redirect to ``/watch``
-  means it is long-form. Cheap (no body) and quota-free.
-* **AI-slop**    — no API flag exists, so we scan title/description/tags against a
-  configurable denylist of "this video is AI-generated" phrases, and reject
-  suspected AI-farm channels via channel-statistics (subscriber floor + upload
-  rate proxy from ``channels.list``).
-
-Thresholds are configured on :class:`atlas.config.Settings` so they can be tuned
-without code changes. The gate is pure and side-effect free for easy testing.
+Rejects Shorts / low-traction / low-engagement / AI-slop videos before they
+hit the database or seed the snowball. Pure and side-effect free for testing.
 """
 
 import asyncio
@@ -65,16 +50,13 @@ class QualityThresholds:
     # judge traction); duration + engagement still apply.
     velocity_grace_hours: float = 1.0
 
-    # ── Shorts HEAD probe ──────────────────────────────────────────────────
     shorts_head_enabled: bool = True
     shorts_head_max_duration: int = 600
     shorts_head_timeout: float = 5.0
     shorts_head_concurrency: int = 8
 
-    # ── AI-slop denylist (compiled regexes) ─────────────────────────────────
     ai_patterns: tuple[re.Pattern[str], ...] = ()
 
-    # ── Channel-statistics gate ──────────────────────────────────────────────
     min_subscribers: int = 50
     max_videos_per_day: float = 20.0
     max_videos_per_subscriber: float = 5.0
@@ -131,9 +113,8 @@ def evaluate_video(
         thresholds: Overrides; defaults to values from settings.
         now: Reference time (defaults to ``datetime.now(UTC)``); injectable for tests.
 
-    Returns:
-        A :class:`QualityResult`; ``passed`` is False with a human-readable
-        ``reason`` on the first failing check.
+    Returns a :class:`QualityResult`; ``passed`` is False with a reason on the
+    first failing check.
     """
     thresholds = thresholds or QualityThresholds()
     now = now or datetime.now(UTC)
@@ -147,7 +128,6 @@ def evaluate_video(
     likes = _to_int(stats.get("likeCount"))
     comments = _to_int(stats.get("commentCount"))
 
-    # ── Duration ──────────────────────────────────────────────────────────
     if duration < thresholds.min_duration_seconds:
         return QualityResult(
             False,
@@ -156,7 +136,6 @@ def evaluate_video(
             views=views,
         )
 
-    # ── AI-slop (title/description/tags denylist) ─────────────────────────
     ai_hit = _matches_ai(item, thresholds.ai_patterns)
     if ai_hit:
         return QualityResult(
@@ -166,7 +145,6 @@ def evaluate_video(
             views=views,
         )
 
-    # ── Velocity (views/hour) ─────────────────────────────────────────────
     hours_since = _hours_since(snippet.get("publishedAt"), now)
     views_per_hour = views / hours_since if hours_since > 0 else float(views)
     if (
@@ -181,7 +159,6 @@ def evaluate_video(
             views_per_hour=views_per_hour,
         )
 
-    # ── Engagement ────────────────────────────────────────────────────────
     engagement = (likes + comments) / views if views > 0 else 0.0
     if engagement < thresholds.min_engagement_rate:
         return QualityResult(
@@ -351,13 +328,10 @@ async def filter_by_quality(
 ) -> list[dict[str, Any]]:
     """Enrich search results via ``videos.list`` and keep only passing videos.
 
-    Search snippets lack ``statistics``/``contentDetails``, so we resolve them
-    (1 quota unit per 50 videos) and apply :func:`evaluate_video`. Returns the
-    **enriched** passing items (which carry duration + stats for richer ingest).
-
-    If the gate is disabled or there is no executor to enrich with, the raw
-    search items are returned unchanged. ``QuotaExhaustedError`` from the lookup
-    propagates to the caller.
+    Search snippets lack ``statistics``/``contentDetails``, so they are resolved
+    (1 quota unit per 50 videos) and filtered via :func:`evaluate_video`. If the
+    gate is disabled or there is no executor, raw search items are returned
+    unchanged. ``QuotaExhaustedError`` propagates to the caller.
     """
     from atlas.config import get_settings
     from atlas.youtube import lookup_videos
@@ -380,7 +354,6 @@ async def filter_by_quality(
     thresholds = QualityThresholds.from_settings()
     now = datetime.now(UTC)
 
-    # ── 1. Per-video signal gate (duration / velocity / engagement / AI) ──
     evaluated: list[tuple[dict[str, Any], QualityResult]] = []
     rejected = 0
     for item in enriched:
@@ -392,7 +365,6 @@ async def filter_by_quality(
             if logger:
                 logger.debug(f"Quality gate rejected {_vid_id_of(item)}: {result.reason}")
 
-    # ── 2. Shorts HEAD probe (quota-free, no body download) ──────────────
     if thresholds.shorts_head_enabled and evaluated:
         candidates = [
             (it, res)
@@ -428,7 +400,6 @@ async def filter_by_quality(
             if logger and shorts_hits:
                 logger.info(f"Quality gate: rejected {shorts_hits} Shorts via HEAD probe")
 
-    # ── 3. Channel-statistics gate (AI-farm / spam) ───────────────────────
     if evaluated:
         channel_ids = list({it.get("snippet", {}).get("channelId") for it, _ in evaluated} - {None})
         stats_map = await _load_channel_stats(channel_ids, executor)

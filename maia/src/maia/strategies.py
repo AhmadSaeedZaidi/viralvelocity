@@ -16,12 +16,8 @@ logger = logging.getLogger(__name__)
 class YouTubeSearchStrategy:
     """Base class for YouTube Data API search and video resolution.
 
-    Provides ``execute_get()`` which handles key rotation and Resilience
-    Strategy (``QuotaExhaustedError``).  On VPS the caller is expected
-    to catch ``QuotaExhaustedError``, notify Discord, and back off.
-
-    Subclasses should call ``await self.execute_get(url, params)`` and
-    implement their own response-processing logic.
+    Provides ``execute_get()`` with key rotation and rate-limit handling.
+    Raises ``QuotaExhaustedError`` when all API keys are exhausted.
     """
 
     SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
@@ -32,13 +28,10 @@ class YouTubeSearchStrategy:
         self.executor = ResiliencyExecutor(self.keys, agent_name=agent_name)
 
     async def execute_get(self, url: str, params: dict[str, Any]) -> dict[str, Any] | None:
-        """Execute an authenticated GET request with key rotation and rate-limit handling.
+        """Execute an authenticated GET with key rotation and rate-limit handling.
 
-        Returns:
-            Parsed JSON body on success, or ``None`` on non-retryable errors.
-
-        Raises:
-            QuotaExhaustedError: When all API keys are exhausted.
+        Returns the parsed JSON body, or raises ``QuotaExhaustedError`` when
+        all API keys are exhausted.
         """
 
         async def make_request(api_key: str) -> dict[str, Any]:
@@ -66,11 +59,7 @@ class YouTubeSearchStrategy:
         return dict[str, Any](result)
 
     async def search(self, params: dict[str, Any]) -> dict[str, Any] | None:
-        """Perform a ``youtube/v3/search`` request.
-
-        Subclasses should populate *params* with the desired search criteria
-        (query, category, publishedAfter, etc.) before calling this.
-        """
+        """Perform a ``youtube/v3/search`` request with the given params."""
         return await self.execute_get(self.SEARCH_URL, params)
 
     async def fetch_videos(

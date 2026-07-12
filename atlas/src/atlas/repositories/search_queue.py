@@ -7,12 +7,8 @@ from atlas.models.search_queue import SearchQueueItem
 
 logger = logging.getLogger("atlas.repositories.search_queue")
 
-# Dynamic relevance score, evaluated at read time (Phase 2):
-#   score = mention_count * MENTION_WEIGHT
-#         - hours_in_queue    * DECAY_PER_HOUR
-#         + priority (manual boost)
-# NOTE: this depends on NOW() so it is not IMMUTABLE and cannot be indexed;
-# the janitor's cull keeps the table small enough that a sort is negligible.
+# Dynamic relevance score evaluated at read time; depends on NOW() so it is not
+# indexable — the cull keeps the table small enough that the sort is negligible.
 _SCORE_EXPR = (
     "(mention_count * %s - EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600.0 * %s + priority)"
 )
@@ -39,18 +35,12 @@ class SearchQueueRepository(DatabaseAdapter):
         return [SearchQueueItem.model_validate(r) for r in rows]
 
     async def cull_stale(self, below: float | None = None) -> int:
-        """Delete low-scoring terms (time-decayed out of relevance).
+        """Delete low-scoring, time-decayed terms.
 
-        Terms still being paginated (``next_page_token IS NOT NULL``) are never
-        culled, so an in-progress crawl is not dropped mid-flight.
-
-        **Opt-in**: the cull only runs when an explicit threshold is configured
-        (``SEARCH_QUEUE_CULL_BELOW``). The default of ``None`` disables it — the
-        queue is a long-lived accumulator and historically kept every term, so a
-        non-``None`` threshold should be set deliberately to avoid starving the
-        hunter of seed terms.
-
-        Returns the number of rows deleted (0 when disabled).
+        Never culls terms mid-pagination (``next_page_token IS NOT NULL``).
+        Opt-in: only runs when a threshold is set (``SEARCH_QUEUE_CULL_BELOW``);
+        ``None`` disables it so the queue stays a long-lived accumulator and the
+        hunter is never starved of seed terms. Returns rows deleted (0 if disabled).
         """
         s = get_settings()
         threshold = s.SEARCH_QUEUE_CULL_BELOW if below is None else below

@@ -1,8 +1,7 @@
-"""Maia Scribe: Transcript loader using the shared YouTube streamer.
+"""Maia Scribe: transcript loader using the shared YouTube streamer.
 
-Thin wrapper around :meth:`StealthVideoStreamer.extract_captions` (yt-dlp native
-subtitle extraction with TLS impersonation + Deno PoToken). This shares the exact
-yt-dlp invocation the Painter uses, so there is a single YouTube interaction path.
+Thin wrapper around :meth:`StealthVideoStreamer.extract_captions`, sharing the
+exact yt-dlp invocation the Painter uses so there is a single YouTube path.
 """
 
 import logging
@@ -23,10 +22,9 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Caption cascade: YouTube throttles the `timedtext` endpoint per IP, but the
-# different player clients resolve captions through semi-independent surfaces, so
-# when one is rate-limited another often still succeeds. We try them in order and
-# only surface a rate-limit error if *every* client is throttled.
+# YouTube throttles `timedtext` per IP, but different player clients resolve
+# captions via semi-independent surfaces, so when one is throttled another often
+# still succeeds; a rate-limit is only raised if every client is throttled.
 _CAPTION_CLIENTS = ["default", "tv", "mweb"]
 
 
@@ -52,16 +50,11 @@ class TranscriptLoader:
     def fetch(self, video_id: str) -> list[dict[str, Any]]:
         """Download captions for *video_id*, cascading across player clients.
 
-        Tries each client in :data:`_CAPTION_CLIENTS`. A rate-limit on one client
-        falls through to the next; only if **all** clients are throttled is a
+        Tries each client in :data:`_CAPTION_CLIENTS`; a rate-limit on one client
+        falls through to the next, and a genuine "no subtitles" result
+        short-circuits the cascade. Only if **all** clients are throttled is a
         :class:`TranscriptRateLimitError` raised (so the flow re-queues the video).
-        A genuine "no subtitles" result short-circuits the cascade.
-
-        Returns:
-            List of ``{"text", "start", "duration"}`` dicts (time in **seconds**).
-
-        Raises:
-            TranscriptExtractionError / TranscriptRateLimitError: see above.
+        Returns a list of ``{"text", "start", "duration"}`` dicts.
         """
         last_rate_limit: TranscriptRateLimitError | None = None
         last_error: TranscriptExtractionError | None = None

@@ -1,9 +1,7 @@
-"""Transcript + vault-pending repository (Single Responsibility).
+"""Transcript staging + vault-pending repository (Single Responsibility).
 
-Previously these operations lived on ``VideoStateMixin`` alongside the video
-state machine. They form a distinct domain — staging transcripts locally and
-tracking which ones still need flushing to the vault — so they are extracted
-into their own repository per the DAO/repository pattern.
+Extracted from ``VideoStateMixin`` into its own repository per the DAO pattern: it
+stages transcripts locally and tracks which still need flushing to the vault.
 """
 
 import json
@@ -14,7 +12,7 @@ from atlas.adapters import DatabaseAdapter
 
 
 class TranscriptRepository(DatabaseAdapter):
-    """DAO for transcript staging and vault-write pending tracking (Option A)."""
+    """DAO for transcript staging and vault-write pending tracking."""
 
     async def record_transcript(
         self,
@@ -24,16 +22,14 @@ class TranscriptRepository(DatabaseAdapter):
         content_json: Any | None = None,
         audio_bytes: bytes | None = None,
     ) -> None:
-        content_param: Any = json.dumps(content_json) if content_json is not None else None
-        """Record a transcript locally (staging) and queue the vault write.
+        """Stage a transcript locally and queue the vault write.
 
-        Under the janitor-owned persistence model (Option A), the scribe only
-        stages: it inserts the transcript row and (optionally) the extracted
-        audio bytes, then marks ``vault_write_pending`` so the janitor flushes
-        everything to the vault in batched commits. ``vault_uri`` stays NULL
-        until that flush succeeds. Pass ``vault_uri`` only for the janitor's
-        post-flush update (which also clears the pending flag).
+        Inserts the transcript row (and optional audio bytes) and marks
+        ``vault_write_pending`` so the janitor flushes it in batched commits;
+        ``vault_uri`` stays NULL until that flush succeeds. Pass ``vault_uri``
+        only for the janitor's post-flush update.
         """
+        content_param: Any = json.dumps(content_json) if content_json is not None else None
         async with self._cursor() as cur:
             await cur.execute(
                 """

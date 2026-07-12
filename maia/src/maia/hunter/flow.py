@@ -94,12 +94,6 @@ async def search_youtube_task(
 async def enrich_channels_task(channel_ids: list[str], strategy: YouTubeSearchStrategy) -> int:
     """Resolve unindexed/stale channels via the YouTube Data API + log a stats snapshot.
 
-    For every channel id passed in:
-    * If the channel has no row in ``channel_stats_log`` newer than 24h, it is
-      fetched via ``channels.list?part=snippet,statistics`` and persisted via
-      :meth:`ChannelRepository.ingest_channel_snapshot`.
-    * Otherwise it is skipped.
-
     Returns the number of channels actually refreshed (real API calls + DB writes).
     """
     if not channel_ids:
@@ -151,16 +145,8 @@ async def ingest_results_task(
     response: dict[str, Any],
     strategy: YouTubeSearchStrategy | None = None,
 ) -> None:
-    """
-    Ingest video metadata and implement the Snowball Effect.
-
-    Steps:
-    1. Store raw metadata to vault (cold archive) — concurrent, best-effort
-    2. Ingest structured metadata to database (hot index) — concurrent
-    3. Enrich newly-discovered channels via channels.list API + snapshot log
-    4. Extract tags from all videos (Snowball)
-    5. Add unique tags to search queue
-    6. Update topic state with pagination token
+    """Store raw metadata to the vault, ingest structured metadata to the DB,
+    enrich newly-discovered channels, snowball tags, and update topic state.
     """
     if not response:
         return
@@ -172,8 +158,8 @@ async def ingest_results_task(
     raw_items = response.get("items", [])
     next_token = response.get("nextPageToken")
 
-    # 0. QUALITY GATE — enrich (videos.list) + reject Shorts / low-traction /
-    #    low-engagement videos before anything is persisted or snowballed.
+    # 0. QUALITY GATE — reject Shorts / low-traction / low-engagement videos
+    #    before anything is persisted or snowballed.
     executor = strategy.executor if strategy is not None else None
     try:
         items = await filter_by_quality(raw_items, executor, logger=run_logger)
@@ -186,9 +172,8 @@ async def ingest_results_task(
         run_logger.warning(f"Quality gate enrichment failed, ingesting unfiltered: {e}")
         items = raw_items
 
-    # 1. Store raw metadata to vault — bundle ALL discovered videos into ONE
-    #    commit (best-effort, off event-loop) instead of 1 commit/video, so we
-    #    stay far under HuggingFace's 128-commits/hour account cap.
+    # Bundle ALL discovered videos into ONE vault commit to stay under
+    # HuggingFace's 128-commits/hour account cap.
     v = get_vault()
 
     def _vid_of(item: dict[str, Any]) -> str | None:
@@ -222,10 +207,8 @@ async def ingest_results_task(
 
     db_tasks = [_db_ingest(item) for item in items]
 
-    # Fire DB inserts concurrently (vault metadata was batched above)
     await asyncio.gather(*db_tasks)
 
-    # 3. Enrich newly-discovered channels (snippet -> channels.list -> stats log)
     if strategy is not None:
         channel_ids = [
             item.get("snippet", {}).get("channelId")
@@ -240,7 +223,7 @@ async def ingest_results_task(
         except Exception as e:
             run_logger.exception(f"Channel enrichment failed (non-fatal): {e}")
 
-    # 4. Extract snowball tags — only from videos that passed the quality gate.
+    # Snowball tags are taken only from videos that passed the quality gate.
     snowball_tags: list[str] = []
     for item in items:
         snippet = item.get("snippet", {})
@@ -277,15 +260,13 @@ async def ingest_results_task(
 
 @flow(name="run_hunter_cycle")
 async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[str, Any]:
-    """
-    Execute a complete Hunter cycle: fetch queries, search YouTube, ingest results.
+    """Execute a complete Hunter cycle: fetch queries, search YouTube, ingest results.
 
     Args:
-        batch_size: Number of queries to process in this cycle
-        strategy: YouTubeSearchStrategy for API access
+        batch_size: Number of queries to process in this cycle.
+        strategy: YouTubeSearchStrategy for API access.
 
-    Returns:
-        Dictionary with cycle statistics
+    Returns a dict with cycle statistics.
     """
     run_logger = get_run_logger()
     run_logger.info("=== Starting Hunter Cycle ===")
@@ -344,11 +325,7 @@ async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[
 
 
 class HunterAgent:
-    """
-    Hunter Agent: YouTube video discovery and ingestion.
-
-    Implements the Agent protocol for polymorphic command dispatch.
-    """
+    """Hunter Agent: YouTube video discovery and ingestion."""
 
     name = "hunter"
 
@@ -368,16 +345,7 @@ class HunterAgent:
         )
 
     async def run(self, batch_size: int = 10, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute a complete Hunter cycle.
-
-        Args:
-            batch_size: Number of queries to process in this cycle
-            **kwargs: Additional arguments (ignored)
-
-        Returns:
-            Dictionary with cycle statistics
-        """
+        """Execute a complete Hunter cycle and return its statistics dict."""
         result: dict[str, Any] = await hunter_flow(batch_size=batch_size, strategy=self.strategy)
         return result
 

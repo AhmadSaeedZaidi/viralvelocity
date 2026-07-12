@@ -1,28 +1,8 @@
-"""
-Maia - The Stateless Agent Layer for Project Pleiades
+"""Maia — the stateless agent layer for Project Pleiades.
 
-Maia is a Prefect-based agent system for video discovery, monitoring,
-archival, and media processing. It operates as a stateless layer that
-interfaces exclusively with Atlas for all persistence.
-
-Architecture (Producer-Consumer Pipeline):
-
-  Producers (identify targets, push to work queue):
-  - Hunter:      Discovery & Ingestion (YouTube search + Snowball sampling)
-  - Archeologist: Historical Curation (Grave Robbery method)
-
-  Consumers (pull from work queue, process, update status):
-  - Scribe:      Transcription (yt-dlp native subtitle extraction)
-  - Painter:     Visual Archival (Intelligent keyframe extraction)
-  - Tracker:     Velocity Monitoring (3-Zone Defense strategy)
-  - Janitor:     Tiered storage cleanup
-
-Core Principles:
-    - Stateless: All state persists in Atlas
-    - Repository Pattern: Database access via atlas.repositories.*
-    - Strategy Pattern: YouTube Data API access via YouTubeSearchStrategy
-    - Producer-Consumer: No direct coupling between discovery and processing
-    - Resiliency Strategy: Rate limit = immediate container suicide for IP rotation
+Producers (Hunter, Archeologist) discover videos and push them to the work
+queue; consumers (Scribe, Painter, Streamer, Singer, Tracker, Janitor) process
+them. All persistence lives in Atlas.
 """
 
 __version__ = "0.1.0"

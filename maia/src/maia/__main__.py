@@ -18,8 +18,8 @@ from maia.registry import AGENT_REGISTRY
 def setup_logging(level: str = "INFO") -> None:
     """Configure logging for Maia.
 
-    ``force=True`` reclaims the root logger even if an imported dependency
-    (e.g. prefect) already installed a handler, so CLI runs actually emit logs.
+    ``force=True`` reclaims the root logger if an imported dependency (e.g.
+    prefect) already installed a handler, so CLI runs actually emit logs.
     """
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(
@@ -31,11 +31,8 @@ def setup_logging(level: str = "INFO") -> None:
 
 
 def main(args: list[str] | None = None) -> int:
-    """
-    Main entry point for Maia CLI.
-
-    Uses distributed CLI configuration pattern where each agent
-    defines its own arguments via Agent.add_cli_args().
+    """CLI entry point. Builds one subparser per registered agent plus the
+    maintenance commands (purge, purge-transcripts, quality-report).
     """
     parser = argparse.ArgumentParser(
         prog="maia",
@@ -57,7 +54,6 @@ def main(args: list[str] | None = None) -> int:
         )
         agent_class.add_cli_args(agent_parser)
 
-    # ── Operations / maintenance commands (not fleet agents) ──────────────
     purge_parser = subparsers.add_parser(
         "purge", help="Purge short / low-quality videos (< threshold) from DB + vault"
     )
@@ -122,7 +118,6 @@ def main(args: list[str] | None = None) -> int:
 
     command = parsed_args.command
 
-    # ── Maintenance commands (not fleet agents) ────────────────────────────
     if command == "purge":
         if not parsed_args.dry_run and not parsed_args.confirm:
             parser.error("purge requires --confirm (or pass --dry-run to preview).")

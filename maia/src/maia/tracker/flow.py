@@ -40,15 +40,13 @@ async def fetch_targets_task(batch_size: int) -> list[dict[str, Any]]:
 
 @task(name="update_stats")
 async def update_stats_task(videos: list[dict[str, Any]], strategy: YouTubeSearchStrategy) -> int:
-    """
-    Fetch and update statistics for a batch of videos.
+    """Fetch and update statistics for a batch of videos.
 
     Args:
-        videos: List of video records from fetch_targets
-        strategy: YouTubeSearchStrategy for API access
+        videos: List of video records from fetch_targets.
+        strategy: YouTubeSearchStrategy for API access.
 
-    Returns:
-        Number of videos successfully updated
+    Returns the number of videos successfully updated.
     """
     if not videos:
         return 0
@@ -106,15 +104,13 @@ async def update_stats_task(videos: list[dict[str, Any]], strategy: YouTubeSearc
 
 @flow(name="run_tracker_cycle")
 async def tracker_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[str, Any]:
-    """
-    Execute a complete Tracker cycle: fetch stale videos, update stats.
+    """Execute a complete Tracker cycle: fetch stale videos, update stats.
 
     Args:
-        batch_size: Number of videos to process (max 50 for YouTube API)
-        strategy: YouTubeSearchStrategy for API access
+        batch_size: Number of videos to process (max 50 for YouTube API).
+        strategy: YouTubeSearchStrategy for API access.
 
-    Returns:
-        Dictionary with cycle statistics
+    Returns a dict with cycle statistics.
     """
     run_logger = get_run_logger()
     run_logger.info("=== Starting Tracker Cycle ===")
@@ -161,11 +157,7 @@ async def tracker_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict
 
 
 class TrackerAgent:
-    """
-    Tracker Agent: Video metrics monitoring and statistics tracking.
-
-    Implements the Agent protocol for polymorphic command dispatch.
-    """
+    """Tracker Agent: video metrics monitoring and statistics tracking."""
 
     name = "tracker"
 
@@ -185,16 +177,7 @@ class TrackerAgent:
         )
 
     async def run(self, batch_size: int = 50, **kwargs: Any) -> dict[str, Any]:
-        """
-        Execute a complete Tracker cycle.
-
-        Args:
-            batch_size: Number of videos to process (max 50 for YouTube API)
-            **kwargs: Additional arguments (ignored)
-
-        Returns:
-            Dictionary with cycle statistics
-        """
+        """Execute a complete Tracker cycle and return its statistics dict."""
         result: dict[str, Any] = await tracker_flow(batch_size=batch_size, strategy=self.strategy)
         return result
 

@@ -1,22 +1,9 @@
-"""Maia Janitor: Tiered storage state-machine cleanup agent.
+"""Maia Janitor: tiered storage state-machine cleanup agent.
 
-Implements a strict transactional State Machine for moving data
-from the hot index (Neon PostgreSQL) to the cold tier (Vault).
-
-Lifecycle::
-
-    PENDING ──► PROCESSING ──► PROCESSED ──► ARCHIVED
-        │                                                       ▲
-        └──► FAILED                                             │
-                                                       (Janitor hand-off)
-
-Phases (per cycle):
-    1. SWEEP  - Query VideoRepository for PROCESSED records past retention
-    2. BATCH  - Group records into manageable chunks
-    3. HAND-OFF - Serialize metadata → Parquet → vault (with verification)
-    4. PURGE  - Mark ARCHIVED, delete ephemeral hot-tier rows
-
-On vault failure: log to EventRepository, leave hot DB untouched.
+Moves data from the hot index (Neon PostgreSQL) to the cold tier (Vault) via a
+strict transactional state machine: PENDING → PROCESSING → PROCESSED → ARCHIVED
+(and FAILED). On vault failure it logs to EventRepository and leaves the hot DB
+untouched.
 """
 
 import argparse
@@ -32,11 +19,8 @@ from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
 
 DEFAULT_BATCH_SIZE = 50
-
-# ── Tasks ─────────────────────────────────────────────────────────────────────
 
 
 @task(name="janitor_sweep")
@@ -125,9 +109,9 @@ async def archive_cold_stats_task(retention_days: int = 7) -> dict[str, int]:
 async def refresh_key_pools_task() -> dict[str, Any]:
     """Recompute the dynamic key-pool allocation from the corpus size.
 
-    Gated internally to a weekly cadence: ``refresh_allocation`` only rewrites
-    the cache when it is older than ``REFRESH_INTERVAL_DAYS``. Hunter/tracking
-    ring sizes then scale with the number of videos in the database.
+    Gated to a weekly cadence: ``refresh_allocation`` only rewrites the cache
+    when older than ``REFRESH_INTERVAL_DAYS``. Hunter/tracking ring sizes then
+    scale with the number of videos in the database.
     """
     from atlas.config import get_settings
     from atlas.key_pool import refresh_allocation
@@ -179,11 +163,9 @@ async def cull_search_queue_task() -> dict[str, Any]:
 async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
     """Flush staged transcripts (+ audio) from the DB to the vault.
 
-    This is the **single owner of vault writes** (Option A). The scribe only
-    stages transcripts/audio into the database; this task batches every pending
-    video into one vault commit, retries on HTTP 429 (HF 128-commits/hour), and
-    is idempotent so it self-heals videos left `vault_write_pending` by a
-    previous failure. All vault-persistence failures surface *here*.
+    Single owner of vault writes (Option A): batches every pending video into
+    one vault commit, retries on HTTP 429, and is idempotent so it self-heals
+    videos left ``vault_write_pending`` by a prior failure.
     """
     transcript_repo = TranscriptRepository()
     run_logger = get_run_logger()
@@ -196,12 +178,8 @@ async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
     flushed = 0
     failed = 0
-    # Batch MANY videos into a single HF commit. ``store_batch`` already writes
-    # all its files in one commit *and* retries HTTP 429 internally, so instead
-    # of 1 commit/video we do ~1 commit per CHUNK videos. This is the heart of
-    # the rate-limit strategy: it keeps us far under HuggingFace's
-    # 128-commits/hour *account* limit (transcript + audio for 25 videos lands
-    # in one commit). The 429 backoff lives inside the vault client, not here.
+    # Batch MANY videos into a single HF commit (store_batch retries 429
+    # internally), keeping us under HuggingFace's 128-commits/hour account cap.
     CHUNK = 25  # videos per commit (audio is large — stay within commit-size limits)
     groups: list[list[tuple[str, Any]]] = []
     vids: list[str] = []
@@ -258,31 +236,23 @@ async def log_summary_task(results: dict[str, Any]) -> None:
     )
 
 
-# ── Orchestration Flow ────────────────────────────────────────────────────────
-
-
 @flow(name="janitor_cycle")
 async def janitor_flow(
     dry_run: bool = False,
     archive_stats: bool = True,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> dict[str, Any]:
-    """
-    Execute the Janitor cleanup cycle — a strict transactional state machine.
+    """Execute the Janitor cleanup cycle — a strict transactional state machine.
 
-    Phases:
-    1. **Stats archival** (optional) — move old ``video_stats_log`` rows to vault
-    2. **Sweep** — query for ``PROCESSED`` videos past the retention threshold
-    3. **Hand-off** — serialize → vault → verify → mark ``ARCHIVED`` → purge
-    4. **Summary** — emit final event to ``system_events``
+    Phases: stats archival (optional), sweep for PROCESSED videos, hand-off
+    (serialize → vault → verify → mark ARCHIVED → purge), and a summary event.
 
     Args:
         dry_run: Log what would happen without making changes.
         archive_stats: Whether to run stats archival phase.
         batch_size: Number of videos to process per hand-off batch.
 
-    Returns:
-        Dict with keys: stats_archived, videos_archived, videos_failed, dry_run.
+    Returns a dict with stats_archived, videos_archived, videos_failed, dry_run.
     """
     run_logger = get_run_logger()
     run_logger.info("=" * 60)
@@ -297,7 +267,6 @@ async def janitor_flow(
         "dry_run": dry_run,
     }
 
-    # ── Phase 0: Refresh dynamic key-pool allocation (weekly, self-gated) ──
     try:
         pool_result = await refresh_key_pools_task()
         results["key_pool"] = pool_result
@@ -305,7 +274,6 @@ async def janitor_flow(
         run_logger.exception(f"Phase 0 (key-pool refresh) failed: {e}")
         results["key_pool_error"] = str(e)
 
-    # ── Phase 0b: Cull stale/low-score search-queue terms (Phase 2 decay) ──
     try:
         cull_result = await cull_search_queue_task()
         results["search_queue_culled"] = cull_result.get("culled", 0)
@@ -313,7 +281,6 @@ async def janitor_flow(
         run_logger.exception(f"Phase 0b (search-queue cull) failed: {e}")
         results["search_queue_cull_error"] = str(e)
 
-    # ── Phase 0c: Flush staged transcripts/audio to the vault (Option A) ──
     try:
         flush_result = await vault_flush_task.fn(batch_size)
         results["vault_flushed"] = flush_result.get("flushed", 0)
@@ -322,7 +289,6 @@ async def janitor_flow(
         run_logger.exception(f"Phase 0c (vault flush) failed: {e}")
         results["vault_flush_error"] = str(e)
 
-    # ── Phase 1: Archive cold stats ───────────────────────────────────────
     if archive_stats and not dry_run:
         run_logger.info("Phase 1/3: Archiving cold stats...")
         try:
@@ -334,7 +300,6 @@ async def janitor_flow(
     else:
         run_logger.info(f"Phase 1/3: Skipped (archive_stats={archive_stats}, dry_run={dry_run})")
 
-    # ── Phase 2: Sweep ────────────────────────────────────────────────────
     run_logger.info("Phase 2/3: Sweeping for PROCESSED videos...")
     all_archivable: list[dict[str, Any]] = []
     page = await sweep_phase_task.fn(batch_size)
@@ -348,7 +313,6 @@ async def janitor_flow(
 
     run_logger.info(f"Phase 2/3: Found {len(all_archivable)} videos to archive")
 
-    # ── Phase 3: Hand-off (serialize → vault → verify → purge) ───────────
     if not all_archivable:
         run_logger.info("Phase 3/3: No videos to archive — cycle complete")
         await log_summary_task.fn(results)
@@ -384,15 +348,8 @@ async def janitor_flow(
     return results
 
 
-# ── Agent / CLI ───────────────────────────────────────────────────────────────
-
-
 class JanitorAgent:
-    """
-    Janitor Agent: Tiered storage state machine.
-
-    Implements the Agent protocol for polymorphic command dispatch.
-    """
+    """Janitor Agent: tiered storage state machine."""
 
     name = "janitor"
 
@@ -443,9 +400,6 @@ class JanitorAgent:
             dry_run=dry_run, archive_stats=archive_stats, batch_size=batch_size
         )
         return result
-
-
-# ── Legacy wrappers ───────────────────────────────────────────────────────────
 
 
 @flow(name="janitor_cycle")

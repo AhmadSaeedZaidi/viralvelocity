@@ -848,3 +848,56 @@ maia/
 ## License
 
 MIT
+
+---
+
+## Design notes
+
+Consolidated rationale preserved from source comments/docstrings during cleanup:
+
+- **Rate-limit error hierarchy (bug context).** `StreamRateLimitError` and
+  `TranscriptRateLimitError` are deliberately *not* subclasses of
+  `yt_dlp.DownloadError`, so the tenacity retry on `extract_info` does not
+  re-hammer YouTube. Instead the caller releases the video back to `PENDING` for
+  a later cycle.
+- **Captions excluded from the unified fetch.** `download_unified` fetches only
+  audio + metadata, never captions: the `timedtext` endpoint is the one YouTube
+  surface that throttles this VPS's egress IP (HTTP 429), and bolting it onto
+  the audio download would poison the whole fetch. Caption ownership stays in the
+  Scribe.
+- **yt-dlp temp-dir gotcha.** yt-dlp leaves side artifacts (`.info.json`,
+  `.json3`, `.part`, captions) beside the real audio file; a naive "any file
+  containing the id" scan would point the singer at JSON/partial data, so
+  `_METADATA_EXTS` excludes them explicitly.
+- **WebP muxer corruption (bug context).** FFmpeg WebP output is written to a
+  temp file, never piped to stdout — the WebP muxer needs a seekable output, and
+  piping to `-` corrupts the RIFF container (this was producing invalid images in
+  the vault). JPEG also pipes unreliably, so both formats use a temp file.
+- **Single owner of vault writes (Option A).** The Janitor's `vault_flush_task`
+  is the only writer of staged transcripts/audio: it batches every pending video
+  into one commit, retries on HTTP 429, and is idempotent so it self-heals rows
+  left `vault_write_pending` by a prior failure.
+- **Single-commit batching under the HuggingFace cap.** Every agent batches its
+  vault writes into one commit per cycle (rather than 1 commit/video) to stay
+  under HuggingFace's 128-commits/hour account limit — this is why hunter,
+  streamer, singer, painter, muralist and janitor all defer storage to the flow
+  level.
+- **Shared raw artifact.** The streamer's `raw/{id}` artifact is consumed by both
+  the singer (audio) and the painter (frames); the singer reclaims it only once
+  *both* consumers have derived their output, so the painter never finds its
+  input gone.
+- **Heartbeat steady-state interpretation.** The polling agents are oneshot loops
+  that exit 0 then sit in `activating (auto-restart)` until the next
+  `RestartSec` tick — that is a *healthy* state. Only a non-zero last exit or a
+  `failed` unit is treated as a real problem.
+- **Groq endpoint gotcha.** Groq STT keys come from console.groq.com (not xAI),
+  so the endpoint is `api.groq.com`, not `api.x.ai`.
+- **Client-side STT pacing.** Paid transcribers (Mistral/Grok) are paced with a
+  process-wide `CallPacer` rather than relying on the provider's own 429, to stay
+  under per-minute quotas and avoid blowing the daily budget.
+- **yt-dlp 2026 runtime change.** yt-dlp renamed `--js-runtime` → `--js-runtimes`
+  and now requires Deno >= 2.3.0 for BotGuard; this fact is encoded in exactly
+  one place (`media/streamer.py`).
+- **Future step (unimplemented).** The Painter could eventually fetch a single
+  muxed stream and split out audio/captions for the Scribe, avoiding the two
+  separate network fetches per video.
