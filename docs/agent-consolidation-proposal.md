@@ -131,11 +131,41 @@ real data and burning quota. That ambiguity is what makes alkyone feel orphaned.
   `mark_fetched`. This keeps disk bounded when muralist is disabled, while letting a manual
   muralist run within the TTL window.
 
-**Phase 1b (later, schema migration):** replace the overloaded boolean flags with an explicit
-`pipeline_phase` enum (`DISCOVERED → FETCHED → AUDIO_DONE → VISUALS_DONE → TRANSCRIPT_DONE →
-CLIP_DONE → PROCESSED`). Each consumer claims *its* phase; `raw` reclamation becomes a single
-transition at `CLIP_DONE`. This removes the entire class of "flag says done but consumer hasn't
-run" bugs. **Recommended to defer** until P2/P3 land, since it's a migration, not a bug fix.
+**Phase 1b (later, schema migration): explicit per-step state + a join barrier — NOT a
+linear phase.** P1a fixed the *symptom* (reclaim race). P1b removes the *cause*: progress is
+currently inferred from a conjunction of boolean flags, which hides the real shape of the
+pipeline — a **fan-out / fan-in** topology (codelit/databricks "fan-out fan-in"):
+
+- The `raw` artifact is the **fan-out point**: after `FETCHED`, three consumers derive from it
+  **in parallel** — `singer` (audio), `painter` (visuals), `muralist` (clip). `scribe`
+  (transcript) runs after `singer` (needs audio). None of these blocks the others.
+- The **fan-in / join** is the point at which `raw` may be reclaimed: only once *every*
+  raw-consuming step is `DONE` (or the muralist's TTL window expires, since muralist is
+  manual-only and may never run).
+
+A single linear `pipeline_phase` enum (`DISCOVERED → … → PROCESSED`) **cannot** model this:
+at any instant the true state is e.g. *"audio done, visuals not done, clip not done"*, which one
+scalar cannot hold without **serializing the pipeline** (a throughput regression, and videos
+would never reach `PROCESSED` while muralist stays manual-only). So P1b models **per-step state**
+instead:
+
+- Each derived artifact (`audio`, `visuals`, `transcript`, `clip`) gets its own phase column:
+  `{PENDING, PROCESSING, DONE, FAILED}` — replacing the boolean `has_*` / `fetched` /
+  `has_video` flags, which conflated "artifact exists" with "consumer finished".
+- `pipeline_phase` becomes a **derived frontier** (a SQL `IMMUTABLE` function or generated
+  column) = the *minimum not-yet-DONE* step. It is queryable for ops/monitoring but does **not**
+  drive claim selection, so the parallel topology is preserved.
+- `raw` reclamation is now an explicit **join barrier**: reclaim when
+  `audio = DONE AND visuals = DONE AND (clip = DONE OR raw_age > RAW_TTL_HOURS)`. Same guard P1a
+  already enforces, but expressed as one named, testable transition that reads as the DAG it is.
+- Consumers become **idempotent** (Gaps §6.1): each step carries a `DONE` marker, so a manual
+  muralist re-run cannot double-write.
+
+Grounded in **Fan-out/Fan-in** (parallel consumers + a join) and the **Saga** pattern
+(microservices.io) — specifically *choreography*: each consumer updates its step state, the join
+reacts; the existing `FOR UPDATE SKIP LOCKED` claim already supplies the saga's required isolation
+countermeasure. **Recommended to defer** until P2/P3 land (it is a schema migration, not a bug
+fix), but it is now correctly specified and parallelism-safe.
 
 ### P2 — `BaseBatchAgent` to kill the ×9 duplication
 Introduce a small base in `maia/agent.py` (or `maia/base.py`):
@@ -232,7 +262,17 @@ proposals in established practice (see the "upgrade" working session):
   and that the raw-reclamation race is fundamentally an *ordering* problem.
   → https://microservices.io/patterns/data/transactional-outbox.html
   (Related: Saga — each transition is an event.)
-  → https://microservices.io/patterns/data/saga.html
+   → https://microservices.io/patterns/data/saga.html
+- **Parallel pipeline modeling (P1b redesign)** — **Fan-out / Fan-in**: a stage
+  splits into multiple independent consumers (each reads at its own pace), then a
+  *join* reclaims/aggregates. Exactly the `raw → {singer, painter, muralist}`
+  topology; raw reclamation is the **join barrier**. The
+  `wshobson/agents@saga-orchestration` skill (8K installs) documents the Saga
+  *choreography* framing for agent pipelines (each step updates its state, the
+  join reacts). Our `FOR UPDATE SKIP LOCKED` claim already supplies the saga's
+  required isolation countermeasure.
+  → Fan-out/Fan-in overview: https://codelit.io/blog/fan-out-fan-in-pattern
+  → Saga (choreography): https://microservices.io/patterns/data/saga.html
 - **Incremental modernization (P1→P4 sequencing)** — Strangler Fig (Fowler):
   modernize via *seams* + *transitional architecture* that later goes away;
   small independently-shippable parts. Justifies keeping legacy cruft behind a
@@ -254,8 +294,10 @@ proposals in established practice (see the "upgrade" working session):
 ### Gaps the research surfaced (candidates for a later addendum)
 1. **Idempotent consumers** (outbox lesson): add an explicit processed-marker
    so a manual muralist rerun cannot double-write — strengthens P1a.
-2. **P1b is more strongly justified** than implied: the race is a missing
-   ordered state machine, so the `pipeline_phase` enum is the root-cause fix,
-   not just "nice to have".
+ 2. **P1b is the root-cause fix, but as a *join barrier* over parallel steps — not a
+    linear phase.** The race is a missing explicit **join** (reclaim `raw` only when all
+    parallel raw-consumers — singer/painter/muralist — are `DONE`), not a missing ordered
+    state machine. Hence per-step state + a derived frontier, not a single scalar
+    `pipeline_phase` (which would serialize the fan-out and regress throughput).
 3. **Transitional seams**: per Strangler Fig, P2/P3 should keep the old flow
    callable behind a seam until the new base class is proven, then remove it.
