@@ -34,7 +34,7 @@ from .transcription import (
 logger = logging.getLogger(__name__)
 
 # Kept low because the VPS egress IP is flagged by YouTube; high concurrency triggers HTTP 429.
-MAX_CONCURRENT_TRANSCRIPTS = 2
+MAX_CONCURRENT_TRANSCRIPTS = 1
 
 # Pacing delay (seconds) between transcript fetches to stay under YouTube's per-IP rate limits.
 SCRIBE_THROTTLE_SECONDS = 1.5

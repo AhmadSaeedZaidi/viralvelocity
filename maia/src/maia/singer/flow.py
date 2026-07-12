@@ -26,7 +26,7 @@ from prefect import flow, get_run_logger, task
 logger = logging.getLogger(__name__)
 
 # Local ffmpeg extraction is CPU bound, not rate limited; modest concurrency.
-MAX_CONCURRENT_VIDEOS = 2
+MAX_CONCURRENT_VIDEOS = 1
 
 # Pacing delay (seconds) between extractions.
 SINGER_THROTTLE_SECONDS = 1.5

@@ -32,7 +32,7 @@ from maia.utils import notify_quota_exhausted, vault_op_with_retry
 logger = logging.getLogger(__name__)
 
 # The VPS egress IP is flagged by YouTube, so keep concurrency low to avoid HTTP 429.
-MAX_CONCURRENT_VIDEOS = 2
+MAX_CONCURRENT_VIDEOS = 1
 
 # ── Frame-extraction policy ───────────────────────────────────────────────────
 FRAME_INTERVAL_SECONDS = 15.0

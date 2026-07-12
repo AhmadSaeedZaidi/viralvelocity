@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # The YouTube fetch is bandwidth/heavy and rate-limit prone; keep concurrency low
 # to avoid HTTP 429 on the (flagged) VPS egress IP.
-MAX_CONCURRENT_VIDEOS = 2
+MAX_CONCURRENT_VIDEOS = 1
 
 # Pacing delay (seconds) between fetches.
 STREAMER_THROTTLE_SECONDS = 1.5
