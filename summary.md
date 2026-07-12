@@ -113,5 +113,20 @@ Fixes the muralist-starvation race at its root.
 - **P4** — alkyone repurpose + test layering + doc refresh (alkyone currently unhooked
   from CI pending this).
 
+## 5. PROCESSED-without-audio fix (shipped, local commit)
+- Root cause: PROCESSED was latched by `mark_transcript_safe`/`mark_visuals_safe` on
+  has_visuals/has_transcript alone, never requiring audio — so caption-first
+  videos (`scribe` runs in parallel with `singer`) landed `PROCESSED` before audio
+  existed. 63 live rows were in this state.
+- `mark_transcript_safe` / `mark_visuals_safe`: PROCESSED only latches when
+  `has_visuals AND has_audio` / `has_transcript AND has_audio`.
+- `mark_audio_safe`: now latches PROCESSED when `has_visuals AND has_transcript`
+  (closes the fan-out race when audio finishes last).
+- `claim_singer_batch`: also reclaims `PROCESSED` rows lacking audio (self-heal),
+  so the bug cannot recur without manual resets.
+- One-off live reset: 63 `PROCESSED` rows with `has_audio=FALSE` → `status=PENDING`,
+  `audio_phase=PENDING`; singer/scribe/painter restarted to load new code.
+- Tests: 4 added/updated in `atlas/tests/test_state_machine.py` (20 passing).
+
 **Next move:** confirm the GitHub Actions run turns green on `0fe96b4`, or start the next
 phase (recommend **P1b** or **P2**).

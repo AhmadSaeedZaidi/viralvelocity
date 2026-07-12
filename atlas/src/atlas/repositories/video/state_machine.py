@@ -86,7 +86,7 @@ class VideoStateMixin(DatabaseAdapter):
             UPDATE videos SET status = 'PROCESSING', audio_phase = 'PROCESSING'
             WHERE id IN (
                 SELECT id FROM videos
-                WHERE status IN ('PENDING', 'PROCESSING')
+                WHERE status IN ('PENDING', 'PROCESSING', 'PROCESSED')
                   AND fetched = TRUE
                   AND has_audio = FALSE
                 ORDER BY discovered_at ASC
@@ -127,7 +127,10 @@ class VideoStateMixin(DatabaseAdapter):
             UPDATE videos
             SET has_transcript = TRUE,
                 last_updated_at = %s,
-                status = CASE WHEN has_visuals THEN 'PROCESSED' ELSE status END
+                -- PROCESSED requires the full audio+visuals+transcript set; do not
+                -- latch it until audio is also present (scribe is caption-first and
+                -- runs in parallel with the singer, so audio may finish after here).
+                status = CASE WHEN has_visuals AND has_audio THEN 'PROCESSED' ELSE status END
             WHERE id = %s AND transcript_phase <> 'DONE'
             """,
             (now, video_id),
@@ -140,7 +143,10 @@ class VideoStateMixin(DatabaseAdapter):
             UPDATE videos
             SET has_visuals = TRUE,
                 last_updated_at = %s,
-                status = CASE WHEN has_transcript THEN 'PROCESSED' ELSE status END
+                -- PROCESSED requires the full audio+visuals+transcript set; do not
+                -- latch it until audio is also present (the singer may finish after
+                -- the painter, so audio is latched separately in mark_audio_safe).
+                status = CASE WHEN has_transcript AND has_audio THEN 'PROCESSED' ELSE status END
             WHERE id = %s AND visuals_phase <> 'DONE'
             """,
             (now, video_id),
@@ -262,7 +268,11 @@ class VideoStateMixin(DatabaseAdapter):
             """
             UPDATE videos
             SET has_audio = TRUE,
-                last_updated_at = %s
+                last_updated_at = %s,
+                -- If audio was the last missing artifact, latch PROCESSED now. This
+                -- closes the fan-out race: scribe/painter may have already set
+                -- has_transcript/has_visuals but could not latch PROCESSED without audio.
+                status = CASE WHEN has_visuals AND has_transcript THEN 'PROCESSED' ELSE status END
             WHERE id = %s AND audio_phase <> 'DONE'
             """,
             (now, video_id),

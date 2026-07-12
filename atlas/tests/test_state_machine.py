@@ -37,6 +37,11 @@ async def test_claim_singer_batch():
     vids = await s.claim_singer_batch(5)
     s._fetch_all.assert_called_once()
     assert vids[0].id == "V1"
+    # Singer also reclaims PROCESSED rows that are missing audio (self-heal),
+    # not just PENDING/PROCESSING.
+    sql = s._fetch_all.call_args[0][0]
+    assert "'PROCESSED'" in sql
+    assert "has_audio = FALSE" in sql
 
 
 @pytest.mark.asyncio
@@ -48,7 +53,27 @@ async def test_mark_audio_safe():
     assert "has_audio = TRUE" in sql
     # Idempotent: a DONE step is never re-marked.
     assert "audio_phase <> 'DONE'" in sql
+    # If audio was the last missing artifact, latch PROCESSED now.
+    assert "has_visuals AND has_transcript THEN 'PROCESSED'" in sql
     assert s._execute.call_args[0][1][1] == "V1"
+
+
+@pytest.mark.asyncio
+async def test_mark_transcript_safe_requires_audio_for_processed():
+    s = FakeState()
+    await s.mark_transcript_safe("V1")
+    sql = s._execute.call_args[0][0]
+    # caption-first scribe runs in parallel with the singer, so PROCESSED may
+    # only latch once audio is also present.
+    assert "has_visuals AND has_audio THEN 'PROCESSED'" in sql
+
+
+@pytest.mark.asyncio
+async def test_mark_visuals_safe_requires_audio_for_processed():
+    s = FakeState()
+    await s.mark_visuals_safe("V1")
+    sql = s._execute.call_args[0][0]
+    assert "has_transcript AND has_audio THEN 'PROCESSED'" in sql
 
 
 @pytest.mark.asyncio
