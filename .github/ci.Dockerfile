@@ -29,7 +29,10 @@ COPY atlas/ atlas/
 COPY maia/ maia/
 COPY alkyone/ alkyone/
 
-# Install all project dependencies system-wide
+# Install all project dependencies system-wide. poetry 2.x `install` always
+# installs from the committed poetry.lock and errors if it is out of date with
+# pyproject.toml, so CI is fully pinned to the lock (rebuild triggered by the
+# pyproject.toml / poetry.lock change filter in ci.yml).
 RUN cd atlas && poetry install --no-interaction && \
     cd ../maia && poetry install --no-interaction && \
     cd ../alkyone && poetry install --no-interaction

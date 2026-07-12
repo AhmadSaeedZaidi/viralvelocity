@@ -61,6 +61,8 @@ class YouTubeSearchStrategy:
                 raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
 
         result = await self.executor.execute_async(make_request)
+        if result is None:
+            raise RuntimeError(f"YouTube API request failed (retries exhausted) for {url}")
         return dict[str, Any](result)
 
     async def search(self, params: dict[str, Any]) -> dict[str, Any] | None:

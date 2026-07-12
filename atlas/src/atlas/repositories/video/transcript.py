@@ -82,7 +82,7 @@ class TranscriptRepository(DatabaseAdapter):
         )
         return [dict(r) for r in rows]
 
-    async def clear_vault_pending(self, video_id: str, vault_uri: str) -> None:
+    async def clear_vault_pending(self, video_id: str, vault_uri: str | None) -> None:
         """Mark a video's vault write complete (called by the janitor)."""
         now = datetime.now(UTC)
         await self._execute(
