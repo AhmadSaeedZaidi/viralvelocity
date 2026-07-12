@@ -1,9 +1,27 @@
 # Agent Consolidation & Test-Strategy Proposal
 
-> Status: **PROPOSAL — for review. Nothing here is implemented yet.**
+> Status: **PARTIALLY IMPLEMENTED.** P1a is shipped; P1b/P2/P3/P4 pending. CI/quality work (mypy 2.x, locked deps, alkyone unhooked from CI) done separately.
 > Companion to `refactor_draft.md` (Atlas DAO → Repository). This doc extends that
 > philosophy to the **maia agent layer** and resolves the **alkyone / 24-7-VPS** question.
 > Author: opencode. Reviewed against code as of 2026-07-11.
+
+## Implementation Status (2026-07-12)
+
+| Phase | State | Notes |
+|---|---|---|
+| P1a | Done | `a4762b7`: claim gates + TTL reclamation + `raw_stored_at` + 13 tests; live DB migrated |
+| P1b | Pending | `pipeline_phase` enum migration (deferred per plan) |
+| P2  | Pending | `BaseBatchAgent` + remove legacy cruft |
+| P3  | Pending | decompose the five oversized files |
+| P4  | Partial | alkyone unhooked from CI (jobs + image) ✓; `architecture.md` → Repository pattern ✓. TODO: alkyone isolated test infra + prod-URL guard, maia unit-test DRY, `testing.md` VPS rewrite |
+
+Adjacent CI/quality work this session (not in plan, but related):
+- mypy 2.x migration + poetry-lock enforcement (lock is now authoritative in the CI image build).
+- alkyone removed from the CI env image (`.dockerignore` excludes it as a separate build context).
+- GitHub Actions bumped to Node-24-targeting majors (silences the runner deprecation warnings).
+
+Open questions in §5 still await a decision: muralist cadence, P1b timing,
+alkyone schedule, doc ownership.
 
 ---
 
