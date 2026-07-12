@@ -131,6 +131,8 @@ class KeyRing:
         """Start a new exhaustible rotation session; allocates a unique id if
         none given. Returns the session id."""
 
+        if session_id is None:
+            session_id = next(self._session_counter)
         self._current_session_attempts[session_id] = 0
         return session_id
 

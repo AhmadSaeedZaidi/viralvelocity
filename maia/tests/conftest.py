@@ -15,7 +15,7 @@ def mock_prefect_context():
     """
     Establish a mock Prefect context so get_run_logger() works.
 
-    We use TaskRunContext.construct() to bypass Pydantic validation
+    We use TaskRunContext.model_construct() to bypass Pydantic validation
     and provide a lightweight context for all tests.
     """
     # Create dummy objects for the context
@@ -23,8 +23,8 @@ def mock_prefect_context():
     mock_task = MagicMock()
     mock_client = MagicMock()
 
-    # Use construct to create the model without validation
-    ctx = TaskRunContext.construct(
+    # Use model_construct to create the model without validation
+    ctx = TaskRunContext.model_construct(
         task_run=mock_task_run,
         task=mock_task,
         client=mock_client,
