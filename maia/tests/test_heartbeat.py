@@ -2,25 +2,31 @@
 Tests for Maia Heartbeat fleet-unit enumeration.
 """
 
-from maia.heartbeat.flow import FLEET_UNITS
+from maia.heartbeat.flow import FLEET_DEPLOYMENTS, FLEET_UNITS
 
 
-def test_fleet_includes_all_scheduled_agents():
-    # Producers + consumers that run as systemd units.
-    for unit in (
-        "pleiades-hunter",
-        "pleiades-archeologist",
-        "pleiades-scribe",
-        "pleiades-painter",
-        "pleiades-streamer",
-        "pleiades-singer",
-        "pleiades-tracker",
-        "pleiades-janitor",
-        "bgutil-provider",
-    ):
-        assert unit in FLEET_UNITS, f"{unit} missing from FLEET_UNITS"
+def test_fleet_unit_is_prefect_worker():
+    # After the two-VPS migration the nine polling agents are Prefect
+    # deployments executed by a single `prefect-worker`, so that is the only
+    # systemd unit probed.
+    assert FLEET_UNITS == ["prefect-worker"]
+
+
+def test_fleet_deployments_are_the_nine_agents():
+    # The heartbeat now reports all nine automated Prefect deployments.
+    assert set(FLEET_DEPLOYMENTS) == {
+        "streamer",
+        "singer",
+        "painter",
+        "scribe",
+        "hunter",
+        "tracker",
+        "archeologist",
+        "heartbeat",
+        "janitor",
+    }
 
 
 def test_fleet_excludes_manual_only_muralist():
-    # muralist is a manual-only capability with no systemd unit to probe.
-    assert "pleiades-muralist" not in FLEET_UNITS
+    # muralist is a manual-only capability with no deployment to probe.
+    assert "muralist" not in FLEET_DEPLOYMENTS

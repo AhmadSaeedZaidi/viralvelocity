@@ -199,15 +199,20 @@ async def test_vault_flush_retries_and_marks_failed(mock_sleep, mock_prefect_log
 
 @pytest.mark.asyncio
 async def test_process_transcript_handles_transcript_fetch_failure():
-    """Unexpected transcription error → video marked failed."""
+    """Loader error → treated as no captions → safe (not permanently FAILED)."""
     video = Video(id="VIDEO_001", title="Test Video")
 
     with (
         patch("maia.scribe.flow.VideoRepository") as MockRepo,
         patch("maia.scribe.flow.get_vault") as mock_get_vault,
         patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+        patch(
+            "maia.scribe.flow.transcribe_audio_download",
+            side_effect=TranscriptExtractionError("no stt"),
+        ),
     ):
         mock_repo = MockRepo.return_value
+        mock_repo.mark_transcript_safe = AsyncMock()
         mock_repo.mark_failed = AsyncMock()
         mock_vault = mock_get_vault.return_value
         mock_vault.fetch_binary = MagicMock(return_value=None)
@@ -215,7 +220,8 @@ async def test_process_transcript_handles_transcript_fetch_failure():
 
         await process_transcript_task.fn(video)
 
-        mock_repo.mark_failed.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_transcript_safe.assert_called_once_with("VIDEO_001")
+        mock_repo.mark_failed.assert_not_called()
 
 
 @pytest.mark.asyncio

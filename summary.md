@@ -1,132 +1,224 @@
-# Pleiades — Work Summary
+# Pleiades — Work Summary (compacted context)
 
-Branch: `hy3-work` (pushed to `origin`). Latest commits:
-- `a4762b7` — P1a producer/consumer coordination fix
-- `0fe96b4` — CI cleanup + make `make lint` green
-- `871db16` — CI fix: grant `packages: write` to `build-env` caller job
-- `76a9b06` — Bump mypy → 2.x, regenerate poetry locks, enforce lock in CI
-- `0a7de7c` — CI fix: drop alkyone from CI env image (`/alkyone: not found`)
+Branch: `hy3-work` (pushed to `origin` for early commits; many later changes are LOCAL/UNCOMMITTED).
+Live DB: `pleiades` @ `127.0.0.1:5432/pleiades` (this VPS). Prefect control plane: micro `10.0.0.22:4200`
+(SQLite). This VPS = executor (runs `prefect-worker`); micro = control plane (API + orchestration DB).
+**Micro is ON again** (brought back up 2026-07-13 via OCI CLI; `e2-micro-server` RUNNING at 10.0.0.22).
 
-## 6. CI is GREEN (verified via `gh run view 29185062767`)
-Used `gh` (installed via apt, authed with a PAT) to inspect live logs.
-- Build CI Environment ✓ (4m57s) — failed before on `/alkyone: not found`
-  because `.dockerignore` excludes `alkyone/` (separate build context) yet
-  `ci.Dockerfile` COPY'd + poetry-installed it. Fixed by dropping alkyone
-  from the image (it's also unhooked from the CI jobs — proposal P4).
-- Quality (Linting & Type Checking) ✓ (1m10s) — mypy 2.2.0 + ruff clean.
-- Unit Tests ✓ (4m1s).
-
-### Outstanding (non-blocking) warning
-- Node.js 20 deprecation annotations on `actions/checkout@v4`,
-  `dorny/paths-filter@v3`, `docker/*@v6/v3/v5/v3`. Bump to v5/v7 to clear
-  (warnings only, not failures).
-
-## 5. mypy 2.x migration + lock enforcement (latest)
-- Bumped mypy pin `>=1.8.0,<2.0.0` → `>=2.0.0,<3.0.0` in atlas/maia/alkyone
-  `[tool.poetry.group.dev.dependencies]` (unifies the dev pins across all three).
-- Regenerated `poetry.lock` (v2 format, via poetry 2.0.0 — matches
-  `ci.Dockerfile` `POETRY_VERSION=2.0.0`). mypy resolves to 2.2.0.
-- Pinned `pydantic` to `<2.14.0` in atlas (the shared source) so maia/alkyone
-  resolve to stable **2.13.4** instead of the `2.14.0a1` pre-release poetry 2.x
-  otherwise picked. pydantic now consistent across all three locks.
-- **CI depends on the lock**: poetry 2.x `install` always installs from the
-  committed `poetry.lock` and errors if out of date with `pyproject.toml`, so the
-  image build is fully pinned. The `check-changes` filter in `ci.yml` already
-  rebuilds the image when `**/pyproject.toml` / `**/poetry.lock` change.
-- Two **real** mypy 2.x errors were fixed (the old env had masked them):
-  - `atlas/.../transcript.py`: `clear_vault_pending` param `vault_uri` widened to
-    `str | None` (caller passes a `.next(..., None)` lookup that can miss).
-  - `maia/strategies.py`: `execute_async` returns `None` on exhausted retries, so
-    `dict(result)` would crash at runtime — now guarded with a `RuntimeError`.
-- Verified in fresh venvs (mirrors CI): `mypy` clean (atlas 33 files, maia 36),
-  `ruff check` + `ruff format --check` clean, `poetry install` succeeds.
+## CURRENT PIPELINE STATUS (2026-07-13, after fix)
+- **Parallelism / concurrency architecture (FIXED 2026-07-13, after "laggy" complaint)**:
+  - `default` work pool `concurrency_limit=3` = CPU-safe global cap (was 2 → starved everything;
+    was unlimited → 9 concurrent → CPU death spiral load 26-27).
+  - **Per-deployment isolation via work queues** (the working Prefect-3 mechanism): one work queue
+    per deployment (`streamer/singer/painter/scribe/hunter/tracker/archeologist/janitor/heartbeat`),
+    each `concurrency_limit=1`, all in the `default` pool. So each agent runs ≤1 instance, but up to
+    3 *different* agents run in parallel (responsive, like the old 9-systemd-units feel).
+  - **Heartbeat queue priority 1** (all others priority 2), so the heartbeat never starves.
+  - **GOTCHA (important):** in this Prefect 3.7.7 build, per-deployment `max_active_runs` is NOT
+    supported — `ConcurrencyOptions` has no `max_active_runs` field and `Deployment.concurrency_limit`
+    (int) does not persist. `prefect.yaml` `max_active_runs: 1` and `concurrency_limit: {limit:1,…}`
+    are silently ignored. The real per-deployment cap comes ONLY from the work-queue `concurrency_limit`.
+    Work queues are DB objects (persist across `prefect deploy`); deployments just reference them via
+    `work_queue_name` (set per-deployment in prefect.yaml so redeploys don't revert to `default`).
+- **Micro SQLite lock storm FIXED**: server connection URL patched to
+  `sqlite+aiosqlite:////opt/prefect/prefect.db?timeout=30` in
+  `/etc/systemd/system/prefect-server.service` on the micro (raised busy_timeout from 5s→30s so
+  writes retry instead of 503 "database is locked"). This was the blocker that stopped `prefect deploy`.
+- **Orphan-slot cleanup** (learned the hard way): after a control-plane outage, orphaned flow runs
+  from the pre-outage worker hold work-pool slots forever (their worker is gone, so Late-detection
+  can't finalize them) → pool reads as "full" and the new worker won't start anything. Fix: delete
+  the orphaned runs via API/DB (the slot-holders were the few `PENDING` runs with `start_time=None`;
+  `RUNNING`/`CRASHED` orphans also hold slots). After cleanup `active_slots` dropped to 0.
+- **FAILED = 0** in the videos DB. The "48 stuck" videos were never `status='FAILED'` — they're in
+  `PENDING` (13,911) / `PROCESSING` (6,610), which the bounded worker reclaims via staleness.
+  The dead-end `FAILED` problem is resolved; backlog drains at concurrency 2.
+- **Muralist 12 "all-done"** videos still separate (in PROCESSING, has_video=FALSE, clip_phase=PENDING);
+  muralist is manual-only. Not blocking.
+- Residual: ~28 "database is locked" log lines/min on the micro (retried, non-fatal). SQLite on a
+  1/8-OCPU e2-micro is the bottleneck; robust fix = migrate orchestration DB to Postgres, or raise
+  `PREFECT_API_SERVICES_*_LOOP_SECONDS`. Functional as-is.
 
 ---
 
-## 1. P1a — Producer/Consumer coordination fix (shipped)
-Fixes the muralist-starvation race at its root.
+## 1. Architecture (how Prefect works here)
 
-- `claim_scribe_batch` is **audio-independent** (scribe is caption-first; audio STT is only a
-  paid fallback) — it must NOT be gated on `has_audio`.
-- `claim_muralist_batch` now requires `raw_uri IS NOT NULL` (no input → no claim).
-- `reclaim_raw_if_complete` only reclaims once `has_audio AND has_visuals`, and only when
-  `has_video` is set **or** raw aged past `RAW_TTL_HOURS` (default 48h).
-- `mark_fetched` records `raw_stored_at` to drive the TTL window.
-- Schema: `raw_stored_at TIMESTAMPTZ` added (idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`).
-- Config: `RAW_TTL_HOURS` setting (default 48).
-- Tests: 13 `atlas/tests/test_state_machine.py` cases (gates + TTL paths).
-- Live DB migrated (`raw_stored_at` column created via `python -m atlas`); running agents
-  pick up new code on next restart cycle.
+- **Control plane (micro `10.0.0.22`)**: Prefect server/API on `:4200`, SQLite backend. Stores
+  *orchestration* state only (deployments, schedules, flow-run state). Does NOT store video data.
+- **Execution plane (this 2-core VPS)**: one `prefect-worker` daemon (`/etc/systemd/system/
+  prefect-worker.service` → `prefect worker start --pool default --type process`). Polls the API
+  and executes each queued run as a **separate subprocess** (`python -m prefect.engine`).
+- **9 deployments** (in `prefect.yaml`): `streamer, singer, painter, scribe, hunter, tracker,
+  archeologist, heartbeat, janitor`. Each = a `@flow` + schedule (interval) + `max_active_runs: 1`
+  + `work_pool: default`. **Muralist is intentionally NOT a deployment** (manual-only).
+- The flows connect directly to the **local** `videos` Postgres for pipeline state; Prefect API only
+  tracks run state.
 
-## 2b. CI workflow validation error (fixed `871db16`)
-- Error: `ci.yml` calling `build-env.yml` failed with *"requesting 'packages: write', but
-  is only allowed 'packages: read'"*. The reusable `build-env.yml` declares
-  `permissions: packages: write` (needed to push the CI image to GHCR), but the caller
-  `build-env` job in `ci.yml` didn't grant it, so GitHub capped the token at read.
-- Fix: added `permissions: { contents: read, packages: write }` to the `build-env` job
-  in `ci.yml`. Pushed; GitHub should now validate the workflow.
-
-## 2. CI cleanup (shipped)
-### Diagnosis
-`ci.yml` was red because:
-- `ruff format --check` failed on 34 previously-unformatted files.
-- 1 ruff-check error (import sort in `alkyone/.../test_integration.py`).
-- The `integration-tests` job relied on Neon ephemeral branches + YouTube/HF secrets that
-  don't exist on the 24/7-VPS model (proposal F4/F5).
-- Hidden blocker: once formatting was fixed, `mypy --strict` would fail (atlas 11, maia 20
-  errors). Note: local mypy 2.2.0 was outside the project pin `<2.0.0`; reinstalled 1.20.2
-  to validate what CI actually runs.
-
-### Fixes
-- **`ci.yml`**: `quality` job now lints **atlas + maia only** (alkyone unhooked);
-  **Neon-based `integration-tests` job removed** (deferred to proposal P4 — isolated test DB
-  + vault + prod-URL guard).
-- Repo-wide `ruff format` + `ruff check --fix` so `ruff format --check` passes.
-- Fixed mypy (strict) errors for atlas + maia:
-  - atlas: `VideoQualityMixin` now inherits `DatabaseAdapter` (resolves
-    `_fetch_all`/`_execute`/`_fetch_one`); cast `json.loads` / `int .get` returns.
-  - maia: add `__all__` to `scribe/loader`; **real bug fixed** in `scribe/flow.py`
-    (`transcribe_audio_path(...)` was missing `.segments`); widen `yt_dlp_base` /
-    `_resolve_cookies` to `str | Path | None`; wrap `Any`-returning repo calls; annotate
-    inner `_bounded` helpers; clean the quality-gate `evaluated` typing.
-
-### Verified green locally
-- ruff: clean (atlas + maia).
-- mypy (1.20.2, matches pin): clean (atlas + maia).
-- tests: **atlas 34 passed**, **maia 106 passed**.
+**Critical mental model:** `max_active_runs: 1` is **per-deployment**, not global. The work pool had
+**no global `concurrency_limit`** (default unlimited). So the worker ran up to 9 flow-runs at once,
+each spawning ffmpeg/yt-dlp → dozens of CPU-bound procs on 2 cores → death spiral.
 
 ---
 
-## 3. Notes / environment
-- SSH deploy key at `/home/ubuntu/code/testing_hy3/id_ed25519` (symlinked to
-  `~/.ssh/id_ed25519`); plain `git push`/`fetch` works.
-- Live DB `pleiades` @ 127.0.0.1:5432; schema applied via idempotent `provision_schema`.
-- `docs/agent-consolidation-proposal.md` §6 documents verified best-practice references
-  (ABC / Transactional Outbox / Strangler Fig / Test Sizes / 12-Factor).
+## 2. The 136/145 `FAILED` investigation (DONE, root-caused)
+
+`FAILED` is a **permanent dead-end**: every claim gate selects `status IN ('PENDING','PROCESSING',…)`
+and excludes `FAILED`, so nothing ever retries it. Three failure shapes:
+- **audio_stuck** (~59): singer's `extract_audio_ffmpeg` had a hard **180s timeout** and transcoded
+  the *whole* track; long videos time out → `TimeoutExpired` → generic `except` → `mark_failed`.
+- **transcript_stuck** (~46–56): live/no-caption videos; scribe is caption-first; loader raised
+  non-`TranscriptExtractionError` → hit generic `except` → `mark_failed` (dead-end) instead of safe.
+- **visuals_stuck** (~30): painter frame grabs are O(1) seeks, not duration-limited; stranded purely
+  by the `FAILED` dead-end.
+
+### Fixes shipped (local, uncommitted)
+- `maia/singer/flow.py`: `SINGER_CHUNK_SECONDS=1800`; `store_audio_task` rewritten to return
+  `list[(video_id, vault_rel_path, audio_bytes)]` and **chunk** long videos (`_plan_audio_chunks`)
+  so each ffmpeg call stays under timeout; `TimeoutExpired`/exception → `release_to_pending`
+  (non-fatal). `VideoRepository` instantiated lazily (happy path never opens a DB conn).
+- `maia/scribe/flow.py`: `SCRIBE_MAX_DURATION_SECONDS=1800`, `SCRIBE_LONG_VIDEO_MESSAGE`,
+  `TranscriptTooLongError`; `_transcribe` treats ANY loader exception as "no captions" (re-raises
+  `QuotaExhaustedError` so backoff still works); >30 min no-caption → templated apology +
+  `mark_transcript_safe` (no STT). Generic loader error → safe, not `FAILED`.
+- `maia/media/streamer.py`: added `extract_audio_chunk` (ffmpeg `-ss`/`-t`).
+- `maia/heartbeat/flow.py`: `heartbeat_flow` is `@flow`; originally `FLEET_UNITS=["prefect-worker"]`.
+
+### Production recovery EXECUTED (this VPS = prod)
+- Pre-reset: **145 FAILED** (audio 59, transcript 56, visuals 30).
+- Surgical reset: `UPDATE videos SET status='PENDING' WHERE status='FAILED'` for all 145 (did NOT
+  use the blunt `tools/recover_failed_runs.py --apply`/frame-purge, to avoid 115 needless frame
+  regenerations). Verified `FAILED → 0`.
+- Triggered manual singer/scribe/painter runs; confirmed new code live (log:
+  `Audio extraction timed out for w3tR6h6C2TI (chunk 0) — releasing for retry`).
+- After first cycles `FAILED` dropped to **6** (genuine `AudioExtractionError`s — appropriate).
+
+### Test migration (DONE)
+Updated 5 tests to new behavior; fixed a mis-indent (call outside `with` patch block). Full maia
+suite **110 pass**, ruff clean.
 
 ---
 
-## 4. Remaining refactor phases (from proposal)
-- **P1b** — `pipeline_phase` enum migration (root-cause fix for the race).
-- **P2** — `BaseBatchAgent` to kill the ×9 scaffolding duplication.
-- **P3** — decompose the 5 oversized files.
-- **P4** — alkyone repurpose + test layering + doc refresh (alkyone currently unhooked
-  from CI pending this).
+## 3. Concurrency / CPU-saturation audit (DONE, fixes applied + pending)
 
-## 5. PROCESSED-without-audio fix (shipped, local commit)
-- Root cause: PROCESSED was latched by `mark_transcript_safe`/`mark_visuals_safe` on
-  has_visuals/has_transcript alone, never requiring audio — so caption-first
-  videos (`scribe` runs in parallel with `singer`) landed `PROCESSED` before audio
-  existed. 63 live rows were in this state.
-- `mark_transcript_safe` / `mark_visuals_safe`: PROCESSED only latches when
-  `has_visuals AND has_audio` / `has_transcript AND has_audio`.
-- `mark_audio_safe`: now latches PROCESSED when `has_visuals AND has_transcript`
-  (closes the fan-out race when audio finishes last).
-- `claim_singer_batch`: also reclaims `PROCESSED` rows lacking audio (self-heal),
-  so the bug cannot recur without manual resets.
-- One-off live reset: 63 `PROCESSED` rows with `has_audio=FALSE` → `status=PENDING`,
-  `audio_phase=PENDING`; singer/scribe/painter restarted to load new code.
-- Tests: 4 added/updated in `atlas/tests/test_state_machine.py` (20 passing).
+**Root cause of the 48 `FAILED` stagnation + load 26–27:** no global concurrency ceiling. 9
+deployments × `max_active_runs:1` = up to 9 concurrent flow-runs, each spawning ffmpeg/yt-dlp.
+Evidence: 6 concurrent singer `ffmpeg` = 6 singer runs (per-deployment cap not effectively
+enforced). Per-flow internal concurrency was ALREADY bounded (singer/painter/streamer
+`MAX_CONCURRENT_VIDEOS=1`; scribe `MAX_CONCURRENT_TRANSCRIPTS=1`; painter extracts frames serially).
+Verified: only ONE `prefect-worker`, no legacy `pleiades-*` units, no duplicate procs.
 
-**Next move:** confirm the GitHub Actions run turns green on `0fe96b4`, or start the next
-phase (recommend **P1b** or **P2**).
+### Fixes APPLIED (live, no API needed)
+- **systemd cgroup backstop** on `prefect-worker.service`: `CPUQuota=180%` + `TasksMax=120`.
+  `daemon-reload` + worker restarted. Confirmed in cgroup (`cpu.max=180000 100000`, `pids.max=120`).
+  Box can NEVER be fully saturated regardless of Prefect misconfig. This is the safety net.
+- **Heartbeat now reports the WHOLE fleet** (user request): `heartbeat/flow.py` adds
+  `collect_fleet_status()` — queries the Prefect API for each of the 9 deployments' last flow-run
+  state → "Deployments" embed field, plus executor `prefect-worker` unit → "Executor" field.
+  Degrades to "API unreachable" if control plane down. `FLEET_DEPLOYMENTS` enumerates the 9
+  (muralist excluded). Tests updated (3 pass); full maia suite 110 pass; ruff clean.
+
+### Fixes PENDING — need the micro (user powered it off)
+1. **Set `default` work-pool global `concurrency_limit = 2`** (PRIMARY fix):
+   `prefect work-pool set-concurrency-limit default 2` (or client `update_work_pool(p.id, concurrency_limit=2)`).
+2. **Re-apply deployments from `prefect.yaml`** (`prefect deploy -n <name>` per deployment) to
+   guarantee `max_active_runs: 1` is actually set (6-concurrent-singer evidence implies it wasn't).
+3. Re-run the surgical FAILED reset (currently 48 = 30 audio_stuck + 12 muralist + 6 visuals_stuck).
+
+---
+
+## 4. The 12 "all-done" `FAILED` = muralist (separate bug, NOT concurrency)
+
+- 12 FAILED videos have audio/transcript/visuals all `DONE` but `has_video=FALSE`,
+  `clip_phase=PENDING` → only the **muralist** claim gate (`claim_muralist_batch` requires
+  `has_video=FALSE`) can pick them up. Every other flow's claim gate excludes them.
+- **Muralist is NOT automated** (no deployment/cron/systemd; confirmed by grep of logs/history/
+  `prefect deployment ls`). It can only run via manual `python -m maia.muralist.flow` (has
+  `main()`/`__main__`) or the agent CLI (`registry.py` maps `"muralist": MuralistAgent`).
+- Conclusion: a **manual muralist run** (likely during refactor/migration testing) failed on clip
+  generation for those 12 and called `mark_failed`. They are otherwise complete (audio+visuals+
+  transcript) and arguably should be `PROCESSED`. Muralist failure shouldn't strand them.
+- Out of scope for the concurrency fix; needs a separate look at muralist clip failures (and
+  possibly treating the clip stage as non-blocking for `PROCESSED`).
+
+---
+
+## 5. Bring-up runbook (when micro is restarted)
+
+```
+# on micro (control plane) — set the global cap (PRIMARY fix)
+prefect work-pool set-concurrency-limit default 2
+# re-apply deployments so max_active_runs:1 is guaranteed on each
+cd /home/ubuntu/code/pleiades
+for d in streamer singer painter scribe hunter tracker archeologist heartbeat janitor; do
+  prefect deploy -n "$d"   # reads prefect.yaml (max_active_runs:1, schedules, env)
+done
+# on executor (this VPS) — worker already has CPUQuota/TasksMax backstop
+sudo systemctl restart prefect-worker
+# re-run the surgical FAILED reset (48 currently) so they reprocess under bounded concurrency
+python - <<'PY'
+import asyncio, os
+from pathlib import Path
+for line in Path(".env").read_text().splitlines():
+    line=line.strip()
+    if line and not line.startswith("#") and "=" in line:
+        k,_,v=line.partition("="); k=k.strip(); v=v.strip().strip('"').strip("'")
+        if " #" in v: v=v.split(" #",1)[0].strip()
+        if k and k not in os.environ: os.environ[k]=v
+from atlas.repositories import VideoRepository
+async def main():
+    repo=VideoRepository()
+    n=await repo._execute("UPDATE videos SET status='PENDING', last_updated_at=now() WHERE status='FAILED'")
+    print("reset FAILED -> PENDING:", n)
+asyncio.run(main())
+PY
+```
+
+---
+
+## 6. Important constraints / environment notes
+
+- This VPS has the **local Postgres** (`DATABASE_URL=postgresql://pleiades:***@127.0.0.1:5432/pleiades`).
+  The Prefect *orchestration* tables (deployments, work_pools, flow_runs) live in the **micro's
+  SQLite**, NOT this Postgres — so you cannot set work-pool limits via `psql` here; must use the API.
+- `systemctl` shows only `bgutil-provider` (running), `pleiades-hf-cache-evict` (dead),
+  `prefect-worker` (running). The 9 old `pleiades-*` agent units are gone (stopped in Phase 4).
+- Python env: `.venv` at `/home/ubuntu/code/pleiades/.venv`. Run tests with
+  `source .venv/bin/activate && python -m pytest maia/tests`. Need `PREFECT_API_URL` +
+  `PYTHONPATH=atlas/src:maia/src` for Prefect CLI.
+- The `tools/recover_failed_runs.py` tool exists (dry-run + `--apply` = `reset_failed_to_pending()`
+  + frame purge) but was deliberately NOT used for the recovery (too blunt — would force 115
+  needless frame regenerations).
+
+---
+
+## 7. Relevant files (current session)
+
+- `prefect.yaml` (untracked) — 9 deployments, `max_active_runs:1`, intervals, env.
+- `/etc/systemd/system/prefect-worker.service` — **edited**: `CPUQuota=180%`, `TasksMax=120`.
+- `maia/src/maia/singer/flow.py` — chunked extraction, non-fatal timeout.
+- `maia/src/maia/scribe/flow.py` — 30-min graceful / templated apology.
+- `maia/src/maia/media/streamer.py` — `extract_audio_chunk`.
+- `maia/src/maia/heartbeat/flow.py` — whole-fleet Discord reporting (`collect_fleet_status`,
+  `FLEET_DEPLOYMENTS`, `FLEET_UNITS`).
+- `maia/tests/test_heartbeat.py`, `test_scribe.py`, `test_singer.py` — updated for new behavior.
+- `atlas/src/atlas/repositories/video/state_machine.py` — claim gates (exclude `FAILED`);
+  `reset_failed_to_pending()` exists; `mark_audio_safe`/`mark_transcript_safe`/`mark_visuals_safe`
+  latch `PROCESSED` only when the other two `has_*` flags are set (and `WHERE <phase> <> 'DONE'`).
+- `maia/src/maia/muralist/flow.py` — manual-only; claims `has_video=FALSE`; marks FAILED on failure.
+
+---
+
+## 8. Status of work
+
+- **Committed (early):** P1a, CI/mypy, P1b PROCESSED fix, etc. (see git log).
+- **Uncommitted local:** singer/scribe/streamer/heartbeat flow changes, 3 test files, `prefect.yaml`,
+  and the systemd unit edit. **Not pushed** — push only on approval.
+- **Verified:** maia 110 tests pass, ruff clean, cgroup backstop live, heartbeat fleet code done.
+- **DONE 2026-07-13:** micro powered on (OCI CLI); work-pool `concurrency_limit=2` set; 9 deployments
+  reapplied (`prefect deploy --all`); worker restarted; orphan flow-run slots cleaned; micro SQLite
+  `timeout=30` patch applied; FAILED backlog = 0 (draining PENDING/PROCESSING at concurrency 2).
+- **Open bug:** 12 muralist-stranded "all-done" videos (in PROCESSING, has_video=FALSE,
+  clip_phase=PENDING) — muralist is manual-only; decide whether to make clip stage non-blocking for
+  PROCESSED, or run muralist manually. Separate from the concurrency fix.
+- **Optional hardening:** migrate Prefect orchestration DB to Postgres (kills the residual SQLite lock
+  noise on the 1/8-OCPU micro), or raise `PREFECT_API_SERVICES_*_LOOP_SECONDS`. Current state is
+  functional and bounded.

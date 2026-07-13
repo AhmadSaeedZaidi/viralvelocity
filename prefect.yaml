@@ -1,0 +1,176 @@
+name: pleiades
+
+prefect-version: 3.7.7
+
+deployments:
+  - name: streamer
+    entrypoint: maia/src/maia/streamer/flow.py:streamer_flow
+    work_pool:
+      name: default
+      work_queue_name: streamer
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      batch_size: 5
+    schedule:
+      interval: 120
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+      MAIA_PROXY_URL: ""
+
+  - name: singer
+    entrypoint: maia/src/maia/singer/flow.py:singer_flow
+    work_pool:
+      name: default
+      work_queue_name: singer
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      batch_size: 10
+    schedule:
+      interval: 300
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: painter
+    entrypoint: maia/src/maia/painter/flow.py:painter_flow
+    work_pool:
+      name: default
+      work_queue_name: painter
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      batch_size: 5
+    schedule:
+      interval: 120
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: scribe
+    entrypoint: maia/src/maia/scribe/flow.py:scribe_flow
+    work_pool:
+      name: default
+      work_queue_name: scribe
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      batch_size: 10
+    schedule:
+      interval: 120
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: hunter
+    entrypoint: maia/src/maia/hunter/flow.py:run_hunter_cycle
+    work_pool:
+      name: default
+      work_queue_name: hunter
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      batch_size: 10
+    schedule:
+      interval: 300
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: tracker
+    entrypoint: maia/src/maia/tracker/flow.py:run_tracker_cycle
+    work_pool:
+      name: default
+      work_queue_name: tracker
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      batch_size: 50
+    schedule:
+      interval: 60
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: archeologist
+    entrypoint: maia/src/maia/archeologist/flow.py:run_archeology_campaign
+    work_pool:
+      name: default
+      work_queue_name: archeologist
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      start_year: 2010
+      end_year: 2024
+    schedule:
+      interval: 600
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: heartbeat
+    entrypoint: maia/src/maia/heartbeat/flow.py:heartbeat_flow
+    work_pool:
+      name: default
+      work_queue_name: heartbeat
+    working_dir: /home/ubuntu/code/pleiades
+    schedule:
+      interval: 900
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu
+
+  - name: janitor
+    entrypoint: maia/src/maia/janitor/flow.py:janitor_flow
+    work_pool:
+      name: default
+      work_queue_name: janitor
+    working_dir: /home/ubuntu/code/pleiades
+    parameters:
+      dry_run: false
+    schedule:
+      interval: 900
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    env:
+      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+      VAULT_PROVIDER: huggingface
+      COMPLIANCE_MODE: "false"
+      HOME: /home/ubuntu

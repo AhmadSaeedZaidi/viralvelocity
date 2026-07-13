@@ -8,28 +8,52 @@ import argparse
 import asyncio
 import logging
 import subprocess
+from datetime import datetime
 from typing import Any
 
 import httpx
 from atlas.repositories import VideoRepository
 from atlas.state import quota_exhausted_agents
+from prefect import flow
+from prefect.client.orchestration import get_client
 
 logger = logging.getLogger(__name__)
 
-# systemd units that make up the fleet (agents + PO-token provider).
-# `muralist` is intentionally NOT listed — it is a manual-only capability with
-# no systemd unit, so there is nothing for the heartbeat to probe.
+# Fleet topology after the two-VPS migration: the nine polling agents are Prefect
+# deployments executed by a single long-running `prefect-worker` process. The
+# heartbeat therefore reports BOTH (a) the executor worker liveness (systemd
+# unit) and (b) the health of every deployment (last flow-run state via the
+# Prefect API). `FLEET_UNITS` is the set of systemd units probed for liveness;
+# `FLEET_DEPLOYMENTS` is the set of Prefect deployments surfaced in the report.
 FLEET_UNITS = [
-    "pleiades-hunter",
-    "pleiades-archeologist",
-    "pleiades-scribe",
-    "pleiades-painter",
-    "pleiades-streamer",
-    "pleiades-singer",
-    "pleiades-tracker",
-    "pleiades-janitor",
-    "bgutil-provider",
+    "prefect-worker",
 ]
+
+# All nine automated deployments (muralist is intentionally excluded — it is a
+# manual-only capability with no deployment).
+FLEET_DEPLOYMENTS = [
+    "streamer",
+    "singer",
+    "painter",
+    "scribe",
+    "hunter",
+    "tracker",
+    "archeologist",
+    "heartbeat",
+    "janitor",
+]
+
+# Map a Prefect flow-run state name to fleet health.
+_RUN_STATE_HEALTH = {
+    "Completed": "healthy",
+    "Running": "healthy",
+    "Pending": "warn",
+    "Scheduled": "warn",
+    "Paused": "warn",
+    "Cancelled": "warn",
+    "Failed": "down",
+    "Crashed": "down",
+}
 
 
 def _unit_state(unit: str) -> tuple[str, str]:
@@ -74,6 +98,45 @@ def _unit_state(unit: str) -> tuple[str, str]:
 def collect_service_status() -> dict[str, tuple[str, str]]:
     """Probe every fleet unit and return ``{unit: (label, health)}``."""
     return {unit: _unit_state(unit) for unit in FLEET_UNITS}
+
+
+async def collect_fleet_status() -> dict[str, tuple[str, str]]:
+    """Return ``{deployment: (label, health)}`` from the Prefect API.
+
+    Health is derived from each deployment's most recent flow run. Best-effort:
+    if the API is unreachable, every deployment is reported as unreachable so
+    the operator can see the control plane is down (rather than the agents).
+    """
+    out: dict[str, tuple[str, str]] = {}
+    try:
+        async with get_client() as client:
+            deployments = await client.read_deployments(limit=100)
+            # One query for recent runs, then keep the latest per deployment.
+            recent = await client.read_flow_runs(limit=500)
+            latest: dict[str, tuple[datetime, str]] = {}
+            for r in recent:
+                did = r.deployment_id
+                if not did:
+                    continue
+                ts = r.state.timestamp if r.state and r.state.timestamp else datetime.min
+                prev = latest.get(did)
+                if prev is None or ts > prev[0]:
+                    latest[did] = (ts, r.state.name if r.state else "Unknown")
+            by_name = {d.name: d.id for d in deployments}
+            for name, did in by_name.items():
+                if did in latest:
+                    st = latest[did][1]
+                    out[name] = (f"last run: {st}", _RUN_STATE_HEALTH.get(st, "warn"))
+                else:
+                    out[name] = ("never run", "warn")
+            # Surface any known deployment missing from the API response.
+            for nm in FLEET_DEPLOYMENTS:
+                if nm not in out:
+                    out[nm] = ("not registered", "down")
+    except Exception as e:  # noqa: BLE001 - fleet probe must never crash the cycle
+        logger.warning(f"Could not query Prefect fleet status: {e}")
+        out = {nm: ("API unreachable", "down") for nm in FLEET_DEPLOYMENTS}
+    return out
 
 
 async def collect_pipeline_metrics() -> dict[str, Any]:
@@ -136,9 +199,17 @@ def _build_fields(services: dict[str, tuple[str, str]], metrics: dict[str, Any])
     """Build the Discord embed fields from service states and pipeline metrics."""
     icons = {"healthy": "🟢", "warn": "🟡", "down": "🔴"}
 
-    services_line = "\n".join(
+    # Split the merged services dict into the executor (systemd unit) and the
+    # Prefect deployments so each gets its own embed field.
+    executor_line = "\n".join(
         f"{icons.get(health, '🔴')} `{unit}` — {label}"
         for unit, (label, health) in services.items()
+        if unit in FLEET_UNITS
+    )
+    deployments_line = "\n".join(
+        f"{icons.get(health, '🔴')} `{unit}` — {label}"
+        for unit, (label, health) in services.items()
+        if unit not in FLEET_UNITS
     )
 
     sc = metrics["status_counts"]
@@ -159,17 +230,26 @@ def _build_fields(services: dict[str, tuple[str, str]], metrics: dict[str, Any])
     )
 
     return {
-        "Services": services_line,
+        "Executor": executor_line,
+        "Deployments": deployments_line,
         "Pipeline": pipeline_line,
         "Content": content_line,
     }
 
 
+@flow(name="heartbeat_cycle")
 async def heartbeat_flow() -> dict[str, Any]:
     """Collect status, post to Discord, and return a summary dict."""
     from atlas.notifications import AlertChannel, AlertLevel, notifier
 
     services = await asyncio.to_thread(collect_service_status)
+    try:
+        fleet = await collect_fleet_status()
+    except Exception as e:  # noqa: BLE001 - never let the fleet probe crash the cycle
+        logger.warning(f"Fleet status collection failed: {e}")
+        fleet = {nm: ("API unreachable", "down") for nm in FLEET_DEPLOYMENTS}
+    # Merge executor liveness (systemd) with deployment health (Prefect API).
+    services = {**services, **fleet}
 
     try:
         metrics = await collect_pipeline_metrics()
@@ -200,16 +280,21 @@ async def heartbeat_flow() -> dict[str, Any]:
     if rate_limited:
         fields["Quota"] = "⏳ Rate limited / quota exhausted: " + ", ".join(rate_limited)
 
-    down = [u for u, (_, health) in services.items() if health == "down"]
+    # Distinguish the executor worker (systemd) from the Prefect deployments.
+    executor_down = [u for u in FLEET_UNITS if services.get(u, ("", "healthy"))[1] == "down"]
+    fleet_down = [
+        u for u, (_, health) in services.items()
+        if u not in FLEET_UNITS and health == "down"
+    ]
     degraded = [u for u, (_, health) in services.items() if health == "warn"]
 
     # A degraded audio API is surfaced but does not by itself flip the banner to
-    # "Degraded" — only a truly down fleet service does. Quota-exhausted agents
-    # are shown in the "Quota" field (and their alert is rate-limited upstream).
-    if down:
+    # "Degraded" — only a truly down executor or deployment does. Quota-exhausted
+    # agents are shown in the "Quota" field (and their alert is rate-limited).
+    if executor_down or fleet_down:
         level = AlertLevel.WARNING
         status_word = "Degraded"
-        description = f"⚠ Down: {', '.join(down)}"
+        description = f"⚠ Down: {', '.join(executor_down + fleet_down)}"
     elif rate_limited:
         level = AlertLevel.INFO
         status_word = "Rate Limited"
@@ -241,12 +326,15 @@ async def heartbeat_flow() -> dict[str, Any]:
     )
 
     summary = {
-        "healthy": not down and not degraded,
-        "down": down,
+        "healthy": not executor_down and not fleet_down and not degraded,
+        "down": executor_down + fleet_down,
         "degraded": degraded,
         "metrics": metrics,
     }
-    logger.info(f"Heartbeat sent: {status_word} (down={down}, degraded={degraded})")
+    logger.info(
+        f"Heartbeat sent: {status_word} "
+        f"(executor_down={executor_down}, fleet_down={fleet_down}, degraded={degraded})"
+    )
     return summary
 
 

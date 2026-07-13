@@ -72,9 +72,13 @@ async def test_store_audio_successful():
 
         result = await store_audio_task.fn(video)
 
-        assert result == ("VIDEO_001", FAKE_OPUS)
+        assert result is not None
+        assert len(result) == 1
+        vid_id, _rel, audio_bytes = result[0]
+        assert vid_id == "VIDEO_001"
+        assert audio_bytes == FAKE_OPUS
         mock_vault.fetch_binary.assert_called_once()
-        mock_repo.mark_audio_safe.assert_not_called()  # flow marks it
+        mock_repo.mark_audio_safe.assert_not_called()
         mock_repo.mark_failed.assert_not_called()
 
 
@@ -159,7 +163,10 @@ async def test_run_singer_cycle_processes_batch():
         patch(
             "maia.singer.flow.store_audio_task",
             new_callable=AsyncMock,
-            side_effect=[("VIDEO_001", FAKE_OPUS), ("VIDEO_002", FAKE_OPUS)],
+            side_effect=[
+                [("VIDEO_001", "audio/VIDEO_001.opus", FAKE_OPUS)],
+                [("VIDEO_002", "audio/VIDEO_002.opus", FAKE_OPUS)],
+            ],
         ),
         patch("maia.singer.flow.VideoRepository") as MockRepo,
         patch("maia.singer.flow.get_vault") as mock_get_vault,

@@ -527,3 +527,42 @@ def extract_audio_ffmpeg(src: Path, dst: Path, timeout: int = 180) -> Path:
     if not dst.exists():
         raise AudioExtractionError(f"ffmpeg produced no file for {dst.name}")
     return dst
+
+
+def extract_audio_chunk(
+    src: Path, dst: Path, start: float, length: float, timeout: int = 180
+) -> Path:
+    """Extract a *time-bounded* speech-optimised opus segment from *src*.
+
+    Used to split long videos into short chunks so each ffmpeg call stays under
+    the timeout while the full audio track is still captured across chunks.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(start),
+        "-i",
+        str(src),
+        "-t",
+        str(length),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "32k",
+        "-f",
+        "opus",
+        str(dst),
+    ]
+    logger.info(f"[ffmpeg] Extracting audio chunk {dst.name} (start={start}s len={length}s)")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if result.returncode != 0:
+        raise AudioExtractionError(
+            f"ffmpeg audio chunk failed for {dst.name}: {result.stderr.strip()[:200]}"
+        )
+    if not dst.exists():
+        raise AudioExtractionError(f"ffmpeg produced no chunk for {dst.name}")
+    return dst
