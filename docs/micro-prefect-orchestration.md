@@ -53,12 +53,12 @@ via `prefect-server.service`.
 
 After the 2026-07-13 incident the orchestration is configured as:
 
-- **Work pool `default`** — global `concurrency_limit = 3` (CPU-safe ceiling for the 2-core box).
+  - **Work pool `default`** — global `concurrency_limit = 5` (cheap agents run concurrently again; the worker's `CPUQuota=180%` cgroup backstop + per-queue `limit=1` prevent any CPU death-spiral).
 - **One work queue per deployment**, each `concurrency_limit = 1`:
   `streamer, singer, painter, scribe, hunter, tracker, archeologist, janitor` (priority 2) and
   `heartbeat` (priority 1).
-- All 9 queues live in the `default` pool. Effect: **each agent runs ≤1 instance, but up to 3
-  *different* agents run in parallel.** The heartbeat (priority 1) is never starved.
+  - All 9 queues live in the `default` pool. Effect: **each agent runs ≤1 instance, but up to 5
+   *different* agents run in parallel.** Cheap agents (heartbeat/janitor/tracker/hunter/archeologist rank priority 1–4/5) sit above the heavy ffmpeg agents (priority 6–9), so they win slots first; the heavy agents stay naturally throttled. The heartbeat (priority 1) is never starved.
 
 This is the idiomatic Prefect-3 equivalent of the old "9 independent systemd units" — multiple stages
 progress concurrently without any single agent flooding CPU.
@@ -73,6 +73,13 @@ The **only** mechanism that enforces per-deployment isolation is the **work-queu
 Work queues are DB objects (they survive `prefect deploy`); deployments just reference them via
 `work_queue_name`. If you ever redeploy from `prefect.yaml`, make sure each deployment's `work_queue_name`
 is set to its own queue name, otherwise it falls back to the unlimited `default` queue and isolation breaks.
+
+### ⚠️ GOTCHA: micro Prefect API caps `read_flow_runs` at `limit=200`
+Any `client.read_flow_runs(limit=N)` / `read_*_runs` with `N > 200` returns **`422 Unprocessable Entity`**
+from the micro server. This bit the heartbeat: `collect_fleet_status()` used `limit=500`, got a 422, and
+the `except Exception` masked it as "API unreachable" for *every* deployment (false total outage).
+**Fix:** page (≤200) or query **per-deployment** (`read_flow_runs(flow_run_filter=deployment_id, limit=1)`).
+Never assume a large `limit` is accepted.
 
 ---
 
@@ -122,6 +129,18 @@ asyncio.run(main())
 Per-deployment `concurrency_limit` and `priority` are set via
 `client.update_work_queue(queue_id, concurrency_limit=1, priority=…)` / `client.create_work_queue(...)`.
 Assign a deployment to a queue with `client.update_deployment(dep_id, deployment=DeploymentUpdate(work_queue_name=…))`.
+
+For a **reproducible** (re)creation of the whole queue topology after a micro
+rebuild or work-pool recreation, run the checked-in script (reads
+`PREFECT_API_URL` from the environment; contains **no secrets**):
+
+```bash
+export PREFECT_API_URL=http://10.0.0.22:4200/api
+python tools/setup_orchestration.py
+```
+
+It sets the pool global `concurrency_limit=3` and creates/updates all 9 queues
+with `limit=1` and the priorities above (heartbeat=1 … streamer=9), idempotently.
 
 ---
 

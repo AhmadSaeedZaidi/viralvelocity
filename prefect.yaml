@@ -13,9 +13,6 @@ deployments:
       batch_size: 5
     schedule:
       interval: 120
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -34,9 +31,6 @@ deployments:
       batch_size: 10
     schedule:
       interval: 300
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -53,9 +47,6 @@ deployments:
       batch_size: 5
     schedule:
       interval: 120
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -72,9 +63,6 @@ deployments:
       batch_size: 10
     schedule:
       interval: 120
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -91,9 +79,6 @@ deployments:
       batch_size: 10
     schedule:
       interval: 300
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -110,9 +95,6 @@ deployments:
       batch_size: 50
     schedule:
       interval: 60
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -130,9 +112,6 @@ deployments:
       end_year: 2024
     schedule:
       interval: 600
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -147,9 +126,6 @@ deployments:
     working_dir: /home/ubuntu/code/pleiades
     schedule:
       interval: 900
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface
@@ -166,9 +142,6 @@ deployments:
       dry_run: false
     schedule:
       interval: 900
-    concurrency_limit:
-      limit: 1
-      collision_strategy: ENQUEUE
     env:
       PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
       VAULT_PROVIDER: huggingface

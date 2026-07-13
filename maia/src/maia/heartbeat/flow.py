@@ -8,7 +8,6 @@ import argparse
 import asyncio
 import logging
 import subprocess
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -16,6 +15,7 @@ from atlas.repositories import VideoRepository
 from atlas.state import quota_exhausted_agents
 from prefect import flow
 from prefect.client.orchestration import get_client
+from prefect.client.schemas.filters import FlowRunFilter, FlowRunFilterDeploymentId
 
 logger = logging.getLogger(__name__)
 
@@ -106,29 +106,31 @@ async def collect_fleet_status() -> dict[str, tuple[str, str]]:
     Health is derived from each deployment's most recent flow run. Best-effort:
     if the API is unreachable, every deployment is reported as unreachable so
     the operator can see the control plane is down (rather than the agents).
+
+    Note: the micro's Prefect server caps ``read_flow_runs`` at ``limit=200``
+    (it returns ``422 Unprocessable Entity`` above that). Querying each
+    deployment's latest run individually (``limit=1``) sidesteps the cap
+    entirely and is always correct regardless of run volume.
     """
     out: dict[str, tuple[str, str]] = {}
     try:
         async with get_client() as client:
             deployments = await client.read_deployments(limit=100)
-            # One query for recent runs, then keep the latest per deployment.
-            recent = await client.read_flow_runs(limit=500)
-            latest: dict[str, tuple[datetime, str]] = {}
-            for r in recent:
-                did = r.deployment_id
-                if not did:
-                    continue
-                ts = r.state.timestamp if r.state and r.state.timestamp else datetime.min
-                prev = latest.get(did)
-                if prev is None or ts > prev[0]:
-                    latest[did] = (ts, r.state.name if r.state else "Unknown")
-            by_name = {d.name: d.id for d in deployments}
-            for name, did in by_name.items():
-                if did in latest:
-                    st = latest[did][1]
-                    out[name] = (f"last run: {st}", _RUN_STATE_HEALTH.get(st, "warn"))
+            for d in deployments:
+                try:
+                    runs = await client.read_flow_runs(
+                        flow_run_filter=FlowRunFilter(
+                            deployment_id=FlowRunFilterDeploymentId(any_=[d.id])
+                        ),
+                        limit=1,
+                    )
+                except Exception:  # noqa: BLE001 - one bad deployment must not sink the rest
+                    runs = []
+                if runs and runs[0].state:
+                    st = runs[0].state.name
+                    out[d.name] = (f"last run: {st}", _RUN_STATE_HEALTH.get(st, "warn"))
                 else:
-                    out[name] = ("never run", "warn")
+                    out[d.name] = ("never run", "warn")
             # Surface any known deployment missing from the API response.
             for nm in FLEET_DEPLOYMENTS:
                 if nm not in out:

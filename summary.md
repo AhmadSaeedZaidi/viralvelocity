@@ -116,9 +116,9 @@ Verified: only ONE `prefect-worker`, no legacy `pleiades-*` units, no duplicate 
   Degrades to "API unreachable" if control plane down. `FLEET_DEPLOYMENTS` enumerates the 9
   (muralist excluded). Tests updated (3 pass); full maia suite 110 pass; ruff clean.
 
-### Fixes PENDING — need the micro (user powered it off)
-1. **Set `default` work-pool global `concurrency_limit = 2`** (PRIMARY fix):
-   `prefect work-pool set-concurrency-limit default 2` (or client `update_work_pool(p.id, concurrency_limit=2)`).
+### Fixes APPLIED during bring-up (micro was powered back on)
+1. **Set `default` work-pool global `concurrency_limit = 3`** (PRIMARY fix, verified live):
+   `prefect work-pool set-concurrency-limit default 3` (or client `update_work_pool(p.id, concurrency_limit=3)`).
 2. **Re-apply deployments from `prefect.yaml`** (`prefect deploy -n <name>` per deployment) to
    guarantee `max_active_runs: 1` is actually set (6-concurrent-singer evidence implies it wasn't).
 3. Re-run the surgical FAILED reset (currently 48 = 30 audio_stuck + 12 muralist + 6 visuals_stuck).
@@ -207,15 +207,72 @@ PY
 
 ---
 
+## 9. 2026-07-13 evening — heartbeat false "all down" fix + cleanup
+
+**Symptom:** Discord fleet status reported every deployment as `🔴 API unreachable` (all 9 down),
+even though the worker was active and the micro API was reachable (`/api/health` → `true`).
+
+**Root cause (code bug, NOT an outage):** `collect_fleet_status()` called
+`client.read_flow_runs(limit=500)`. The micro's Prefect server **caps `read_flow_runs` at
+`limit=200`** and returns `422 Unprocessable Entity` above that. The `except Exception` in
+`collect_fleet_status()` caught the 422 and **masqueraded it as "API unreachable" for every
+deployment** — turning a pagination bug into a false total outage. (The 422 was in the worker log
+six times: 20:43–21:24.)
+
+**Fix (`maia/src/maia/heartbeat/flow.py`):** replaced the bulk `read_flow_runs(limit=500)` with a
+**per-deployment query** (`read_flow_runs(flow_run_filter=deployment_id, limit=1)`). This sidesteps
+the 200 cap entirely and is always correct. Removed the now-unused `datetime` import. ruff clean.
+The worker runs flow code from disk, so **no redeploy needed**.
+
+**Verified:** `collect_fleet_status()` returns real per-deployment health (Completed/Scheduled);
+`heartbeat_flow()` returns `down: []`. Post-fix scheduled runs complete with no 422. Deployments are
+actually healthy (4 Completed / 5 Scheduled at the time of check). Note: a deployment whose latest
+run is merely `Scheduled`/`Pending` shows as `warn` (🟡), which is expected for a periodic pipeline.
+
+**GOTCHA:** the micro Prefect API enforces `read_flow_runs`/`read_*_runs` `limit <= 200`. Any code
+querying flow runs must page or query per-deployment. (Also recorded in
+`docs/micro-prefect-orchestration.md` §3.)
+
+**Cleanup executed (prod):**
+- Deleted **191 dead Prefect flow runs** (`FAILED` + `CRASHED`) via API, 0 errors. `Late` runs left
+  alone — Late-detection auto-frees their slots; pool `active_slots` was only 2 (not blocking).
+- Reset **16 `FAILED` videos → `PENDING`** (unstuck their `audio_phase`/`visuals_phase='PROCESSING'`)
+  so singer/painter re-claim them. FAILED 16→0 (a few new genuine audio/visuals failures reappeared
+  afterward — expected; pipeline self-manages).
+- Filesystem garbage: removed regenerable caches (`__pycache__`, `.pytest_cache`, `.ruff_cache`,
+  `.mypy_cache`); moved 6 stray `*.en.json3` transcript artifacts out of repo root →
+  `/tmp/pleiades-garbage/`; cleared `/tmp` prefect temp dirs + stale logs/locks.
+
+**Observations (not fixed — flag to user):**
+- HuggingFace vault push throwing **HTTP 500** (retrying 89 LFS files) saturates worker concurrency
+  slots — this is what made a manual heartbeat trigger go `Late`. External HF issue; consider making
+  the vault push less blocking / more resilient.
+- `www.youtube.cookies.txt does not look like a Netscape format cookies file` → streamer raw-fetch
+  releases videos (non-fatal, but those videos never get fetched). Cookies file format needs fixing.
+- ~6,900 videos still `PROCESSING` — NOT stuck: claim gates include `PROCESSING`, so the worker
+  re-claims and grinds through them at concurrency 3. Just a large backlog, not an error.
+
+---
+
 ## 8. Status of work
 
 - **Committed (early):** P1a, CI/mypy, P1b PROCESSED fix, etc. (see git log).
 - **Uncommitted local:** singer/scribe/streamer/heartbeat flow changes, 3 test files, `prefect.yaml`,
   and the systemd unit edit. **Not pushed** — push only on approval.
 - **Verified:** maia 110 tests pass, ruff clean, cgroup backstop live, heartbeat fleet code done.
-- **DONE 2026-07-13:** micro powered on (OCI CLI); work-pool `concurrency_limit=2` set; 9 deployments
-  reapplied (`prefect deploy --all`); worker restarted; orphan flow-run slots cleaned; micro SQLite
-  `timeout=30` patch applied; FAILED backlog = 0 (draining PENDING/PROCESSING at concurrency 2).
+- **DONE 2026-07-13:** micro powered on (OCI CLI); work-pool `concurrency_limit=3` set (verified live);
+   9 deployments reapplied (`prefect deploy --all`); worker restarted; orphan flow-run slots cleaned;
+   micro SQLite `timeout=30` patch applied.
+  - **DONE 2026-07-13 evening:** heartbeat false-"all down" bug fixed (was `read_flow_runs(limit=500)` →
+   422 → masked as "API unreachable"; now per-deployment `limit=1` query). 191 dead flow runs
+   (FAILED+CRASHED) deleted; 16 FAILED videos reset to PENDING; caches + stray artifacts cleaned.
+   See §9.
+  - **DONE 2026-07-13 (audit remediations):** added `tools/setup_orchestration.py` (idempotent, no
+   secrets) that captures the pool `concurrency_limit=3` + 9 queues (`limit=1`, priorities 1–9) so the
+   2-VPS orchestration is reproducible after a micro rebuild. Deleted 9 dead `concurrency_limit` blocks
+   from `prefect.yaml` (verified `Deployment.concurrency_limit` reads back `None` → ignored in 3.7.7).
+   Tuned tracker schedule `interval 60→300` (cheap cycle was firing every 60s into a 3-slot pool
+   contested by 9 deployments → 122 Late/queued runs). Docs reference the setup script.
 - **Open bug:** 12 muralist-stranded "all-done" videos (in PROCESSING, has_video=FALSE,
   clip_phase=PENDING) — muralist is manual-only; decide whether to make clip stage non-blocking for
   PROCESSED, or run muralist manually. Separate from the concurrency fix.
