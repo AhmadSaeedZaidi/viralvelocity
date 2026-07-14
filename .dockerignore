@@ -29,7 +29,9 @@ www.youtube.cookies.txt
 yt_cookies.txt
 
 # Unrelated workloads (separate build contexts)
-alkyone/
+# NOTE: alkyone/ is intentionally NOT ignored — the CI image (.github/ci.Dockerfile,
+# context: .) COPYs it in so `make -C alkyone lint` can run in CI. The maia runtime
+# image (Dockerfile) only COPYs atlas/ + maia/, so alkyone is never baked into it.
 training/
 hf-spaces/
 tools/

@@ -2,14 +2,34 @@
 
 **Alkyone** is the dedicated integration and system testing module for Project Pleiades. It contains all integration tests, smoke tests, and system-level validation for Atlas, Maia, and other Pleiades components.
 
-## IMPORTANT: Real Integration Testing
+## IMPORTANT: Isolated Integration Testing (never production)
 
-Alkyone implements **Real Integration Testing** - tests interact with actual external services:
-- **Real YouTube API** calls (video metadata, statistics, transcripts)
-- **Real HuggingFace Hub** storage (vault uploads)
-- **Real PostgreSQL** database (Neon)
+Alkyone runs **integration tests against REAL infrastructure**, but that infrastructure MUST be
+isolated from production:
 
-**No mocks** are used for external services. This ensures tests validate actual integration behavior.
+- **A dedicated test PostgreSQL** database (never the live `pleiades` DB).
+- **A dedicated test HuggingFace vault** (`HF_DATASET_ID_TEST`, default
+  `Rolaficus/pleiades-vault-test`); uploaded files are deleted at teardown.
+- **YouTube is NOT exercised against the live API by default.** Tests use fixtures / mocked
+  responses so they do not burn production YouTube quota. Real-key runs only happen when
+  `YOUTUBE_API_KEY_POOL_JSON` is set to genuine keys, and the relevant tests are gated on that.
+
+### Production-safety guard (mandatory)
+
+Every Alkyone session refuses to start if it is pointed at production. Set these (out-of-band,
+never committed) to the real production values:
+
+```bash
+export PLEIADES_PROD_DATABASE_URL="postgresql://pleiades:***@host:5432/pleiades"
+export PLEIADES_PROD_VAULT="your-username/pleiades-vault"   # the live vault repo id
+```
+
+Then `make guard` (also run automatically by `make test` / `make test-int`, and at pytest
+session start) hard-exits if `DATABASE_URL` or `HF_DATASET_ID` matches them. This is a hard stop,
+not a skip — hitting production is a data-integrity incident.
+
+Alkyone is **run manually / on-demand** (GitHub → Actions → "Alkyone Integration" workflow, or
+locally), never automatically per-commit, to keep production quota and data untouched.
 
 ## Purpose
 
@@ -75,16 +95,23 @@ Integration tests require **REAL credentials** for external services:
 
 ### Required Environment Variables
 
+**Use isolated test infrastructure — never the production DB or vault.**
+
 ```bash
-# HuggingFace Vault (for storing test artifacts)
+# HuggingFace Vault — a DEDICATED test dataset (uploads are cleaned up at teardown)
 export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-export HF_DATASET_ID="your-username/pleiades-test-vault"
+export HF_DATASET_ID_TEST="your-username/pleiades-test-vault"   # alkyone forces this as HF_DATASET_ID
 
-# YouTube Data API (for real API calls)
-export YOUTUBE_API_KEY_POOL_JSON='["AIzaSy..."]'
+# YouTube Data API — leave unset for fixture-backed runs (no quota burn).
+# Only set genuine keys if you intend to exercise the live API.
+# export YOUTUBE_API_KEY_POOL_JSON='["AIzaSy..."]'
 
-# PostgreSQL Database (Neon or local)
-export DATABASE_URL="postgresql://user:pass@host/dbname"
+# PostgreSQL — a DEDICATED test database
+export DATABASE_URL="postgresql://user:pass@host/testdb"
+
+# Prod-safety guard: values that, if matched by DATABASE_URL / HF_DATASET_ID, refuse the run.
+export PLEIADES_PROD_DATABASE_URL="postgresql://pleiades:***@host:5432/pleiades"
+export PLEIADES_PROD_VAULT="your-username/pleiades-vault"
 ```
 
 ### Setting Up Your Test HuggingFace Repo
@@ -100,10 +127,10 @@ export DATABASE_URL="postgresql://user:pass@host/dbname"
    - Copy the token (starts with `hf_`)
 
 3. Set environment variables:
-   ```bash
-   export HF_TOKEN="hf_your_token_here"
-   export HF_DATASET_ID="your-username/pleiades-test-vault"
-   ```
+    ```bash
+    export HF_TOKEN="hf_your_token_here"
+    export HF_DATASET_ID_TEST="your-username/pleiades-test-vault"
+    ```
 
 ### Test Data Cleanup
 
@@ -111,10 +138,22 @@ Alkyone automatically cleans up files uploaded to HuggingFace during tests via t
 
 ## Running Tests
 
+> Alkyone runs **on-demand only** (local `make test-int`, or the manual
+> `Alkyone Integration` GitHub Actions workflow). It is intentionally NOT part of per-PR CI, to
+> avoid touching production quota/data. See the production-safety guard above.
+
+### Prod-safety check (runs automatically, also available standalone)
+```bash
+cd alkyone
+make guard          # refuses if DATABASE_URL / HF_DATASET_ID point at production
+```
+
 ### All Integration Tests
 ```bash
 cd alkyone
 make test-int
+# or (guard runs first inside `make test`)
+make test
 # or
 pytest tests/ -m integration
 ```

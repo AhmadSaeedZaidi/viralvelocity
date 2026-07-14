@@ -6,16 +6,16 @@ concurrency:
 
 on:
   push:
-    branches: [ "*" ]
+    branches: ["*"]
     paths-ignore:
-      - 'docs/**'
-      - '**.md'
+      - "docs/**"
+      - "**.md"
   pull_request:
     types: [opened, reopened, synchronize]
-    branches: [ main ]
+    branches: [main]
     paths-ignore:
-      - 'docs/**'
-      - '**.md'
+      - "docs/**"
+      - "**.md"
 
 env:
   CI_IMAGE: ghcr.io/ahmadsaeedzaidi/pleiades/ci-env:latest
@@ -28,26 +28,26 @@ jobs:
       needs-build: ${{ steps.filter.outputs.any_changed }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Check for dependency changes
         id: filter
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@v3
         with:
           base: ${{ github.event.repository.default_branch }}
           filters: |
             any_changed:
-              - '.github/workflows/build-env.yml'
-              - '.github/ci.Dockerfile'
-              - '**/pyproject.toml'
-              - '**/poetry.lock'
+              - ".github/workflows/build-env.yml"
+              - ".github/ci.Dockerfile"
+              - "**/pyproject.toml"
+              - "**/poetry.lock"
 
   build-env:
     name: Build CI Environment
     needs: check-changes
-    if: needs.check-changes.outputs.needs-build == 'true'
+    if: needs.check-changes.outputs.needs-build == "true"
     uses: ./.github/workflows/build-env.yml
     secrets: inherit
     permissions:
@@ -57,7 +57,7 @@ jobs:
   quality:
     name: Quality (Linting & Type Checking)
     needs: build-env
-    if: always() && (needs.build-env.result == 'success' || needs.build-env.result == 'skipped')
+    if: always() && (needs.build-env.result == "success" || needs.build-env.result == "skipped")
     runs-on: ubuntu-latest
     timeout-minutes: 5
     container:
@@ -67,13 +67,11 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      # Dependencies are already in the Docker image!
-      # Lint atlas + maia only. alkyone is intentionally unhooked from CI until
-      # its test strategy is settled (see docs/agent-consolidation-proposal.md, P4).
-      - name: Lint Modules (atlas + maia)
-        run: make -C atlas lint && make -C maia lint
+      # Dependencies are already in the Docker image.
+      - name: Lint Modules (atlas + maia + alkyone)
+        run: make -C atlas lint && make -C maia lint && make -C alkyone lint
 
   unit-tests:
     name: Unit Tests
@@ -87,15 +85,14 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      # Dependencies are already in the Docker image!
+      # Dependencies are already in the Docker image.
       - name: Run Unit Tests
         run: make test-unit
 
   # ── alkyone (integration tests) ───────────────────────────────────────────
-  # Intentionally NOT run in CI. alkyone is the live integration/smoke suite
-  # that, on a 24/7 VPS, would hit the production Postgres / YouTube quota /
-  # HuggingFace vault. Its test strategy is being reworked (proposal P4) to use
-  # an isolated test DB + test vault with a prod-URL guard before it is wired
-  # back into CI. See docs/agent-consolidation-proposal.md.
+  # Alkyone is NOT run per-PR. It exercises REAL infrastructure (test DB + test
+  # vault) and must never burn production quota/data, so it runs on-demand via
+  # `.github/workflows/alkyone.yml` (manual dispatch, prod-safety guarded).
+  # It is linted above (make -C alkyone lint) so its code still stays green.

@@ -1,11 +1,12 @@
-.PHONY: help install lint test test-int clean
+.PHONY: help install lint lint-local test test-int guard clean
 
 help:
 	@echo "Alkyone Development Commands:"
 	@echo "  make install     - Install dependencies (editable mode)"
-	@echo "  make lint        - Run linters (black, isort, mypy)"
-	@echo "  make test        - Run integration tests"
+	@echo "  make lint        - Run linters (ruff, mypy)"
+	@echo "  make test        - Run integration tests (with prod guard)"
 	@echo "  make test-int    - Run integration tests (alias for test)"
+	@echo "  make guard       - Prod-safety check (refuses if pointed at production DB/vault)"
 	@echo "  make clean       - Clean build artifacts"
 
 install:
@@ -21,7 +22,11 @@ lint:
 	poetry run ruff format --check src/alkyone tests
 	poetry run mypy src/alkyone --config-file pyproject.toml --no-error-summary
 
+guard:
+	poetry run python -m alkyone.guard
+
 test:
+	poetry run python -m alkyone.guard
 	poetry run pytest tests -v --tb=short
 
 test-int: test

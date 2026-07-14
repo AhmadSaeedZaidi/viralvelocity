@@ -22,22 +22,24 @@ WORKDIR /workspace
 # Copy dependency manifests first (cache layer)
 COPY atlas/pyproject.toml atlas/poetry.lock* atlas/
 COPY maia/pyproject.toml maia/poetry.lock* maia/
+COPY alkyone/pyproject.toml alkyone/poetry.lock* alkyone/
 
 # Copy source so editable installs resolve
 COPY atlas/ atlas/
 COPY maia/ maia/
+COPY alkyone/ alkyone/
 
 # Install project dependencies system-wide. poetry 2.x `install` always
 # installs from the committed poetry.lock and errors if it is out of date with
 # pyproject.toml, so CI is fully pinned to the lock (rebuild triggered by the
 # pyproject.toml / poetry.lock change filter in ci.yml).
 #
-# NOTE: alkyone is intentionally NOT built into this image. It is excluded by
-# .dockerignore (separate build context) and unhooked from the CI jobs below
-# (see ci.yml + docs/agent-consolidation-proposal.md, P4). Its own image is
-# built separately for the 24/7 VPS integration runs.
+# alkyone is now part of the image so `make -C alkyone lint` runs in per-PR CI.
+# Its integration tests stay manual/on-demand (see .github/workflows/alkyone.yml)
+# and are guarded against production by alkyone/src/alkyone/guard.py.
 RUN cd atlas && poetry install --no-interaction && \
-    cd ../maia && poetry install --no-interaction
+    cd ../maia && poetry install --no-interaction && \
+    cd ../alkyone && poetry install --no-interaction
 
 # Purge yt-dlp cache
 RUN rm -rf ~/.cache/yt-dlp || true

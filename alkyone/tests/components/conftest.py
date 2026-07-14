@@ -41,6 +41,27 @@ def pytest_configure(config):
         "PLEIADES_USE_PRODUCTION_VAULT=1 (no automatic test-dataset override)",
     )
 
+    # ── Prod-safety interlock ───────────────────────────────────────────────
+    # Mirror the effective DATABASE_URL / HF_DATASET_ID from atlas settings into
+    # os.environ (settings may have loaded them from .env), then refuse the run
+    # if either resolves to the known production target. Runs before collection
+    # so we never even import test code pointed at prod.
+    try:
+        from atlas.config import settings as _settings
+
+        for _k in ("DATABASE_URL", "HF_DATASET_ID"):
+            _v = getattr(_settings, _k, None)
+            if _v is not None and not _os.getenv(_k):
+                _os.environ[_k] = (
+                    _v.get_secret_value() if hasattr(_v, "get_secret_value") else str(_v)
+                )
+    except Exception:
+        pass
+
+    from alkyone.guard import assert_not_production
+
+    assert_not_production()
+
 
 def pytest_collection_modifyitems(config, items):
     """

@@ -3,7 +3,7 @@
 > Status: **PARTIALLY IMPLEMENTED.** P1a is shipped; P1b/P2/P3/P4 pending. CI/quality work (mypy 2.x, locked deps, alkyone unhooked from CI) done separately.
 > Companion to `refactor_draft.md` (Atlas DAO → Repository). This doc extends that
 > philosophy to the **maia agent layer** and resolves the **alkyone / 24-7-VPS** question.
-> Author: opencode. Reviewed against code as of 2026-07-11.
+> Author: opencode. Reviewed against code as of 2026-07-13 (deployment assumptions updated for the 2-VPS orchestration split).
 
 ## Implementation Status (2026-07-12)
 
@@ -13,12 +13,24 @@
 | P1b | In Progress | per-step state + join barrier + idempotent consumers **landed & live-migrated**; booleans kept as transitional seam (removed in P3) |
 | P2  | Pending | `BaseBatchAgent` + remove legacy cruft |
 | P3  | Pending | decompose the five oversized files |
-| P4  | Partial | alkyone unhooked from CI (jobs + image) ✓; `architecture.md` → Repository pattern ✓. TODO: alkyone isolated test infra + prod-URL guard, maia unit-test DRY, `testing.md` VPS rewrite |
+| P4  | Partial | alkyone isolated test infra + **prod-URL/prod-vault guard DONE** (`alkyone/src/alkyone/guard.py`; `make guard`; wired into conftest + `make test-int`); alkyone now linted in per-PR CI (`make -C alkyone lint`); manual `alkyone.yml` dispatch workflow added. `architecture.md` → Repository pattern ✓. TODO: maia unit-test DRY, `testing.md`/`architecture.md` VPS rewrite |
 
 Adjacent CI/quality work this session (not in plan, but related):
 - mypy 2.x migration + poetry-lock enforcement (lock is now authoritative in the CI image build).
 - alkyone removed from the CI env image (`.dockerignore` excludes it as a separate build context).
 - GitHub Actions bumped to Node-24-targeting majors (silences the runner deprecation warnings).
+- **2-VPS orchestration migration (2026-07-13, DONE):** the Prefect control plane moved to the
+  micro `e2-micro-server` (`10.0.0.22:4200`, SQLite at `/opt/prefect/prefect.db`); this 2-core
+  machine is now the **executor VPS** running `prefect-worker` + the nine agents + production
+  Postgres + HuggingFace vault. Orchestration hardened via per-deployment work queues (each
+  `limit=1`) + a global pool `concurrency_limit=5`; reproducible via `tools/setup_orchestration.py`
+  (no secrets). See `docs/micro-prefect-orchestration.md`. Every "VPS" reference below now means
+  this executor VPS; the control plane lives separately on the micro.
+- **Alkyone functional + CI/CD (2026-07-13, DONE):** alkyone gained a prod-safety guard
+  (`alkyone/src/alkyone/guard.py`) that hard-refuses runs against production DB/vault, is linted
+  in per-PR CI, and runs integration tests only via the manual `alkyone.yml` dispatch workflow.
+  `cd.yml` now SSH-deploys to the executor VPS (git pull + install + restart `prefect-worker` +
+  re-apply orchestration) instead of the old standalone `python -m maia <agent>` model.
 
 Open questions in §5 still await a decision: muralist cadence, P1b timing,
 alkyone schedule, doc ownership.
@@ -34,9 +46,13 @@ Three things converged:
 2. **Design-debt audit (this doc).** Beneath the surface, the maia agent layer still has the
    problems `refactor_draft.md` fixed in atlas: duplicated scaffolding, overloaded state flags,
    and a producer/consumer coordination bug that bites `streamer → scribe/painter/muralist`.
-3. **Deployment reality changed.** The system now runs 24/7 on a single VPS (this machine),
-   not ephemeral CI runners. `docs/testing.md` and `docs/architecture.md` still describe the
-   CI-runner world (Neon per-PR branches, GitHub Actions, mocked deps). That is the root of
+3. **Deployment reality changed — now a 2-VPS split.** The system runs 24/7 across two
+   machines, not ephemeral CI runners: a **micro control plane** (`e2-micro-server`, private
+   `10.0.0.22`, public `141.147.60.138`) hosts the Prefect API + SQLite orchestration DB, while
+   **this 2-core executor VPS** runs the `prefect-worker`, the nine maia agents, the production
+   Postgres, and the HuggingFace vault. `docs/testing.md` and `docs/architecture.md` still describe
+   the CI-runner world (Neon per-PR branches, GitHub Actions, mocked deps); the orchestration
+   split is now documented in `docs/micro-prefect-orchestration.md`. That mismatch is the root of
    "I'm not sure what to do with alkyone."
 
 This proposal is deliberately **phased and low-risk**: every step is independently testable and
@@ -98,13 +114,17 @@ These shrink substantially if the batch-loop and repo-transaction boilerplate ar
   features for ML"). It also describes Streamer as setting `has_audio` directly, but `singer`
   does. The doc actively misleads a new reader.
 - `docs/testing.md` assumes **ephemeral Neon branches per PR + GitHub Actions** — infrastructure
-  that no longer exists on a 24/7 VPS.
+  that no longer exists in the 2-VPS deployment. (Orchestration is now documented separately in
+  `docs/micro-prefect-orchestration.md`; `docs/testing.md`/`docs/architecture.md` cover app-level
+  testing + the Repository pattern and still need the VPS rewrite.)
 
-### F5 — alkyone's purpose is undefined on a 24/7 VPS
+### F5 — alkyone's purpose is undefined in the 2-VPS deployment
 alkyone was "live integration tests + smoke tests", run in CI against isolated Neon branches.
-On a VPS there is no CI and no per-PR isolation. If run as-written, alkyone's live tests hit the
-**same production Postgres, YouTube quota, and HuggingFace vault** the 24/7 agents use — polluting
-real data and burning quota. That ambiguity is what makes alkyone feel orphaned.
+In the 2-VPS setup there is no CI and no per-PR isolation: the Prefect control plane lives on the
+micro (`10.0.0.22`), but the production **Postgres, YouTube quota, and HuggingFace vault** all
+live on the executor VPS. If alkyone is run as-written on the executor VPS, its live tests hit the
+**same production Postgres, YouTube quota, and HF vault** the 24/7 agents use — polluting real
+data and burning quota. That ambiguity is what makes alkyone feel orphaned.
 
 ---
 
@@ -230,20 +250,22 @@ unit-test philosophy. Instead:
   duplicate legacy tests), align mocks to the Repository imports (per `refactor_draft.md` Table).
   No move.
 - **alkyone (live integration + smoke):** keep as the integration home, but **mandate isolated
-  test infrastructure** so it's safe on a VPS:
+  test infrastructure** so it's safe in the 2-VPS deployment:
   - alkyone must target a **separate test Postgres + separate test HF vault**, never the
     production `DATABASE_URL` / `HF_DATASET_ID` the agents use. (The alkyone README already
     half-specifies a `pleiades-test-vault`; make it required, not optional.)
   - Add a guard: `make test-int` refuses to run if `DATABASE_URL` points at the production DB.
-  - On a VPS with no CI, alkyone runs **on-demand / manually** (and optionally a throttled
-    scheduled job), never per-commit. It must **not** consume production YouTube quota
+  - In the 2-VPS deployment, with no CI, alkyone runs **on-demand / manually** (and optionally a
+    throttled scheduled job), never per-commit. It must **not** consume production YouTube quota
     (use a fixed small fixture set or mock the API) and must **not** write to the production
     vault.
   - **"Full rewrite" = rewrite alkyone's integration suite properly** (real isolation, correct
     markers, no contradiction with its README) + consolidate maia's unit tests in place. This
     resolves the F5 ambiguity without relocating 106 tests.
-- **Docs:** rewrite `docs/testing.md` for the VPS model; refresh `docs/architecture.md` to the
-  Repository pattern + correct agent roles + the real producer/consumer flow (P1).
+- **Docs:** rewrite `docs/testing.md` for the 2-VPS model (control plane on micro, agents + DB +
+  vault on the executor VPS); refresh `docs/architecture.md` to the Repository pattern + correct
+  agent roles + the real producer/consumer flow (P1); cross-link
+  `docs/micro-prefect-orchestration.md` for the orchestration/control-plane split.
 
 ---
 

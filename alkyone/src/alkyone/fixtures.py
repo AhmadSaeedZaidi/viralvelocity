@@ -78,6 +78,12 @@ _uploaded_files: list[str] = []
 @pytest_asyncio.fixture(scope="session")
 async def system_init() -> AsyncGenerator[None, None]:
     """Session-level setup that validates HuggingFace credentials for integration tests."""
+    # Prod-safety interlock (belt-and-suspenders with the conftest guard): never
+    # run integration tests against production infrastructure.
+    from alkyone.guard import assert_not_production
+
+    assert_not_production()
+
     logger.info("Alkyone: Initializing System for Testing...")
 
     if not os.getenv("HF_TOKEN"):
