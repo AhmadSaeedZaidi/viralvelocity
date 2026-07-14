@@ -99,6 +99,64 @@ def record_quota_alert(agent_name: str) -> None:
     _write(state)
 
 
+# Rate-limit (YouTube HTTP 403 / bot-check) back-off for the fetch agents. When a
+# cycle hits rate limits we stop re-claiming on every schedule tick and back off
+# with an increasing delay, so we don't hammer a flagged IP (which makes the block
+# worse). Exponential: BASE * FACTOR**(attempt-1), capped at MAX.
+RATE_LIMIT_BACKOFF_BASE_S = 300
+RATE_LIMIT_BACKOFF_FACTOR = 2
+RATE_LIMIT_BACKOFF_MAX_S = 3600
+
+
+def _rate_limit_entry(agent_name: str) -> dict[str, Any]:
+    state = _read()
+    return state.setdefault("rate_limit", {}).setdefault(
+        agent_name, {"attempt": 0, "cooldown_until": None}
+    )
+
+
+def get_rate_limit_cooldown_until(agent_name: str) -> float | None:
+    """Return the epoch second until which *agent_name* should back off, or None."""
+    entry = _read().get("rate_limit", {}).get(agent_name, {})
+    return entry.get("cooldown_until")
+
+
+def is_rate_limited(agent_name: str) -> bool:
+    """True if *agent_name* is currently inside a rate-limit cooldown window."""
+    cd = get_rate_limit_cooldown_until(agent_name)
+    return cd is not None and time.time() < float(cd)
+
+
+def bump_rate_limit_cooldown(agent_name: str) -> float:
+    """Record a rate-limit hit this cycle and return the new ``cooldown_until``.
+
+    Increases the back-off attempt and schedules the next cycle to wait
+    ``BASE * FACTOR**(attempt-1)`` seconds (capped), so repeated storms back off
+    progressively longer instead of re-hammering the flagged IP every tick.
+    """
+    state = _read()
+    entry = state.setdefault("rate_limit", {}).setdefault(
+        agent_name, {"attempt": 0, "cooldown_until": None}
+    )
+    entry["attempt"] = int(entry.get("attempt", 0)) + 1
+    duration = min(
+        RATE_LIMIT_BACKOFF_BASE_S * (RATE_LIMIT_BACKOFF_FACTOR ** (entry["attempt"] - 1)),
+        RATE_LIMIT_BACKOFF_MAX_S,
+    )
+    entry["cooldown_until"] = time.time() + duration
+    _write(state)
+    return float(entry["cooldown_until"])
+
+
+def clear_rate_limit_cooldown(agent_name: str) -> None:
+    """Clear the rate-limit back-off for *agent_name* (called after a clean cycle)."""
+    state = _read()
+    rl = state.get("rate_limit", {})
+    if agent_name in rl:
+        rl[agent_name] = {"attempt": 0, "cooldown_until": None}
+        _write(state)
+
+
 # Paid STT (Grok/Mistral) has a daily quota; once hit we fall back to
 # captions-only for the rest of the day so we don't blow the budget.
 def _daily_audio_cap() -> int:

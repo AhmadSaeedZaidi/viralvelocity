@@ -10,10 +10,16 @@ import asyncio
 import logging
 import shutil
 import tempfile
+import time
 from typing import Any
 
 from atlas.models import Video
 from atlas.repositories import VideoRepository
+from atlas.state import (
+    bump_rate_limit_cooldown,
+    clear_rate_limit_cooldown,
+    get_rate_limit_cooldown_until,
+)
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, meta_path
 from maia.base import BaseBatchAgent
@@ -27,6 +33,16 @@ from maia.utils import cli_bootstrap, notify_quota_exhausted, run_agent_main, va
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
+
+# Set when a cycle observes a YouTube rate-limit (HTTP 403 / bot-check). The
+# streamer's run() reads this after the cycle to decide whether to back off.
+_rate_limit_cycle_hit = False
+
+
+def _note_rate_limit() -> None:
+    """Record that the current cycle hit a YouTube rate limit."""
+    global _rate_limit_cycle_hit
+    _rate_limit_cycle_hit = True
 
 # The YouTube fetch is bandwidth/heavy and rate-limit prone; keep concurrency low
 # to avoid HTTP 429 on the (flagged) VPS egress IP.
@@ -91,6 +107,7 @@ async def fetch_source_task(
         # Transient — release back to PENDING so it retries on a later cycle.
         run_logger.warning(f"Rate-limited on {vid_id}, releasing: {e}")
         await video_repo.release_to_pending(vid_id)
+        _note_rate_limit()
         return None
     except AudioExtractionError as e:
         # Likely transient (throttle / network) — release to PENDING for retry
@@ -149,6 +166,42 @@ class StreamerAgent(BaseBatchAgent):
             store=vault_op_with_retry,
             vault=get_vault(),
         )
+
+    async def run(self, batch_size: int | None = None, **kwargs: Any) -> dict[str, Any]:
+        """Run one cycle with rate-limit back-off.
+
+        If a previous cycle hit YouTube rate limits (HTTP 403 / bot-check), we
+        sit out this cycle instead of re-claiming and hammering the flagged IP
+        every schedule tick. The cooldown grows exponentially (see
+        ``atlas.state``) and resets after any clean cycle, so a transient block
+        self-heals instead of becoming a permanent hammer-loop.
+        """
+        global _rate_limit_cycle_hit
+        _rate_limit_cycle_hit = False
+
+        cooldown_until = get_rate_limit_cooldown_until(self.name)
+        if cooldown_until is not None and time.time() < cooldown_until:
+            get_run_logger().info(
+                f"streamer in rate-limit cooldown until {time.ctime(cooldown_until)} "
+                f"— backing off to avoid hammering the flagged IP; skipping cycle"
+            )
+            return {
+                "videos_processed": 0,
+                "skipped": True,
+                "cooldown_until": cooldown_until,
+            }
+
+        result = await super().run(batch_size=batch_size, **kwargs)
+
+        if _rate_limit_cycle_hit:
+            new_cd = bump_rate_limit_cooldown(self.name)
+            get_run_logger().info(
+                f"Rate limit hit this cycle; backing off until {time.ctime(new_cd)}"
+            )
+        else:
+            clear_rate_limit_cooldown(self.name)
+
+        return result
 
 
 def main() -> None:

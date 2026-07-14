@@ -225,11 +225,17 @@ Fix: `prefect work-pool set-concurrency-limit default 9`.
   `claim_painter_batch`/`claim_singer_batch` return **0** — they are idle, not broken. Scribe
   bypasses this entirely (free YouTube captions, no fetch) and raced to 14,133 transcripts.
   **Fix is on the streamer/YouTube-access layer, not painter/singer:**
-  - renew `YOUTUBE_COOKIES_PATH` + PoToken; try yt-dlp `player_client` variants
-    (`tv`/`tv_embedded`/`web_silk`/`android`) to dodge the 403;
-  - route the egress through a clean IP/proxy (current one is flagged);
-  - add a real backoff/cooldown on 403 — current `release_to_pending` + 120s re-claim hammers the
-    flagged IP and makes the block worse.
+    - renew `YOUTUBE_COOKIES_PATH` + PoToken; try yt-dlp `player_client` variants
+      (`tv`/`tv_embedded`/`web_silk`/`android`) to dodge the 403;
+    - route the egress through a clean IP/proxy (current one is flagged) — note both the
+      executor and the micro are OCI **datacenter** IPs, so YouTube will likely still 403 a
+      proxy through the micro; a **residential** proxy is the durable fix if it's IP-class;
+    - **backoff/cooldown IMPLEMENTED (2026-07-14):** `StreamerAgent.run()` now checks an
+      on-disk rate-limit cooldown (`atlas.state`): after a 403 storm it *skips* cycles and
+      backs off exponentially (300s → 1h cap) instead of re-claiming every 120s and hammering
+      the flagged IP (which worsened the block). A clean cycle resets the cooldown. Fresh
+      cookies were also deployed (`pleiades/www.youtube.cookies.txt`). Monitoring 24h to see
+      whether cookie freshness + backoff restores fetch throughput.
   - **Secondary defect — FIXED (2026-07-14).** A successful fetch failed to persist:
     `Batched videos' raw+meta store failed (1 items): RetryError[... raised AttributeError]`
     (vault `store` path), so even good fetches were lost. **Root cause:** `commit_artifacts`

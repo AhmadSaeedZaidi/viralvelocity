@@ -2,6 +2,7 @@
 Tests for Maia Streamer module (YouTube source fetcher; network pull only).
 """
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -168,9 +169,12 @@ async def test_fetch_source_releases_quota_to_pending():
 
 @pytest.mark.asyncio
 async def test_run_streamer_cycle_empty_queue():
-    with patch(
-        "maia.streamer.flow.fetch_streamer_targets_task", new_callable=AsyncMock
-    ) as mock_fetch:
+    with (
+        patch(
+            "maia.streamer.flow.fetch_streamer_targets_task", new_callable=AsyncMock
+        ) as mock_fetch,
+        patch("maia.streamer.flow.get_rate_limit_cooldown_until", return_value=None),
+    ):
         mock_fetch.return_value = []
 
         await streamer_flow.fn(batch_size=5)
@@ -200,6 +204,7 @@ async def test_run_streamer_cycle_batched_store():
         patch("maia.streamer.flow.VideoRepository") as MockRepo,
         patch("maia.streamer.flow.get_vault") as mock_get_vault,
         patch("maia.streamer.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
+        patch("maia.streamer.flow.get_rate_limit_cooldown_until", return_value=None),
         patch("maia.base.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos
@@ -239,6 +244,7 @@ async def test_run_streamer_cycle_vault_failure_marks_failed():
             new_callable=AsyncMock,
             side_effect=Exception("Vault error"),
         ),
+        patch("maia.streamer.flow.get_rate_limit_cooldown_until", return_value=None),
         patch("maia.base.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos
@@ -293,3 +299,74 @@ def test_download_unified_raises_on_media_failure(tmp_path):
         pytest.raises(AudioExtractionError),
     ):
         streamer.download_unified("VID", str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_streamer_run_skips_during_cooldown():
+    """When a rate-limit cooldown is active, run() sits out without claiming."""
+    import maia.streamer.flow as sf
+    from maia.streamer.flow import StreamerAgent
+
+    future = time.time() + 600
+    with (
+        patch.object(sf, "get_rate_limit_cooldown_until", return_value=future),
+        patch.object(StreamerAgent, "claim_batch", AsyncMock()) as mock_claim,
+    ):
+        result = await StreamerAgent().run(batch_size=5)
+
+    assert result.get("skipped") is True
+    mock_claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_streamer_run_backs_off_after_rate_limit():
+    """A rate-limited cycle bumps the cooldown; a clean cycle clears it."""
+    import maia.streamer.flow as sf
+    from atlas.models import Video
+    from maia.streamer.flow import StreamerAgent
+
+    video = Video(id="VID_RL", title="t")
+    with (
+        patch.object(sf, "get_rate_limit_cooldown_until", return_value=None),
+        patch.object(
+            StreamerAgent, "claim_batch", AsyncMock(return_value=[video])
+        ),
+        patch.object(
+            StreamerAgent,
+            "process_one",
+            AsyncMock(
+                side_effect=lambda v: setattr(sf, "_rate_limit_cycle_hit", True) or None
+            ),
+        ),
+        patch.object(sf, "bump_rate_limit_cooldown", MagicMock()) as mock_bump,
+        patch.object(sf, "clear_rate_limit_cooldown", MagicMock()) as mock_clear,
+        patch("maia.base.clear_quota_exhausted", MagicMock()),
+    ):
+        await StreamerAgent().run(batch_size=5)
+
+    mock_bump.assert_called_once_with("streamer")
+    mock_clear.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_streamer_run_clears_cooldown_on_clean_cycle():
+    """A cycle with no rate limits clears any prior cooldown."""
+    import maia.streamer.flow as sf
+    from atlas.models import Video
+    from maia.streamer.flow import StreamerAgent
+
+    video = Video(id="VID_OK", title="t")
+    with (
+        patch.object(sf, "get_rate_limit_cooldown_until", return_value=None),
+        patch.object(
+            StreamerAgent, "claim_batch", AsyncMock(return_value=[video])
+        ),
+        patch.object(StreamerAgent, "process_one", AsyncMock(return_value=None)),
+        patch.object(sf, "bump_rate_limit_cooldown", MagicMock()) as mock_bump,
+        patch.object(sf, "clear_rate_limit_cooldown", MagicMock()) as mock_clear,
+        patch("maia.base.clear_quota_exhausted", MagicMock()),
+    ):
+        await StreamerAgent().run(batch_size=5)
+
+    mock_clear.assert_called_once_with("streamer")
+    mock_bump.assert_not_called()
