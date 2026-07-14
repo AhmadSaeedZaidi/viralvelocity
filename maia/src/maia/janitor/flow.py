@@ -17,6 +17,8 @@ from atlas.repositories import TranscriptRepository, VideoRepository
 from atlas.vault import get_vault
 from prefect import flow, get_run_logger, task
 
+from maia.utils import cli_bootstrap, run_agent_main
+
 logger = logging.getLogger(__name__)
 
 
@@ -412,19 +414,9 @@ async def janitor_cycle(
 
 
 def main() -> None:
-    try:
-        agent = JanitorAgent()
-        asyncio.run(agent.run(dry_run=True))
-    except KeyboardInterrupt:
-        logger.info("Janitor stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Janitor failed with error: {e}")
-        raise
+    run_agent_main(lambda: JanitorAgent().run(dry_run=True), "janitor")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

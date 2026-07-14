@@ -7,7 +7,7 @@ Centralises helpers that were previously duplicated across agent modules
 import asyncio
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
@@ -88,3 +88,51 @@ async def vault_op_with_retry(fn: Callable[[], Any]) -> Any:
     """
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, fn)
+
+
+def run_agent_main(run_coro: Callable[[], Awaitable[None]], name: str) -> None:
+    """Run an agent's entry-point coroutine with uniform SIGINT/error handling.
+
+    Replaces the near-identical ``try/except KeyboardInterrupt/except Exception``
+    block repeated in every agent module's ``main()``.
+
+    ``run_coro`` is a zero-arg callable returning the coroutine to execute (e.g.
+    ``lambda: streamer_flow(batch_size=...)`` or ``HunterAgent().run``).
+    """
+    try:
+        asyncio.run(run_coro())
+    except KeyboardInterrupt:
+        logging.getLogger(name).info(f"{name} stopped by user (SIGINT)")
+    except Exception as e:
+        logging.getLogger(name).exception(f"{name} failed with error: {e}")
+        raise
+
+
+def cli_bootstrap() -> None:
+    """Configure root logging for a CLI agent run (idempotent)."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+
+def video_id_of(item: dict[str, Any]) -> str | None:
+    """Extract a video ID from a YouTube API ``search``/``videos`` item.
+
+    The ``id`` field is a bare string (``videos.list``) or a dict with a
+    ``videoId`` key (``search.list``). Returns ``None`` when absent.
+    """
+    vid = item.get("id")
+    if isinstance(vid, dict):
+        return vid.get("videoId")
+    return vid if isinstance(vid, str) else None
+
+
+def channel_ids_of(items: list[dict[str, Any]]) -> list[str]:
+    """Collect the non-empty ``channelId`` values from a list of API items."""
+    ids: list[str] = []
+    for item in items:
+        cid = item.get("snippet", {}).get("channelId")
+        if cid:
+            ids.append(cid)
+    return ids

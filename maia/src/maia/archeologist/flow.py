@@ -19,7 +19,12 @@ from prefect import flow, get_run_logger, task
 from maia.hunter.flow import enrich_channels_task
 from maia.quality import filter_by_quality
 from maia.strategies import YouTubeSearchStrategy
-from maia.utils import notify_quota_exhausted
+from maia.utils import (
+    channel_ids_of,
+    cli_bootstrap,
+    notify_quota_exhausted,
+    run_agent_main,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +75,7 @@ async def hunt_history_task(year: int, month: int, strategy: YouTubeSearchStrate
             ]
             await asyncio.gather(*ingest_tasks)
 
-            channel_ids = [
-                it.get("snippet", {}).get("channelId")
-                for it in items
-                if it.get("snippet", {}).get("channelId")
-            ]
+            channel_ids = channel_ids_of(items)
             if channel_ids:
                 try:
                     n = await enrich_channels_task(channel_ids, strategy)
@@ -184,6 +185,10 @@ async def hunt_history(year: int, month: int) -> None:
     await hunt_history_task(year, month, agent.strategy)
 
 
+def main() -> None:
+    run_agent_main(lambda: ArcheologistAgent().run(start_year=2010, end_year=2010), "archeologist")
+
+
 if __name__ == "__main__":
-    agent = ArcheologistAgent()
-    asyncio.run(agent.run(start_year=2010, end_year=2010))
+    cli_bootstrap()
+    main()

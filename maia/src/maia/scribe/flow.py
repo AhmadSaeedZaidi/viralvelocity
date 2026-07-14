@@ -13,13 +13,13 @@ from typing import Any
 
 from atlas.models import Video
 from atlas.repositories import TranscriptRepository, VideoRepository
-from atlas.state import audio_cap_reached, clear_quota_exhausted, record_audio_usage
+from atlas.state import audio_cap_reached, record_audio_usage
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import audio_path, get_vault
 from prefect import flow, get_run_logger, task
 
 from maia.base import BaseBatchAgent
-from maia.utils import notify_quota_exhausted
+from maia.utils import cli_bootstrap, notify_quota_exhausted, run_agent_main
 
 from .loader import (
     TranscriptExtractionError,
@@ -187,11 +187,6 @@ class ScribeAgent(BaseBatchAgent):
     async def process_one(self, video: Video) -> None:
         await process_transcript_task(video)
 
-    async def after_cycle(self) -> None:
-        # Cycle completed without quota exhaustion — clear any stale marker so the
-        # heartbeat stops reporting scribe as rate-limited.
-        clear_quota_exhausted("scribe")
-
 
 @flow(name="run_scribe_cycle")
 async def run_scribe_cycle(batch_size: int = 10) -> None:
@@ -204,20 +199,9 @@ async def run_scribe_cycle(batch_size: int = 10) -> None:
 
 
 def main() -> None:
-    """Entry point for running the Scribe as a standalone service."""
-    try:
-        agent = ScribeAgent()
-        asyncio.run(scribe_flow(batch_size=agent.default_batch_size))
-    except KeyboardInterrupt:
-        logger.info("Scribe stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Scribe failed with error: {e}")
-        raise
+    run_agent_main(lambda: scribe_flow(batch_size=ScribeAgent.default_batch_size), "scribe")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

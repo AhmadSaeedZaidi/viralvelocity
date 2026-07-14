@@ -20,14 +20,13 @@ from typing import Any
 import numpy as np
 from atlas.models import Video
 from atlas.repositories import VideoRepository
-from atlas.state import clear_quota_exhausted
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, meta_path
 from prefect import flow, get_run_logger, task
 
 from maia.base import BaseBatchAgent
 from maia.painter.streamer import StealthVideoStreamer, StreamRateLimitError
-from maia.utils import notify_quota_exhausted, vault_op_with_retry
+from maia.utils import cli_bootstrap, notify_quota_exhausted, run_agent_main, vault_op_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -405,11 +404,6 @@ class PainterAgent(BaseBatchAgent):
             for vid, _ in extracted:
                 await video_repo.mark_failed(vid)
 
-    async def after_cycle(self) -> None:
-        # Cycle completed without quota exhaustion — clear any stale marker so the
-        # heartbeat stops reporting painter as rate-limited.
-        clear_quota_exhausted("painter")
-
 
 @flow(name="run_painter_cycle")
 async def run_painter_cycle(batch_size: int = 5) -> None:
@@ -417,19 +411,9 @@ async def run_painter_cycle(batch_size: int = 5) -> None:
 
 
 def main() -> None:
-    try:
-        agent = PainterAgent()
-        asyncio.run(painter_flow(batch_size=agent.default_batch_size))
-    except KeyboardInterrupt:
-        logger.info("Painter stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Painter failed with error: {e}")
-        raise
+    run_agent_main(lambda: painter_flow(batch_size=PainterAgent.default_batch_size), "painter")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

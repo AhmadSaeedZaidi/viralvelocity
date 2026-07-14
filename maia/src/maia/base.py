@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from atlas.models import Video
+from atlas.state import clear_quota_exhausted
 from prefect import get_run_logger
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,10 @@ class BaseBatchAgent(abc.ABC):
     # Exception types that, if any item raises, are re-raised after the gather
     # (terminating the cycle). E.g. quota exhaustion.
     raise_on: tuple[type[Exception], ...] = ()
+    # When True, clear the stale quota-exhausted marker for this agent at the
+    # end of a successful (non-raise_on) cycle. Set False for agents that do
+    # not enforce quota gating.
+    clear_quota_after_cycle: bool = True
 
     @abc.abstractmethod
     async def claim_batch(self, n: int) -> list[Video]:
@@ -99,6 +104,8 @@ class BaseBatchAgent(abc.ABC):
 
         ok = [r for r in gathered if not isinstance(r, Exception)]
         await self.store_results(ok)
+        if self.clear_quota_after_cycle:
+            clear_quota_exhausted(self.name)
         await self.after_cycle()
 
         run_logger.info(

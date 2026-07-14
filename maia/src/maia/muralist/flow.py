@@ -18,7 +18,6 @@ from typing import Any
 
 from atlas.models import Video
 from atlas.repositories import VideoRepository
-from atlas.state import clear_quota_exhausted
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, video_path
 from prefect import flow, get_run_logger, task
@@ -26,7 +25,7 @@ from prefect import flow, get_run_logger, task
 from maia.base import BaseBatchAgent
 from maia.media.streamer import StealthVideoStreamer, VideoExtractionError
 from maia.storage import commit_artifacts
-from maia.utils import notify_quota_exhausted, vault_op_with_retry
+from maia.utils import cli_bootstrap, notify_quota_exhausted, run_agent_main, vault_op_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -138,25 +137,11 @@ class MuralistAgent(BaseBatchAgent):
             vault=get_vault,
         )
 
-    async def after_cycle(self) -> None:
-        # Cycle completed without quota exhaustion — clear any stale marker.
-        clear_quota_exhausted("muralist")
-
 
 def main() -> None:
-    try:
-        agent = MuralistAgent()
-        asyncio.run(muralist_flow(batch_size=agent.default_batch_size))
-    except KeyboardInterrupt:
-        logger.info("Muralist stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Muralist failed with error: {e}")
-        raise
+    run_agent_main(lambda: muralist_flow(batch_size=MuralistAgent.default_batch_size), "muralist")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

@@ -382,7 +382,7 @@ async def test_run_painter_cycle_handles_vault_failure():
             new_callable=AsyncMock,
             side_effect=Exception("Vault error"),
         ),
-        patch("maia.painter.flow.clear_quota_exhausted"),
+        patch("maia.base.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos
         mock_repo = MockRepo.return_value

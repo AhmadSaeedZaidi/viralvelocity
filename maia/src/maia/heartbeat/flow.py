@@ -17,6 +17,8 @@ from prefect import flow
 from prefect.client.orchestration import get_client
 from prefect.client.schemas.filters import FlowRunFilter, FlowRunFilterDeploymentId
 
+from maia.utils import cli_bootstrap, run_agent_main
+
 logger = logging.getLogger(__name__)
 
 # Fleet topology after the two-VPS migration: the nine polling agents are Prefect
@@ -359,18 +361,9 @@ class HeartbeatAgent:
 
 
 def main() -> None:
-    try:
-        asyncio.run(HeartbeatAgent().run())
-    except KeyboardInterrupt:
-        logger.info("Heartbeat stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Heartbeat failed with error: {e}")
-        raise
+    run_agent_main(HeartbeatAgent().run, "heartbeat")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

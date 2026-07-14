@@ -20,7 +20,13 @@ from prefect import flow, get_run_logger, task
 
 from maia.quality import filter_by_quality
 from maia.strategies import YouTubeSearchStrategy
-from maia.utils import notify_quota_exhausted
+from maia.utils import (
+    channel_ids_of,
+    cli_bootstrap,
+    notify_quota_exhausted,
+    run_agent_main,
+    video_id_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -176,16 +182,10 @@ async def ingest_results_task(
     # HuggingFace's 128-commits/hour account cap.
     v = get_vault()
 
-    def _vid_of(item: dict[str, Any]) -> str | None:
-        vid = item.get("id")
-        if isinstance(vid, dict):
-            return vid.get("videoId")
-        return vid
-
     date_key = datetime.now(UTC).strftime("%Y-%m-%d")
     vault_items: list[tuple[str, dict[str, Any]]] = []
     for item in items:
-        vid_id = _vid_of(item)
+        vid_id = video_id_of(item)
         if vid_id:
             vault_items.append((f"metadata/{date_key}/{vid_id}.json", item))
 
@@ -203,18 +203,14 @@ async def ingest_results_task(
         try:
             await video_repo.ingest_video_metadata(item)
         except Exception as e:
-            run_logger.exception(f"Failed to ingest video {_vid_of(item)} to database: {e}")
+            run_logger.exception(f"Failed to ingest video {video_id_of(item)} to database: {e}")
 
     db_tasks = [_db_ingest(item) for item in items]
 
     await asyncio.gather(*db_tasks)
 
     if strategy is not None:
-        channel_ids = [
-            item.get("snippet", {}).get("channelId")
-            for item in items
-            if item.get("snippet", {}).get("channelId")
-        ]
+        channel_ids = channel_ids_of(items)
         try:
             await enrich_channels_task(channel_ids, strategy)
         except QuotaExhaustedError:
@@ -364,20 +360,9 @@ async def run_hunter_cycle(batch_size: int = 10) -> dict[str, Any]:
 
 
 def main() -> None:
-    """Entry point for running the Hunter as a standalone service."""
-    try:
-        agent = HunterAgent()
-        asyncio.run(agent.run())
-    except KeyboardInterrupt:
-        logger.info("Hunter stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Hunter failed with error: {e}")
-        raise
+    run_agent_main(HunterAgent().run, "hunter")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

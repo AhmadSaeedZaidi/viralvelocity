@@ -10,13 +10,7 @@ from maia.quality.gates import _to_int, evaluate_channel, evaluate_video
 from maia.quality.shorts import is_youtube_short
 from maia.quality.thresholds import QualityThresholds
 from maia.quality.types import QualityResult
-
-
-def _vid_id_of(item: dict[str, Any]) -> str | None:
-    vid = item.get("id")
-    if isinstance(vid, dict):
-        return vid.get("videoId")
-    return vid
+from maia.utils import video_id_of
 
 
 async def _load_channel_stats(
@@ -97,7 +91,7 @@ async def filter_by_quality(
         else:
             rejected += 1
             if logger:
-                logger.debug(f"Quality gate rejected {_vid_id_of(item)}: {result.reason}")
+                logger.debug(f"Quality gate rejected {video_id_of(item)}: {result.reason}")
 
     if thresholds.shorts_head_enabled and evaluated:
         candidates = [
@@ -112,7 +106,7 @@ async def filter_by_quality(
             async def _probe(
                 it: dict[str, Any], res: QualityResult
             ) -> tuple[dict[str, Any], QualityResult] | None:
-                vid = _vid_id_of(it)
+                vid = video_id_of(it)
                 if not vid:
                     return (it, res)
                 async with sem:
@@ -146,7 +140,7 @@ async def filter_by_quality(
             else:
                 rejected += 1
                 if logger:
-                    logger.debug(f"Quality gate rejected {_vid_id_of(it)} (channel): {reason}")
+                    logger.debug(f"Quality gate rejected {video_id_of(it)} (channel): {reason}")
     passing = list(final)
     if logger:
         logger.info(

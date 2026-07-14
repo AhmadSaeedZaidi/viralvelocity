@@ -14,7 +14,6 @@ from typing import Any
 
 from atlas.models import Video
 from atlas.repositories import VideoRepository
-from atlas.state import clear_quota_exhausted
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, meta_path
 from maia.base import BaseBatchAgent
@@ -24,7 +23,7 @@ from maia.media.streamer import (
     StreamRateLimitError,
 )
 from maia.storage import commit_artifacts
-from maia.utils import notify_quota_exhausted, vault_op_with_retry
+from maia.utils import cli_bootstrap, notify_quota_exhausted, run_agent_main, vault_op_with_retry
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -151,25 +150,11 @@ class StreamerAgent(BaseBatchAgent):
             vault=get_vault,
         )
 
-    async def after_cycle(self) -> None:
-        # Cycle completed without quota exhaustion — clear any stale marker.
-        clear_quota_exhausted("streamer")
-
 
 def main() -> None:
-    try:
-        agent = StreamerAgent()
-        asyncio.run(streamer_flow(batch_size=agent.default_batch_size))
-    except KeyboardInterrupt:
-        logger.info("Streamer stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Streamer failed with error: {e}")
-        raise
+    run_agent_main(lambda: streamer_flow(batch_size=StreamerAgent.default_batch_size), "streamer")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

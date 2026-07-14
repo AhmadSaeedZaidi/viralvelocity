@@ -26,7 +26,7 @@ from maia.media.streamer import (
     extract_audio_ffmpeg,
 )
 from maia.storage import commit_artifacts
-from maia.utils import vault_op_with_retry
+from maia.utils import cli_bootstrap, run_agent_main, vault_op_with_retry
 from prefect import flow, get_run_logger, task
 
 logger = logging.getLogger(__name__)
@@ -192,19 +192,9 @@ class SingerAgent(BaseBatchAgent):
 
 
 def main() -> None:
-    try:
-        agent = SingerAgent()
-        asyncio.run(singer_flow(batch_size=agent.default_batch_size))
-    except KeyboardInterrupt:
-        logger.info("Singer stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Singer failed with error: {e}")
-        raise
+    run_agent_main(lambda: singer_flow(batch_size=SingerAgent.default_batch_size), "singer")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()

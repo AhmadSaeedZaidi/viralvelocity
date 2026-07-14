@@ -200,7 +200,7 @@ async def test_run_streamer_cycle_batched_store():
         patch("maia.streamer.flow.VideoRepository") as MockRepo,
         patch("maia.streamer.flow.get_vault") as mock_get_vault,
         patch("maia.streamer.flow.vault_op_with_retry", new_callable=AsyncMock) as mock_vault_retry,
-        patch("maia.streamer.flow.clear_quota_exhausted"),
+        patch("maia.base.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos
         mock_repo = MockRepo.return_value
@@ -239,7 +239,7 @@ async def test_run_streamer_cycle_vault_failure_marks_failed():
             new_callable=AsyncMock,
             side_effect=Exception("Vault error"),
         ),
-        patch("maia.streamer.flow.clear_quota_exhausted"),
+        patch("maia.base.clear_quota_exhausted"),
     ):
         mock_fetch.return_value = mock_videos
         mock_repo = MockRepo.return_value

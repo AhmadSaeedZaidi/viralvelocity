@@ -6,7 +6,6 @@ and persists them back to Atlas.
 """
 
 import argparse
-import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -18,7 +17,7 @@ from atlas.utils import QuotaExhaustedError
 from prefect import flow, get_run_logger, task
 
 from maia.strategies import YouTubeSearchStrategy
-from maia.utils import notify_quota_exhausted
+from maia.utils import cli_bootstrap, notify_quota_exhausted, run_agent_main
 
 logger = logging.getLogger(__name__)
 
@@ -202,20 +201,9 @@ async def run_tracker_cycle(batch_size: int = 50) -> dict[str, Any]:
 
 
 def main() -> None:
-    """Entry point for running the Tracker as a standalone service."""
-    try:
-        agent = TrackerAgent()
-        asyncio.run(agent.run())
-    except KeyboardInterrupt:
-        logger.info("Tracker stopped by user (SIGINT)")
-    except Exception as e:
-        logger.exception(f"Tracker failed with error: {e}")
-        raise
+    run_agent_main(TrackerAgent().run, "tracker")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    cli_bootstrap()
     main()
