@@ -363,12 +363,6 @@ async def run_hunter_cycle(batch_size: int = 10) -> dict[str, Any]:
     return await agent.run(batch_size=batch_size)
 
 
-@task(name="fetch_batch")
-async def fetch_batch(batch_size: int = 10) -> Any:
-    """Legacy function wrapper for backward compatibility."""
-    return await fetch_batch_task(batch_size)
-
-
 def main() -> None:
     """Entry point for running the Hunter as a standalone service."""
     try:

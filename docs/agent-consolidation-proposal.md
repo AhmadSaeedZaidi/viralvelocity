@@ -1,6 +1,6 @@
 # Agent Consolidation & Test-Strategy Proposal
 
-> Status: **PARTIALLY IMPLEMENTED.** P1a is shipped; P1b/P2/P3/P4 pending. CI/quality work (mypy 2.x, locked deps, alkyone unhooked from CI) done separately.
+> Status: **PARTIALLY IMPLEMENTED.** P1a/P1b/P2/P3 shipped; P4 pending. CI/quality work (mypy 2.x, locked deps, alkyone unhooked from CI) done separately.
 > Companion to `refactor_draft.md` (Atlas DAO → Repository). This doc extends that
 > philosophy to the **maia agent layer** and resolves the **alkyone / 24-7-VPS** question.
 > Author: opencode. Reviewed against code as of 2026-07-13 (deployment assumptions updated for the 2-VPS orchestration split).
@@ -11,8 +11,8 @@
 |---|---|---|
 | P1a | Done | `a4762b7`: claim gates + TTL reclamation + `raw_stored_at` + 13 tests; live DB migrated |
 | P1b | In Progress | per-step state + join barrier + idempotent consumers **landed & live-migrated**; booleans kept as transitional seam (removed in P3) |
-| P2  | Pending | `BaseBatchAgent` + remove legacy cruft |
-| P3  | Pending | decompose the five oversized files |
+| P2  | Done | `BaseBatchAgent` (`maia/base.py`) + 5 agents migrated; dead `fetch_batch`/`fetch_targets` task wrappers removed (legacy `run_*` flow wrappers kept for alkyone) |
+| P3  | Done | `quality.py` → `quality/` package; shared `commit_artifacts` (`maia/storage.py`) for streamer/singer/muralist; painter/scribe/singer/streamer/muralist loop extracted onto `BaseBatchAgent` |
 | P4  | Partial | alkyone isolated test infra + **prod-URL/prod-vault guard DONE** (`alkyone/src/alkyone/guard.py`; `make guard`; wired into conftest + `make test-int`); alkyone now linted in per-PR CI (`make -C alkyone lint`); manual `alkyone.yml` dispatch workflow added. `architecture.md` → Repository pattern ✓. TODO: maia unit-test DRY, `testing.md`/`architecture.md` VPS rewrite |
 
 Adjacent CI/quality work this session (not in plan, but related):
@@ -241,12 +241,40 @@ Extract, don't rewrite:
   vault-I/O and DB-transaction helpers into shared modules so the flow file reads as *policy*,
   not *plumbing*.
 
+**What actually landed (2026-07-14), with deviations from the original plan:**
+
+- **P2 (`BaseBatchAgent` in `maia/base.py`)** — a real `abc.ABC` Template-Method base
+  (`claim_batch` / `process_one` abstract; optional `store_results` / `after_cycle`;
+  `raise_on` tuple for fatal errors like `QuotaExhaustedError`). `scribe`, `singer`,
+  `streamer`, `muralist`, `painter` now subclass it; the shared
+  `Semaphore + gather(return_exceptions=True) + throttle + raise_on + store + after_cycle`
+  loop lives in `run()`. **Deviation:** the legacy `run_scribe_cycle` / `run_painter_cycle`
+  / `janitor_cycle` / `run_archeology_campaign` *flow* wrappers were **kept** (not deleted)
+  because alkyone's integration tests import and call them; only the dead
+  `fetch_batch` / `fetch_targets` *task* wrappers were removed. Each agent's `main()` now
+  invokes its `@flow` (not `agent.run()` directly) so the per-video tasks still run inside a
+  Prefect flow run.
+- **P3** — `quality.py` (455) was extracted into a `quality/` **package**
+  (`duration` / `shorts` / `thresholds` / `types` / `gates` / `enrich`), re-exported via
+  `__init__` to preserve the `from maia.quality import ...` API; `hunter`/`archeologist`
+  import only `filter_by_quality`. The shared "write a batch to the vault in ONE commit then
+  mark videos safe (or roll back)" plumbing was lifted into `maia/storage.py:commit_artifacts`
+  and is used by `streamer` / `singer` / `muralist` (injectable `store`/`vault` so unit tests
+  patch them). **Deviation:** `media/streamer.py` (the yt-dlp engine) was **not** split — it
+  is a coherent engine module and the orchestration already lives in the per-agent flow tasks;
+  splitting it added no clarity. `janitor`/`hunter` were left as-is (not migrated onto
+  `BaseBatchAgent`) since their cycles are not the uniform claim→process→store shape and they
+  are the Prefect deployment entrypoints (`run_hunter_cycle` / `run_tracker_cycle` /
+  `run_archeology_campaign`).
+- **Validation:** all **110** maia unit tests green; `ruff check maia/src` clean; every flow
+  module imports cleanly (Prefect deployment entrypoints intact).
+
 ### P4 — Test strategy: keep the layering, fix the VPS gap
-**Decision: do NOT move maia's 106 unit tests into alkyone.** That contradicts alkyone's own
+**Decision: do NOT move maia's 110 unit tests into alkyone.** That contradicts alkyone's own
 charter (integration-only) and `refactor_draft.md`'s "mock the Repository / inject the pool"
 unit-test philosophy. Instead:
 
-- **`maia/tests/` (106 mocked unit tests):** keep in-repo, DRY them (shared fixtures, remove
+- **`maia/tests/` (110 mocked unit tests):** keep in-repo, DRY them (shared fixtures, remove
   duplicate legacy tests), align mocks to the Repository imports (per `refactor_draft.md` Table).
   No move.
 - **alkyone (live integration + smoke):** keep as the integration home, but **mandate isolated
@@ -261,7 +289,7 @@ unit-test philosophy. Instead:
     vault.
   - **"Full rewrite" = rewrite alkyone's integration suite properly** (real isolation, correct
     markers, no contradiction with its README) + consolidate maia's unit tests in place. This
-    resolves the F5 ambiguity without relocating 106 tests.
+    resolves the F5 ambiguity without relocating 110 tests.
 - **Docs:** rewrite `docs/testing.md` for the 2-VPS model (control plane on micro, agents + DB +
   vault on the executor VPS); refresh `docs/architecture.md` to the Repository pattern + correct
   agent roles + the real producer/consumer flow (P1); cross-link
@@ -276,7 +304,7 @@ unit-test philosophy. Instead:
 | 0 | Doc refresh plan + alkyone isolation guard + test-DB provisioning | low | docs build, guard rejects prod URL |
 | 1a | P1 minimal fix (claim gates + TTL reclamation) | low | existing + new unit tests on `state_machine` |
 | 1b | P1 phase-enum migration | med | migration + integration test |
-| 2 | P2 `BaseBatchAgent` + remove legacy cruft | med | 106 maia unit tests still green |
+| 2 | P2 `BaseBatchAgent` + remove legacy cruft | med | 110 maia unit tests still green |
 | 3 | P3 file decomposition | med | unit + integration green; smaller files |
 | 4 | P4 alkyone rewrite + maia unit-test DRY + doc refresh | low-med | `make test` + `make test-int` (isolated) |
 

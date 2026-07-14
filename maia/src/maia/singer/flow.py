@@ -7,9 +7,7 @@ The singer performs NO YouTube call and NO speech-to-text API call — transcrip
 is handled separately by the scribe.
 """
 
-import argparse
 import asyncio
-import io
 import logging
 import math
 import shutil
@@ -21,11 +19,13 @@ from typing import Any
 from atlas.models import Video
 from atlas.repositories import VideoRepository
 from atlas.vault import audio_path, get_vault
+from maia.base import BaseBatchAgent
 from maia.media.streamer import (
     AudioExtractionError,
     extract_audio_chunk,
     extract_audio_ffmpeg,
 )
+from maia.storage import commit_artifacts
 from maia.utils import vault_op_with_retry
 from prefect import flow, get_run_logger, task
 
@@ -146,86 +146,55 @@ def _plan_audio_chunks(duration: int | None) -> list[tuple[float, float | None, 
 @flow(name="run_singer_cycle")
 async def singer_flow(batch_size: int) -> dict[str, Any]:
     """Execute a complete Singer cycle: extract + store audio for fetched videos."""
-    run_logger = get_run_logger()
-    run_logger.info("=== Starting Singer Cycle ===")
-
-    targets = await fetch_singer_targets_task(batch_size)
-
-    if not targets:
-        run_logger.info("No videos need audio storage. Singer cycle complete (idle).")
-        return {"videos_processed": 0}
-
-    run_logger.info(f"Processing {len(targets)} videos concurrently...")
-
-    sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
-
-    async def _bounded(video: Video) -> Any:
-        async with sem:
-            result = await store_audio_task(video)
-            await asyncio.sleep(SINGER_THROTTLE_SECONDS)
-            return result
-
-    results = await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
-
-    # Flatten the per-video chunk lists into (video_id, vault_rel_path, bytes).
-    extracted: list[tuple[str, str, bytes]] = [
-        item for r in results if isinstance(r, list) for item in r
-    ]
-
-    if extracted:
-        video_repo = VideoRepository()
-        v = get_vault()
-        items = [(rel, io.BytesIO(b)) for _vid, rel, b in extracted]
-        try:
-            await vault_op_with_retry(lambda: v.store_batch(items))  # type: ignore[arg-type]
-            for vid_id, _rel, _b in extracted:
-                await video_repo.mark_audio_safe(vid_id)
-            # The raw artifact is shared with the painter (frames). Reclaim it
-            # only once BOTH consumers have derived their output, so the
-            # painter never finds its input gone.
-            for vid_id, _rel, _b in extracted:
-                await video_repo.reclaim_raw_if_complete(vid_id)
-            run_logger.info(
-                f"Batched {len(extracted)} audio files into ONE vault commit; "
-                f"reclaimed raw where frames were also extracted"
-            )
-        except Exception as e:
-            run_logger.exception(f"Batched audio store failed ({len(extracted)} vids): {e}")
-            # A transient vault/network blip must not permanently strand good
-            # extractions — release them for retry instead of marking FAILED.
-            for vid_id, _rel, _b in extracted:
-                await VideoRepository().release_to_pending(vid_id)
-
-    run_logger.info(f"=== Singer Cycle Complete === Processed {len(targets)} videos")
-    return {"videos_processed": len(targets)}
+    return await SingerAgent().run(batch_size=batch_size)
 
 
-class SingerAgent:
+class SingerAgent(BaseBatchAgent):
     """Singer Agent: extract + store audio (no transcription)."""
 
     name = "singer"
+    default_batch_size = 10
+    max_concurrent = MAX_CONCURRENT_VIDEOS
+    throttle_seconds = SINGER_THROTTLE_SECONDS
 
-    def __init__(self) -> None:
-        self.logger = logging.getLogger(self.name)
+    async def claim_batch(self, n: int) -> list[Video]:
+        return await fetch_singer_targets_task(n)
 
-    @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--batch-size",
-            type=int,
-            default=10,
-            help="Number of videos to process per cycle (default: 10)",
+    async def process_one(self, video: Video) -> list[tuple[str, str, bytes]] | None:
+        return await store_audio_task(video)
+
+    async def store_results(self, results: list[Any]) -> None:
+        # store_audio_task returns a per-video *list* of chunks; flatten them.
+        extracted: list[tuple[str, str, bytes]] = [
+            item for r in results if isinstance(r, list) for item in r
+        ]
+        if not extracted:
+            return
+        items: list[tuple[str, bytes]] = [
+            (rel, data) for _vid, rel, data in extracted
+        ]
+        vids = [_vid for _vid, _rel, _data in extracted]
+        await commit_artifacts(
+            items=items,
+            video_ids=vids,
+            mark_safe=VideoRepository().mark_audio_safe,
+            on_failure=VideoRepository().release_to_pending,
+            label="audio files",
+            store=vault_op_with_retry,
+            vault=get_vault,
         )
-
-    async def run(self, batch_size: int = 10, **kwargs: Any) -> dict[str, Any]:
-        result: dict[str, Any] = await singer_flow(batch_size=batch_size)
-        return result
+        # The raw artifact is shared with the painter (frames). Reclaim it only
+        # once BOTH consumers have derived their output, so the painter never
+        # finds its input gone.
+        repo = VideoRepository()
+        for vid in dict.fromkeys(vids):
+            await repo.reclaim_raw_if_complete(vid)
 
 
 def main() -> None:
     try:
         agent = SingerAgent()
-        asyncio.run(agent.run())
+        asyncio.run(singer_flow(batch_size=agent.default_batch_size))
     except KeyboardInterrupt:
         logger.info("Singer stopped by user (SIGINT)")
     except Exception as e:

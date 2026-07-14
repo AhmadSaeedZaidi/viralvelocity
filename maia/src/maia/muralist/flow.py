@@ -10,9 +10,7 @@ loop. Archiving full clips is storage-hungry, and the muralist is kept as a
 runnable, claim-based capability to switch on once storage allows.
 """
 
-import argparse
 import asyncio
-import io
 import logging
 import shutil
 import tempfile
@@ -25,7 +23,9 @@ from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, video_path
 from prefect import flow, get_run_logger, task
 
+from maia.base import BaseBatchAgent
 from maia.media.streamer import StealthVideoStreamer, VideoExtractionError
+from maia.storage import commit_artifacts
 from maia.utils import notify_quota_exhausted, vault_op_with_retry
 
 logger = logging.getLogger(__name__)
@@ -102,87 +102,51 @@ async def process_video_task(video: Video) -> tuple[str, bytes, str] | None:
 @flow(name="run_muralist_cycle")
 async def muralist_flow(batch_size: int, height: int = DEFAULT_HEIGHT) -> dict[str, Any]:
     """Execute a Muralist cycle: archive source clips to the vault."""
-    run_logger = get_run_logger()
-    run_logger.info(f"=== Starting Muralist Cycle (<= {height}p) ===")
-
-    targets = await fetch_muralist_targets_task(batch_size)
-
-    if not targets:
-        run_logger.info("No videos need video archival. Muralist cycle complete (idle).")
-        return {"videos_processed": 0}
-
-    run_logger.info(f"Processing {len(targets)} videos concurrently...")
-
-    sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
-
-    async def _bounded(video: Video) -> tuple[str, bytes, str] | None:
-        async with sem:
-            result = await process_video_task(video)
-            await asyncio.sleep(MURALIST_THROTTLE_SECONDS)
-            return result
-
-    results = await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
-    # Propagate any QuotaExhaustedError that was caught by return_exceptions.
-    quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
-    if quota_errors:
-        raise quota_errors[0]
-
-    extracted: list[tuple[str, bytes, str]] = [r for r in results if isinstance(r, tuple)]
-
-    if extracted:
-        video_repo = VideoRepository()
-        v = get_vault()
-        items = [(video_path(vid, ext), io.BytesIO(b)) for vid, b, ext in extracted]
-        try:
-            await vault_op_with_retry(lambda: v.store_batch(items))  # type: ignore[arg-type]
-            for vid, _, _ in extracted:
-                await video_repo.mark_video_safe(vid)
-            run_logger.info(f"Batched {len(extracted)} source clips into ONE vault commit")
-        except Exception as e:
-            run_logger.exception(f"Batched video store failed ({len(extracted)} vids): {e}")
-            for vid, _, _ in extracted:
-                await video_repo.mark_failed(vid)
-
-    # Cycle completed without quota exhaustion — clear any stale marker.
-    clear_quota_exhausted("muralist")
-
-    run_logger.info(f"=== Muralist Cycle Complete === Processed {len(targets)} videos")
-    return {"videos_processed": len(targets)}
+    return await MuralistAgent().run(batch_size=batch_size)
 
 
-class MuralistAgent:
+class MuralistAgent(BaseBatchAgent):
     """Muralist Agent: full-video archival ("super painter"). Manual-only."""
 
     name = "muralist"
+    default_batch_size = 5
+    max_concurrent = MAX_CONCURRENT_VIDEOS
+    throttle_seconds = MURALIST_THROTTLE_SECONDS
+    raise_on = (QuotaExhaustedError,)
 
-    def __init__(self) -> None:
-        self.logger = logging.getLogger(self.name)
+    async def claim_batch(self, n: int) -> list[Video]:
+        return await fetch_muralist_targets_task(n)
 
-    @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--batch-size",
-            type=int,
-            default=5,
-            help="Number of videos to process per cycle (default: 5)",
+    async def process_one(self, video: Video) -> tuple[str, bytes, str] | None:
+        return await process_video_task(video)
+
+    async def store_results(self, results: list[Any]) -> None:
+        extracted: list[tuple[str, bytes, str]] = [
+            r for r in results if isinstance(r, tuple) and len(r) == 3
+        ]
+        if not extracted:
+            return
+        items = [(video_path(vid, ext), data) for vid, data, ext in extracted]
+        vids = [vid for vid, _data, _ext in extracted]
+        await commit_artifacts(
+            items=items,
+            video_ids=vids,
+            mark_safe=VideoRepository().mark_video_safe,
+            on_failure=VideoRepository().mark_failed,
+            label="source clips",
+            store=vault_op_with_retry,
+            vault=get_vault,
         )
-        parser.add_argument(
-            "--height",
-            type=int,
-            default=DEFAULT_HEIGHT,
-            help="Max resolution to archive (default: 720)",
-        )
 
-    async def run(
-        self, batch_size: int = 5, height: int = DEFAULT_HEIGHT, **kwargs: Any
-    ) -> dict[str, Any]:
-        return await muralist_flow(batch_size=batch_size, height=height)
+    async def after_cycle(self) -> None:
+        # Cycle completed without quota exhaustion — clear any stale marker.
+        clear_quota_exhausted("muralist")
 
 
 def main() -> None:
     try:
         agent = MuralistAgent()
-        asyncio.run(agent.run())
+        asyncio.run(muralist_flow(batch_size=agent.default_batch_size))
     except KeyboardInterrupt:
         logger.info("Muralist stopped by user (SIGINT)")
     except Exception as e:

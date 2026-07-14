@@ -6,9 +6,7 @@ flags the video ``fetched``. The singer later extracts speech locally, keeping
 the YouTube rate-limit surface confined to this single agent.
 """
 
-import argparse
 import asyncio
-import io
 import logging
 import shutil
 import tempfile
@@ -19,11 +17,13 @@ from atlas.repositories import VideoRepository
 from atlas.state import clear_quota_exhausted
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, meta_path
+from maia.base import BaseBatchAgent
 from maia.media.streamer import (
     AudioExtractionError,
     StealthVideoStreamer,
     StreamRateLimitError,
 )
+from maia.storage import commit_artifacts
 from maia.utils import notify_quota_exhausted, vault_op_with_retry
 from prefect import flow, get_run_logger, task
 
@@ -110,88 +110,56 @@ async def fetch_source_task(
 @flow(name="run_streamer_cycle")
 async def streamer_flow(batch_size: int) -> dict[str, Any]:
     """Execute a complete Streamer cycle: fetch raw sources and store to vault."""
-    run_logger = get_run_logger()
-    run_logger.info("=== Starting Streamer Cycle ===")
-
-    targets = await fetch_streamer_targets_task(batch_size)
-
-    if not targets:
-        run_logger.info("No videos need a fetch. Streamer cycle complete (idle).")
-        return {"videos_processed": 0}
-
-    run_logger.info(f"Processing {len(targets)} videos concurrently...")
-
-    sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
-
-    async def _bounded(video: Video) -> Any:
-        async with sem:
-            result = await fetch_source_task(video)
-            await asyncio.sleep(STREAMER_THROTTLE_SECONDS)
-            return result
-
-    results = await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
-    # Propagate any QuotaExhaustedError that was caught by return_exceptions.
-    quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
-    if quota_errors:
-        raise quota_errors[0]
-
-    fetched = [
-        r
-        for r in results
-        if isinstance(r, tuple) and len(r) == 4  # (id, raw_uri, raw_bytes, meta_bytes)
-    ]
-
-    if fetched:
-        video_repo = VideoRepository()
-        v = get_vault()
-        items: list[tuple[str, io.BytesIO]] = []
-        for _id, raw_uri, raw_bytes, _meta in fetched:
-            items.append((raw_uri, io.BytesIO(raw_bytes)))
-            if _meta:
-                items.append((meta_path(_id), io.BytesIO(_meta)))
-        try:
-            await vault_op_with_retry(lambda: v.store_batch(items))  # type: ignore[arg-type]
-            for _id, raw_uri, _rb, _mb in fetched:
-                await video_repo.mark_fetched(_id, raw_uri)
-            run_logger.info(f"Batched {len(fetched)} videos' raw+meta into ONE vault commit")
-        except Exception as e:
-            run_logger.exception(f"Batched unified store failed ({len(fetched)} vids): {e}")
-            for _id, *_ in fetched:
-                await video_repo.mark_failed(_id)
-
-    # Cycle completed without quota exhaustion — clear any stale marker.
-    clear_quota_exhausted("streamer")
-
-    run_logger.info(f"=== Streamer Cycle Complete === Processed {len(targets)} videos")
-    return {"videos_processed": len(targets)}
+    return await StreamerAgent().run(batch_size=batch_size)
 
 
-class StreamerAgent:
+class StreamerAgent(BaseBatchAgent):
     """Streamer Agent: fetch YouTube sources for the singer to extract."""
 
     name = "streamer"
+    default_batch_size = 5
+    max_concurrent = MAX_CONCURRENT_VIDEOS
+    throttle_seconds = STREAMER_THROTTLE_SECONDS
 
-    def __init__(self) -> None:
-        self.logger = logging.getLogger(self.name)
+    async def claim_batch(self, n: int) -> list[Video]:
+        return await fetch_streamer_targets_task(n)
 
-    @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--batch-size",
-            type=int,
-            default=5,
-            help="Number of videos to process per cycle (default: 5)",
+    async def process_one(self, video: Video) -> tuple[str, str, bytes, bytes | None] | None:
+        return await fetch_source_task(video)
+
+    async def store_results(self, results: list[Any]) -> None:
+        fetched = [r for r in results if isinstance(r, tuple) and len(r) == 4]
+        if not fetched:
+            return
+        items: list[tuple[str, bytes]] = []
+        vids: list[str] = []
+        id_uri: dict[str, str] = {}
+        for _id, raw_uri, raw_bytes, meta in fetched:
+            items.append((raw_uri, raw_bytes))
+            if meta:
+                items.append((meta_path(_id), meta))
+            vids.append(_id)
+            id_uri[_id] = raw_uri
+
+        await commit_artifacts(
+            items=items,
+            video_ids=vids,
+            mark_safe=lambda vid: VideoRepository().mark_fetched(vid, id_uri[vid]),
+            on_failure=VideoRepository().mark_failed,
+            label="videos' raw+meta",
+            store=vault_op_with_retry,
+            vault=get_vault,
         )
 
-    async def run(self, batch_size: int = 5, **kwargs: Any) -> dict[str, Any]:
-        result: dict[str, Any] = await streamer_flow(batch_size=batch_size)
-        return result
+    async def after_cycle(self) -> None:
+        # Cycle completed without quota exhaustion — clear any stale marker.
+        clear_quota_exhausted("streamer")
 
 
 def main() -> None:
     try:
         agent = StreamerAgent()
-        asyncio.run(agent.run())
+        asyncio.run(streamer_flow(batch_size=agent.default_batch_size))
     except KeyboardInterrupt:
         logger.info("Streamer stopped by user (SIGINT)")
     except Exception as e:

@@ -1,11 +1,10 @@
-"""Maia Painter: Video keyframe extraction agent (Turbo Mode: FFmpeg + Concurrency).
+"""Maia Painter: Video keyframe extraction agent.
 
 Consumer in the Producer-Consumer pipeline. Pulls videos needing
 visual processing from the video table, extracts keyframes via FFmpeg,
 and persists them to Atlas Vault.
 """
 
-import argparse
 import asyncio
 import contextlib
 import json
@@ -26,6 +25,7 @@ from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault, meta_path
 from prefect import flow, get_run_logger, task
 
+from maia.base import BaseBatchAgent
 from maia.painter.streamer import StealthVideoStreamer, StreamRateLimitError
 from maia.utils import notify_quota_exhausted, vault_op_with_retry
 
@@ -359,44 +359,37 @@ async def process_frames_task(video: Video) -> tuple[str, list[tuple[int, bytes]
 
 @flow(name="run_painter_cycle")
 async def painter_flow(batch_size: int) -> dict[str, Any]:
-    """Execute a complete Painter cycle with parallel processing.
+    """Execute a complete Painter cycle with parallel processing."""
+    return await PainterAgent().run(batch_size=batch_size)
 
-    Uses a semaphore (``MAX_CONCURRENT_VIDEOS``) to bound concurrency; each video
-    is processed independently with FFmpeg surgical extraction.
-    """
-    run_logger = get_run_logger()
-    run_logger.info(
-        f"=== Starting Painter Cycle ({MAX_CONCURRENT_VIDEOS} concurrent) ==="
-    )
 
-    targets = await fetch_painter_targets_task(batch_size)
+class PainterAgent(BaseBatchAgent):
+    """Painter Agent: video keyframe extraction."""
 
-    if not targets:
-        run_logger.info("No videos need visual processing. Painter cycle complete (idle).")
-        return {"videos_processed": 0}
+    name = "painter"
+    default_batch_size = 5
+    max_concurrent = MAX_CONCURRENT_VIDEOS
+    raise_on = (QuotaExhaustedError,)
 
-    run_logger.info(f"Processing {len(targets)} videos in parallel...")
+    async def claim_batch(self, n: int) -> list[Video]:
+        return await fetch_painter_targets_task(n)
 
-    sem = asyncio.Semaphore(MAX_CONCURRENT_VIDEOS)
+    async def process_one(self, video: Video) -> tuple[str, list[tuple[int, bytes]]] | None:
+        # Surgical frame extraction paces itself with a small random jitter to
+        # avoid stampeding YouTube's CDN with perfectly-aligned requests.
+        await asyncio.sleep(random.uniform(0.5, 2.0))
+        return await process_frames_task(video)
 
-    async def protected_process(video: Video) -> tuple[str, list[tuple[int, bytes]]] | None:
-        async with sem:
-            await asyncio.sleep(random.uniform(0.5, 2.0))
-            return await process_frames_task(video)
-
-    results = await asyncio.gather(*[protected_process(v) for v in targets], return_exceptions=True)
-    # Propagate any QuotaExhaustedError that was caught by return_exceptions
-    quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
-    if quota_errors:
-        raise quota_errors[0]
-
-    # Write the whole batch to the vault in ONE commit to stay under HuggingFace's
-    # 128-commits/hour account cap; failed/RELEASED videos are absent here.
-    extracted: list[tuple[str, list[tuple[int, bytes]]]] = [
-        r for r in results if isinstance(r, tuple)
-    ]
-
-    if extracted:
+    async def store_results(self, results: list[Any]) -> None:
+        # Write the whole batch to the vault in ONE commit to stay under
+        # HuggingFace's 128-commits/hour account cap; failed/RELEASED videos are
+        # absent here. (Painter's vault API is bespoke — store_visual_evidence_batch
+        # — so it is not covered by the generic maia.storage helper.)
+        extracted: list[tuple[str, list[tuple[int, bytes]]]] = [
+            r for r in results if isinstance(r, tuple)
+        ]
+        if not extracted:
+            return
         video_repo = VideoRepository()
         v = get_vault()
         entries = [(vid, frames, FRAME_FORMAT) for vid, frames in extracted]
@@ -404,57 +397,29 @@ async def painter_flow(batch_size: int) -> dict[str, Any]:
             await vault_op_with_retry(lambda: v.store_visual_evidence_batch(entries))
             for vid, _ in extracted:
                 await video_repo.mark_visuals_safe(vid)
+            run_logger = get_run_logger()
             run_logger.info(f"Batched {len(extracted)} videos' frames into ONE vault commit")
         except Exception as e:
+            run_logger = get_run_logger()
             run_logger.exception(f"Batched frame store failed ({len(extracted)} vids): {e}")
             for vid, _ in extracted:
                 await video_repo.mark_failed(vid)
 
-    # Cycle completed without quota exhaustion — clear any stale marker so the
-    # heartbeat stops reporting painter as rate-limited.
-    clear_quota_exhausted("painter")
-
-    run_logger.info(f"=== Painter Cycle Complete === Processed {len(targets)} videos")
-    return {"videos_processed": len(targets)}
-
-
-class PainterAgent:
-    """Painter Agent: video keyframe extraction."""
-
-    name = "painter"
-
-    def __init__(self) -> None:
-        self.logger = logging.getLogger(self.name)
-
-    @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--batch-size",
-            type=int,
-            default=5,
-            help="Number of videos to process per cycle (default: 5)",
-        )
-
-    async def run(self, batch_size: int = 5, **kwargs: Any) -> dict[str, Any]:
-        result: dict[str, Any] = await painter_flow(batch_size=batch_size)
-        return result
-
-
-@task(name="fetch_painter_targets")
-async def fetch_painter_targets(batch_size: int = 5) -> Any:
-    return await fetch_painter_targets_task(batch_size)
+    async def after_cycle(self) -> None:
+        # Cycle completed without quota exhaustion — clear any stale marker so the
+        # heartbeat stops reporting painter as rate-limited.
+        clear_quota_exhausted("painter")
 
 
 @flow(name="run_painter_cycle")
 async def run_painter_cycle(batch_size: int = 5) -> None:
-    agent = PainterAgent()
-    await agent.run(batch_size=batch_size)
+    await PainterAgent().run(batch_size=batch_size)
 
 
 def main() -> None:
     try:
         agent = PainterAgent()
-        asyncio.run(agent.run())
+        asyncio.run(painter_flow(batch_size=agent.default_batch_size))
     except KeyboardInterrupt:
         logger.info("Painter stopped by user (SIGINT)")
     except Exception as e:

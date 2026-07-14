@@ -5,7 +5,6 @@ transcripts from the video table, fetches them via yt-dlp native
 subtitle extraction, and persists results to Atlas Vault.
 """
 
-import argparse
 import asyncio
 import logging
 import tempfile
@@ -19,6 +18,7 @@ from atlas.utils import QuotaExhaustedError
 from atlas.vault import audio_path, get_vault
 from prefect import flow, get_run_logger, task
 
+from maia.base import BaseBatchAgent
 from maia.utils import notify_quota_exhausted
 
 from .loader import (
@@ -168,75 +168,29 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
 
 @flow(name="run_scribe_cycle")
 async def scribe_flow(batch_size: int) -> dict[str, Any]:
-    """Execute a complete Scribe cycle: fetch videos, transcribe, store to Vault.
-
-    Args:
-        batch_size: Number of videos to process.
-
-    Returns a dict with cycle statistics.
-    """
-    run_logger = get_run_logger()
-    run_logger.info("=== Starting Scribe Cycle ===")
-
-    targets = await fetch_scribe_targets_task(batch_size)
-
-    if not targets:
-        run_logger.info("No videos need transcripts. Scribe cycle complete (idle).")
-        return {"videos_processed": 0}
-
-    run_logger.info(f"Processing {len(targets)} videos concurrently...")
-
-    sem = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTS)
-
-    async def _bounded(video: Video) -> None:
-        async with sem:
-            await process_transcript_task(video)
-            await asyncio.sleep(SCRIBE_THROTTLE_SECONDS)
-
-    results = await asyncio.gather(*[_bounded(v) for v in targets], return_exceptions=True)
-    # Propagate any QuotaExhaustedError that was caught by return_exceptions
-    quota_errors = [r for r in results if isinstance(r, QuotaExhaustedError)]
-    if quota_errors:
-        raise quota_errors[0]
-
-    # Cycle completed without quota exhaustion — clear any stale marker.
-    clear_quota_exhausted("scribe")
-
-    run_logger.info(f"=== Scribe Cycle Complete === Processed {len(targets)} videos")
-    return {"videos_processed": len(targets)}
+    """Execute a complete Scribe cycle: fetch videos, transcribe, store to Vault."""
+    return await ScribeAgent().run(batch_size=batch_size)
 
 
-class ScribeAgent:
+class ScribeAgent(BaseBatchAgent):
     """Scribe Agent: transcript extraction and storage."""
 
     name = "scribe"
+    default_batch_size = 10
+    max_concurrent = MAX_CONCURRENT_TRANSCRIPTS
+    throttle_seconds = SCRIBE_THROTTLE_SECONDS
+    raise_on = (QuotaExhaustedError,)
 
-    def __init__(self) -> None:
-        """Initialize the Scribe agent."""
-        self.logger = logging.getLogger(self.name)
+    async def claim_batch(self, n: int) -> list[Video]:
+        return await fetch_scribe_targets_task(n)
 
-    @staticmethod
-    def add_cli_args(parser: argparse.ArgumentParser) -> None:
-        """Register command-line arguments for the Scribe agent."""
-        parser.add_argument(
-            "--batch-size",
-            type=int,
-            default=10,
-            help="Number of videos to process per cycle (default: 10)",
-        )
+    async def process_one(self, video: Video) -> None:
+        await process_transcript_task(video)
 
-    async def run(self, batch_size: int = 10, **kwargs: Any) -> dict[str, Any]:
-        """Execute a complete Scribe cycle and return its statistics dict."""
-        result: dict[str, Any] = await scribe_flow(batch_size=batch_size)
-        return result
-
-
-@task(name="process_transcript")
-async def process_transcript(video: dict[str, Any]) -> None:
-    """Legacy Task wrapper — converts dict to Video and delegates."""
-    from atlas.models import Video as VideoModel
-
-    await process_transcript_task(VideoModel(**video))
+    async def after_cycle(self) -> None:
+        # Cycle completed without quota exhaustion — clear any stale marker so the
+        # heartbeat stops reporting scribe as rate-limited.
+        clear_quota_exhausted("scribe")
 
 
 @flow(name="run_scribe_cycle")
@@ -246,15 +200,14 @@ async def run_scribe_cycle(batch_size: int = 10) -> None:
 
     Prefer using ScribeAgent directly for new code.
     """
-    agent = ScribeAgent()
-    await agent.run(batch_size=batch_size)
+    await ScribeAgent().run(batch_size=batch_size)
 
 
 def main() -> None:
     """Entry point for running the Scribe as a standalone service."""
     try:
         agent = ScribeAgent()
-        asyncio.run(agent.run())
+        asyncio.run(scribe_flow(batch_size=agent.default_batch_size))
     except KeyboardInterrupt:
         logger.info("Scribe stopped by user (SIGINT)")
     except Exception as e:

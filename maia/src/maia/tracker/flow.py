@@ -201,12 +201,6 @@ async def run_tracker_cycle(batch_size: int = 50) -> dict[str, Any]:
     return await agent.run(batch_size=batch_size)
 
 
-@task(name="fetch_targets")
-async def fetch_targets(batch_size: int = 50) -> Any:
-    """Legacy function wrapper for backward compatibility."""
-    return await fetch_targets_task(batch_size)
-
-
 def main() -> None:
     """Entry point for running the Tracker as a standalone service."""
     try:
