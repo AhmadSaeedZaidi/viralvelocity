@@ -141,7 +141,7 @@ Constructor accepts optional `ConnectionProvider`. Defaults to the global `Datab
 
 ### 4. Domain Models — `models/`
 
-9 Pydantic models with `from_attributes=True` (ORM-compatible):
+7 Pydantic models with `from_attributes=True` (ORM-compatible):
 
 | Model | Key Fields |
 |---|---|
@@ -149,8 +149,6 @@ Constructor accepts optional `ConnectionProvider`. Defaults to the global `Datab
 | `VideoStats` | video_id, timestamp, views, likes, comment_count |
 | `Channel` | id, title, country, custom_url, is_verified |
 | `ChannelStats` | channel_id, timestamp, view_count, subscriber_count, video_count |
-| `ChannelHistory` | channel_id, changed_at, old_title, new_title, event_type |
-| `Transcript` | video_id, language, vault_uri, created_at |
 | `SystemEvent` | id, event_type, entity_id, payload, created_at |
 | `SearchQueueItem` | id, query_term, priority, next_page_token, status |
 | `WatchlistItem` | video_id, tracking_tier (HOURLY/DAILY/WEEKLY), next_track_at |

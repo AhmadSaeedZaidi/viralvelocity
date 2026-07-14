@@ -47,7 +47,7 @@ maia/
 ├── agent.py             # Agent protocol (structural contract)
 ├── registry.py          # AGENT_REGISTRY (name → class mapping)
 ├── strategies.py        # YouTubeSearchStrategy (shared HTTP/KMS logic)
-├── utils.py             # looks_like_rate_limit, AdaptiveConcurrency, notify_quota_exhausted, run_in_executor
+├── utils.py             # looks_like_rate_limit, notify_quota_exhausted, vault_op_with_retry
 │
 ├── hunter/              # Producer — fresh video discovery
 │   └── flow.py          #   fetch_batch → search_youtube → enrich → ingest
@@ -181,9 +181,7 @@ Encapsulates:
 | Function | Purpose |
 |---|---|
 | `looks_like_rate_limit(stderr)` | Detects HTTP 429 / bot-check / rate-limit patterns in yt-dlp stderr |
-| `AdaptiveConcurrency` | Sliding-window failure-rate monitor; halves concurrency on sustained failures and alerts Discord |
 | `notify_quota_exhausted(agent_name)` | Sends a CRITICAL Discord alert when the API key pool is exhausted |
-| `run_in_executor(func)` | Decorator to offload sync functions to thread pool |
 | `vault_op_with_retry(fn)` | Runs a blocking vault op off the event loop (returns its result) |
 
 ### Resiliency Strategy
@@ -200,8 +198,8 @@ suicide** ("Hydra Protocol" was removed). Failures are handled in-process:
   (`release_to_pending()`) for a later retry — never marked done or failed — so
   no work is silently lost.
 - **Concurrency** is kept low (see agent sections) because the VPS egress IP is
-  flagged by YouTube; `AdaptiveConcurrency` further backs off under sustained
-  failure rates.
+  flagged by YouTube; each agent self-limits with `asyncio.Semaphore` and paces
+  its calls.
 
 ---
 

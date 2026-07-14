@@ -216,8 +216,9 @@ Fix: `prefect work-pool set-concurrency-limit default 9`.
 ---
 
 ## 7. Known open items
-- **Muralist** is manual-only (no deployment); 12 "all-done" videos (audio/transcript/visuals DONE,
+- **Muralist** is manual-only (no deployment); ~12 "all-done" videos (audio/transcript/visuals DONE,
   `has_video=FALSE`, `clip_phase=PENDING`) are claimed by muralist and were marked FAILED by a manual
   run. Not blocking; decide separately whether to make the clip stage non-blocking for `PROCESSED`.
 - **Orchestration DB on SQLite** → residual lock-noise under load. Postgres migration is the durable fix.
-- All source changes from the 2026-07-13 work are **local/uncommitted** on `hy3-work` (push on approval).
+- Source lives on the `hy3-work` branch (committed + pushed); see `docs/deploy.md` for the reproduce
+  script (`tools/setup_orchestration.py`) and `docs/CHALLENGES.md` for the engineering log.

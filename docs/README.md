@@ -7,8 +7,10 @@
 ## Documentation Index
 
 ### Getting Started
-- **[Quick Start](quickstart.md)** - Get up and running in 5 minutes
+- **[Quick Start](quickstart.md)** - Get up and running
 - **[Architecture Overview](architecture.md)** - System design and components
+- **[Deployment (two-VPS)](deploy.md)** - Control plane + executor setup, no secrets
+- **[Orchestration Runbook](micro-prefect-orchestration.md)** - Everyday ops & incident playbooks
 
 ### Core Features
 - **[Adaptive Scheduling](adaptive-scheduling.md)** - Infinite video tracking with minimal SQL footprint
@@ -16,13 +18,14 @@
 - **[Tiered Storage Architecture](tiered-storage.md)** - Ephemeral data management for high-throughput ingestion
 
 ### Component Guides
-- **[Atlas](../atlas/docs/README.md)** - Infrastructure layer (DB, Vault, Events, Notifications)
-- **[Maia](../maia/docs/README.md)** - Collection service (Hunter, Tracker agents)
-- **[Alkyone](../alkyone/README.md)** - Integration testing suite
+- **[Atlas](../atlas/README.md)** - Infrastructure layer (DB, Vault, Events, Notifications, Repositories)
+- **[Maia](../maia/README.md)** - Stateless agent fleet (Hunter, Tracker, Scribe, Painter, …)
+- **[Alkyone](../alkyone/README.md)** - Integration testing suite (isolated infra only)
 
-### Development
+### Development & Ops
 - **[Testing Guide](testing.md)** - Unit, integration, and smoke testing
 - **[Contributing](contributing.md)** - Development workflow and standards
+- **[Challenges Log](challenges.md)** - Problems we hit and how we solved them
 
 ---
 
@@ -32,6 +35,7 @@
 1. Read [Architecture Overview](architecture.md)
 2. Follow [Quick Start](quickstart.md)
 3. Review component-specific guides
+4. Stand up the system with [Deployment](deploy.md)
 
 ### For Developers
 1. Read [Contributing](contributing.md)
@@ -39,9 +43,9 @@
 3. Run tests with `make test`
 
 ### For Operators
-1. Review deployment architecture
-2. Configure environment variables
-3. Monitor with Resiliency Strategy guidelines
+1. Read [Deployment](deploy.md) (two-VPS setup)
+2. Read the [Orchestration Runbook](micro-prefect-orchestration.md)
+3. Keep [Challenges](challenges.md) handy for known traps
 
 ---
 
@@ -49,30 +53,34 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                      PLEIADES PLATFORM                        │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                    MAIA SERVICE                      │   │
-│  │                                                      │   │
-│  │  Hunter Agent  → Discover new videos               │   │
-│  │  Tracker Agent → Monitor viral velocity            │   │
-│  │  (Adaptive Scheduling for infinite history)             │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                          ↓                                   │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                  ATLAS LIBRARY                       │   │
-│  │                                                      │   │
-│  │  Database   → PostgreSQL (Tiered Storage <7 days)       │   │
-│  │  Vault      → HF/GCS (Cold storage, Parquet)       │   │
-│  │  Events     → Observer pattern event bus            │   │
-│  │  Notifier   → Alerts and notifications             │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                ALKYONE TEST SUITE                    │   │
-│  │  Integration & smoke tests for all components       │   │
-│  └─────────────────────────────────────────────────────┘   │
+│                      CONTROL PLANE (micro)                     │
+│  Prefect server/API :4200  (SQLite orchestration DB)          │
+└───────────────────────────────┬──────────────────────────────┘
+                                 │ PREFECT_API_URL
+                                 ▼
+┌──────────────────────────────────────────────────────────────┐
+│                      EXECUTOR VPS (2-core)                     │
+│                                                                │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │                  MAIA AGENT FLEET                    │     │
+│  │  Hunter/Archeologist (producers) → videos table →   │     │
+│  │  Scribe/Painter/Singer/Tracker/Janitor/Heartbeat     │     │
+│  │  (consumers) + Streamer (audio producer)            │     │
+│  └───────────────────────────────┬─────────────────────┘     │
+│                                  ▼                            │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │                  ATLAS LIBRARY                       │     │
+│  │  Database   → PostgreSQL (Tiered Storage <7 days)    │     │
+│  │  Vault      → HF/GCS (Cold storage, Parquet/WebP)    │     │
+│  │  Repositories → VideoRepository, ChannelRepository…  │     │
+│  │  Events     → Observer-pattern event bus             │     │
+│  │  Notifier   → Discord alerts                         │     │
+│  └─────────────────────────────────────────────────────┘     │
+│                                                                │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │           ALKYONE TEST SUITE (isolated infra)        │     │
+│  │  Integration & smoke tests — never production        │     │
+│  └─────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -87,25 +95,24 @@ Track videos **forever** while keeping SQL under 0.5 GB:
 - Adaptive tracking tiers (HOURLY → DAILY → WEEKLY)
 - Decoupled from video retention (survives Janitor cleanup)
 
-[Learn more →](ghost-tracking.md)
+[Learn more →](adaptive-scheduling.md)
 
 ### 🔑 Resiliency Strategy
 Intelligent API key management:
-- Automatic key rotation on quota exhaustion
-- Clean termination (SystemExit) when all keys exhausted
-- KeyRing for pool management
-- HydraExecutor for automatic retry logic
+- Automatic key rotation on quota exhaustion (`KeyRing` + `ResiliencyExecutor`)
+- `QuotaExhaustedError` propagates and fires a Discord alert (no `sys.exit`)
+- Rate-limit errors release the video to `PENDING` for retry
 
-[Learn more →](hydra-protocol.md)
+[Learn more →](resiliency-strategy.md)
 
 ### ⚡ Tiered Storage Architecture
 Ephemeral data management for high throughput:
-- Videos purged after 7 days
+- Videos archived to the vault after the retention window (default 7 days)
 - Search queue for discovery coordination
 - Watchlist persists forever (Adaptive Scheduling)
 - Maintains <0.5 GB SQL footprint
 
-[Learn more →](hot-queue.md)
+[Learn more →](tiered-storage.md)
 
 ---
 
@@ -115,27 +122,27 @@ Ephemeral data management for high throughput:
 pleiades/
 ├── docs/                    # Unified project documentation
 │   ├── README.md            # This file
+│   ├── deploy.md            # Two-VPS deployment guide
+│   ├── micro-prefect-orchestration.md  # Ops runbook
+│   ├── challenges.md        # Engineering challenges log
 │   ├── quickstart.md        # Getting started guide
 │   ├── architecture.md      # System architecture
-│   ├── adaptive-scheduling.md  # Adaptive Scheduling guide
-│   ├── resiliency-strategy.md  # Resiliency Strategy guide
-│   ├── tiered-storage.md    # Tiered Storage architecture
+│   ├── adaptive-scheduling.md
+│   ├── resiliency-strategy.md
+│   ├── tiered-storage.md
 │   ├── testing.md           # Testing guide
 │   └── contributing.md      # Development guide
 │
 ├── atlas/                   # Infrastructure library
 │   ├── src/atlas/
-│   ├── docs/                # Atlas-specific docs
-│   └── tests/               # Atlas unit tests
+│   └── README.md            # Atlas-specific docs
 │
-├── maia/                    # Collection service
+├── maia/                    # Stateless agent fleet
 │   ├── src/maia/
-│   ├── docs/                # Maia-specific docs
-│   └── tests/               # Maia unit tests
+│   └── README.md            # Maia-specific docs
 │
-└── alkyone/                 # Integration testing
-    ├── src/alkyone/
-    └── tests/               # Integration & smoke tests
+└── alkyone/                 # Integration testing (isolated infra)
+    └── README.md
 ```
 
 ---
@@ -148,6 +155,7 @@ pleiades/
 
 ---
 
-**Version**: 1.0.0  
-**License**: MIT  
+**Version**: 1.0.0
+**License**: MIT
 **Maintainer**: Ahmad Saeed Zaidi
+**Last Updated**: 2026-07-14

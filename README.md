@@ -13,9 +13,14 @@ Pleiades is a high-throughput video intelligence platform that:
 
 - 🔍 **Discovers** viral content through intelligent YouTube search
 - 📊 **Tracks** video metrics forever with minimal SQL footprint (<0.5 GB)
-- 🚀 **Scales** to 100k+ videos/day using Adaptive Scheduling architecture
-- 🔑 **Manages** API quotas intelligently via Resiliency Strategy
-- 🗄️ **Stores** time-series data efficiently in Parquet files
+- 🚀 **Scales** to 100k+ videos/day using an Adaptive Scheduling architecture
+- 🔑 **Manages** API quotas intelligently via a Resiliency Strategy
+- 🗄️ **Stores** time-series data efficiently in a HuggingFace / GCS vault
+
+The system is a **producer/consumer pipeline** orchestrated by [Prefect](https://www.prefect.io/)
+across two machines (see [Deployment](docs/deploy.md)): a tiny Oracle **control
+plane** running the Prefect server, and a **2-core executor VPS** that runs the
+agent fleet, the production Postgres DB, and the HuggingFace vault.
 
 ---
 
@@ -27,87 +32,98 @@ Pleiades is a high-throughput video intelligence platform that:
 - PostgreSQL 15+ (or Neon serverless)
 - HuggingFace account or Google Cloud Storage
 - YouTube Data API v3 keys
+- **Deno** ≥ 2.3.0 (required by `yt-dlp` for YouTube's BotGuard / PoToken challenge)
+- **FFmpeg** (frame extraction + audio chunking)
+- A **bgutil Po-token provider** server (see [Deployment §4.2](docs/deploy.md))
 
 ### Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/pleiades.git
+git clone <repo> pleiades
 cd pleiades
 
 # Set up virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate
 
-# Install components
-cd atlas && pip install -e ".[dev]" && cd ..
-cd maia && pip install -e ".[dev]" && cd ..
-cd alkyone && pip install -e . && cd ..
-```
+# Install components (atlas = lib, maia = agents)
+make install
 
-### Configuration
-
-```bash
-# Copy environment templates
+# Copy environment templates and fill in credentials (NEVER commit .env)
+cp .env.example .env
 cp atlas/ENV.example atlas/.env
 cp maia/ENV.example maia/.env
-
-# Edit .env files with your credentials
 ```
 
-### Initialize Database
+### Initialize the database
 
 ```bash
-cd atlas
-make setup
-make smoke-test
+cd atlas && make setup      # provisions schema.sql
 ```
 
-### Run Services
+### Run an agent manually (development)
 
 ```bash
-# Hunter (discovery)
-cd maia && python -m maia.hunter.flow
-
-# Tracker (monitoring)
-python -m maia.tracker.flow
-
-# Or use Docker Compose
-docker-compose up -d
+cd maia && python -m maia hunter --batch-size 10
+python -m maia painter
+python -m maia heartbeat
 ```
 
-**See [Quick Start Guide](docs/quickstart.md) for detailed instructions.**
+In production the agents run as **Prefect deployments** (9 of them) scheduled by the
+control plane — see [Deployment](docs/deploy.md) and the
+[orchestration runbook](docs/micro-prefect-orchestration.md).
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    PLEIADES PLATFORM                      │
-├──────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌────────────────────────────────────────────────┐    │
-│  │               MAIA SERVICE                      │    │
-│  │  • Hunter Agent  → Discover new videos         │    │
-│  │  • Tracker Agent → Monitor viral velocity      │    │
-│  │  • Janitor Agent → Clean up old data           │    │
-│  └────────────────────────────────────────────────┘    │
-│                        ↓                                 │
-│  ┌────────────────────────────────────────────────┐    │
-│  │             ATLAS LIBRARY                       │    │
-│  │  • Database   → PostgreSQL (Tiered Storage)    │    │
-│  │  • Vault      → HF/GCS (Cold storage)          │    │
-│  │  • Events     → Event bus                      │    │
-│  │  • Notifier   → Alerts                         │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                          │
-│  ┌────────────────────────────────────────────────┐    │
-│  │           ALKYONE TEST SUITE                    │    │
-│  │  Integration & smoke tests                     │    │
-│  └────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         CONTROL PLANE (micro)                          │
+│  Prefect server/API :4200  (SQLite orchestration DB — deployments,     │
+│  schedules, flow-run state. No video data.)                            │
+└───────────────────────────────────┬──────────────────────────────────┘
+                                      │ PREFECT_API_URL
+                                      ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                       EXECUTOR VPS (2-core)                            │
+│                                                                        │
+│  prefect-worker  ──►  default work pool (concurrency_limit = 9)        │
+│       │                                                                │
+│       ├─ streamer  (producer)  ─┐                                      │
+│       ├─ hunter / archeologist (producers)                             │
+│       ├─ singer (audio→transcript)  ─┐  fan-out from raw               │
+│       ├─ painter (frames)          ─┤                                  │
+│       ├─ scribe (captions)         ─┘  (parallel consumers)           │
+│       ├─ tracker (stats)                                             │
+│       ├─ janitor (tiered storage)                                    │
+│       └─ heartbeat (fleet status → Discord)                           │
+│                                                                        │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │  MAIA  (stateless agent layer — all logic)                    │     │
+│  │     producers → videos table (work queue) → consumers         │     │
+│  └───────────────────────────────┬─────────────────────────────┘     │
+│                                   ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │  ATLAS  (infrastructure library — plumbing only)              │     │
+│  │   • PostgreSQL  — video DB (hot tier, tiered storage)         │     │
+│  │   • Vault       — HF/GCS (cold tier: frames/audio/transcripts)│     │
+│  │   • Repositories — VideoRepository, ChannelRepository, …      │     │
+│  │   • Events / Notifications / KeyRing / Resiliency             │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+│                                                                        │
+│  alkyone — integration test suite (isolated infra only, never prod)    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+**Pipeline shape (fan-out / fan-in).** After a video is fetched, three consumers
+derive from the single `raw` artifact **in parallel** — `singer` (audio),
+`painter` (visuals), `muralist` (clip) — while `scribe` (transcript) runs
+independently (caption-first). Each artifact has its own phase column
+(`raw/audio/visuals/transcript/clip`); `PROCESSED` is latched only once
+audio + visuals + transcript are all present. `raw` is reclaimed (disk-bounded)
+only after its mandatory consumers are DONE or the TTL window expires. See
+[`docs/agent-consolidation-proposal.md`](docs/agent-consolidation-proposal.md).
 
 **See [Architecture Guide](docs/architecture.md) for complete design.**
 
@@ -119,18 +135,10 @@ docker-compose up -d
 
 Track videos **forever** while keeping SQL under 0.5 GB:
 
-- Lightweight `watchlist` table for scheduling (50 bytes/video)
-- Heavy metrics stored in Parquet files (unlimited)
+- Lightweight `watchlist` table for scheduling (≈50 bytes/video)
+- Heavy metrics stored in Parquet files in the vault (unlimited)
 - Adaptive tracking tiers (HOURLY → DAILY → WEEKLY)
 - Survives video cleanup (tracking continues after deletion)
-
-**Example**:
-```python
-# Add video to persistent watchlist
-await dao.add_to_watchlist("VIDEO_123", tier="HOURLY")
-
-# Track continues forever, even after Janitor cleanup
-```
 
 **[Learn more →](docs/adaptive-scheduling.md)**
 
@@ -138,18 +146,9 @@ await dao.add_to_watchlist("VIDEO_123", tier="HOURLY")
 
 Intelligent API key management:
 
-- Automatic key rotation on quota exhaustion
-- Clean termination (exit 42) when all keys exhausted
-- Container orchestration integration
-- Retry logic with exponential backoff
-
-**Example**:
-```python
-keys = KeyRing("hunting")
-executor = HydraExecutor(keys, agent_name="hunter")
-result = await executor.execute_async(make_request)
-# Automatically rotates through keys on 403/429
-```
+- Automatic key rotation on quota exhaustion (`KeyRing` + `ResiliencyExecutor`)
+- `QuotaExhaustedError` propagates and triggers a Discord alert (no `sys.exit`)
+- Rate-limit errors release the video back to `PENDING` for retry — never `FAILED`
 
 **[Learn more →](docs/resiliency-strategy.md)**
 
@@ -157,7 +156,7 @@ result = await executor.execute_async(make_request)
 
 Ephemeral data management for high throughput:
 
-- Videos auto-deleted after 7 days
+- Videos auto-archived to the vault after `JANITOR_RETENTION_DAYS` (default 7)
 - SQL footprint stays constant (<0.5 GB)
 - Fast queries on recent data only
 - 100k+ videos/day ingestion capacity
@@ -169,8 +168,10 @@ Ephemeral data management for high throughput:
 ## Documentation
 
 ### Getting Started
-- **[Quick Start](docs/quickstart.md)** - Get up and running in 5 minutes
+- **[Quick Start](docs/quickstart.md)** - Get up and running
 - **[Architecture Overview](docs/architecture.md)** - System design and components
+- **[Deployment (two-VPS)](docs/deploy.md)** - Control plane + executor setup
+- **[Orchestration Runbook](docs/micro-prefect-orchestration.md)** - Ops & incidents
 
 ### Core Features
 - **[Adaptive Scheduling](docs/adaptive-scheduling.md)** - Infinite video tracking
@@ -180,11 +181,12 @@ Ephemeral data management for high throughput:
 ### Development
 - **[Testing Guide](docs/testing.md)** - Unit, integration, and smoke testing
 - **[Contributing](docs/contributing.md)** - Development workflow and standards
+- **[Challenges Log](docs/CHALLENGES.md)** - Problems we hit and how we solved them
 
 ### Component Guides
-- **[Atlas](atlas/docs/README.md)** - Infrastructure layer
-- **[Maia](maia/docs/README.md)** - Collection service
-- **[Alkyone](alkyone/README.md)** - Integration testing
+- **[Atlas](atlas/README.md)** - Infrastructure layer (DB, Vault, Events, Notifications)
+- **[Maia](maia/README.md)** - Agent fleet (Hunter, Tracker, Scribe, Painter, …)
+- **[Alkyone](alkyone/README.md)** - Integration testing (isolated infra only)
 
 ---
 
@@ -194,47 +196,46 @@ Ephemeral data management for high throughput:
 pleiades/
 ├── docs/                    # 📚 Unified documentation
 │   ├── README.md            # Documentation index
-│   ├── quickstart.md        # Getting started
+│   ├── deploy.md            # Two-VPS deployment guide
+│   ├── micro-prefect-orchestration.md  # Ops runbook
+│   ├── challenges.md        # Engineering challenges log
 │   ├── architecture.md      # System design
-│   ├── adaptive-scheduling.md  # Adaptive Scheduling guide
-│   ├── resiliency-strategy.md  # Resiliency Strategy guide
-│   ├── tiered-storage.md    # Tiered Storage architecture
-│   ├── testing.md           # Testing guide
-│   └── contributing.md      # Development guide
+│   ├── adaptive-scheduling.md
+│   ├── resiliency-strategy.md
+│   ├── tiered-storage.md
+│   ├── testing.md
+│   └── contributing.md
 │
-├── atlas/                   # 🏗️ Infrastructure library
+├── atlas/                   # 🏗️ Infrastructure library (no agent logic)
 │   ├── src/atlas/
-│   │   ├── db.py            # PostgreSQL
+│   │   ├── db.py            # PostgreSQL connection pool
 │   │   ├── vault.py         # HF/GCS storage
 │   │   ├── events.py        # Event bus
-│   │   ├── notifier.py      # Alerts
+│   │   ├── notifier.py      # Discord alerts
 │   │   ├── utils.py         # KeyRing, ResiliencyExecutor
+│   │   ├── config.py        # Pydantic settings (env-driven)
 │   │   ├── schema.sql       # Database schema
-│   │   └── adapters/
-│   │       ├── maia.py      # MaiaDAO
-│   │       └── maia_adaptive_scheduling.py # Adaptive Scheduling
-│   ├── docs/                # Atlas-specific docs
-│   └── tests/               # Unit tests
+│   │   ├── models/          # Pydantic domain models
+│   │   └── repositories/    # VideoRepository, ChannelRepository, … (Repository pattern)
+│   └── tests/
 │
-├── maia/                    # 🤖 Collection service
+├── maia/                    # 🤖 Stateless agent fleet (Prefect flows)
 │   ├── src/maia/
-│   │   ├── hunter/          # Discovery agent (producer)
-│   │   ├── tracker/         # Monitoring agent (consumer)
-│   │   ├── janitor/         # Cleanup agent (consumer)
+│   │   ├── hunter/          # Discovery (producer)
+│   │   ├── archeologist/    # Historical discovery (producer)
+│   │   ├── tracker/         # Stats monitoring (consumer)
+│   │   ├── janitor/         # Tiered-storage cleanup (consumer)
 │   │   ├── painter/         # Keyframe extraction (consumer)
 │   │   ├── scribe/          # Captions extraction (consumer)
 │   │   ├── streamer/        # Audio extraction + vault storage (producer)
 │   │   ├── singer/          # Audio transcription (consumer)
 │   │   ├── muralist/        # Full-video archival (consumer, manual-only)
-│   │   ├── media/           # Shared YouTube streamer (single yt-dlp path)
+│   │   ├── media/           # Shared yt-dlp streamer (single path)
 │   │   └── heartbeat/       # Fleet status reporter
-│   ├── docs/                # Maia-specific docs
-│   └── tests/               # Unit tests
+│   └── tests/
 │
-└── alkyone/                 # 🧪 Integration testing
-    ├── src/alkyone/
-    │   └── fixtures.py      # Test fixtures
-    └── tests/components/    # Integration tests
+├── alkyone/                 # 🧪 Integration testing (isolated infra only)
+└── tools/                   # Orchestration + recovery scripts (no secrets)
 ```
 
 ---
@@ -246,7 +247,6 @@ pleiades/
 ```python
 from maia.hunter import run_hunter_cycle
 
-# Run discovery cycle
 stats = await run_hunter_cycle(batch_size=10)
 # Discovers videos, adds to watchlist (Adaptive Scheduling)
 ```
@@ -256,28 +256,23 @@ stats = await run_hunter_cycle(batch_size=10)
 ```python
 from maia.tracker import run_tracker_cycle
 
-# Run tracking cycle
 stats = await run_tracker_cycle(batch_size=50)
-# Fetches from watchlist, stores to Vault
+# Fetches from watchlist, stores stats to the vault
 ```
 
-### Data Access
+### Data Access (Repository pattern)
 
 ```python
-from atlas.adapters.maia import MaiaDAO
+from atlas.repositories import VideoRepository
 
-dao = MaiaDAO()
-
-# Add video to persistent watchlist
-await dao.add_to_watchlist("VIDEO_123")
-
-# Fetch videos needing updates
-batch = await dao.fetch_tracking_batch(50)
-
-# Store metrics to Vault
-from atlas import vault
-vault.append_metrics(metrics_data)
+repo = VideoRepository()
+await repo.ingest_video_metadata(video_data)          # upsert a video
+batch = await repo.claim_scribe_batch(batch_size=10)  # atomic claim
+await repo.mark_transcript_safe(video.id)             # advance state
 ```
+
+All DB access goes through `atlas.repositories.*` — agents never write raw SQL.
+See [Atlas README](atlas/README.md) for the full repository surface.
 
 ---
 
@@ -287,25 +282,21 @@ vault.append_metrics(metrics_data)
 - **SQL Footprint**: <0.5 GB (constant)
 - **Tracking Duration**: Infinite (Adaptive Scheduling)
 - **API Efficiency**: Multi-key rotation (Resiliency Strategy)
-- **Storage**: Unlimited (compressed Parquet in Vault)
+- **Storage**: Unlimited (compressed Parquet / WebP in the vault)
 
 ---
 
 ## Testing
 
 ```bash
-# Unit tests
-cd atlas && pytest tests/
-cd maia && pytest tests/
+# Unit tests (atlas + maia, all mocked)
+make test-unit
 
-# Integration tests
-cd alkyone && pytest tests/
+# Integration tests (alkyone — isolated infra only, never production)
+make test-int
 
-# Smoke tests (requires live services)
-pytest -m smoke
-
-# With coverage
-pytest --cov=atlas --cov=maia --cov-report=html
+# Everything
+make test
 ```
 
 **See [Testing Guide](docs/testing.md) for detailed instructions.**
@@ -314,56 +305,27 @@ pytest --cov=atlas --cov=maia --cov-report=html
 
 ## Deployment
 
-### Docker Compose
+Pleiades runs as **9 Prefect deployments** across two VPSes (control plane +
+executor). See the dedicated guides:
 
-The root `Dockerfile` builds a single image that contains both `atlas` (lib) and
-`maia` (agents), so the build **context is the repository root**:
+- **[Deployment (two-VPS)](docs/deploy.md)** — provisioning both machines, systemd
+  units, the 9 deployments + work queues, and secrets handling (no keys in repo).
+- **[Orchestration Runbook](docs/micro-prefect-orchestration.md)** — everyday ops,
+  concurrency model, and incident playbooks.
 
-```yaml
-services:
-  maia-hunter:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - YOUTUBE_API_KEY_POOL_JSON=${YOUTUBE_API_KEY_POOL_JSON}
-    restart: unless-stopped
-    command: python -m maia hunter
+A `Dockerfile` also exists for single-image builds (atlas + maia in one image);
+it is useful for isolated dev but the production topology is the two-VPS Prefect
+deployment above.
 
-  maia-tracker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-    restart: unless-stopped
-    command: python -m maia tracker
-```
-
-```bash
-docker compose up -d
-```
-
-> **Requirements**
-> - **Deno** is installed in the image and is required by `yt-dlp` (>=2026.6.9)
->   to solve YouTube's BotGuard/POT challenge via `--js-runtimes`. Without it the
->   hunter/tracker/painter/scribe/streamer/singer/muralist agents get rate-limited
->   by YouTube's bot check.
-> - A **`bgutil` PO-token provider** must be running (the `bgutil-provider`
->   systemd unit) — YouTube (2026) requires a per-video Proof-of-Origin token for
->   authenticated GVS/subtitle requests. See `maia/README.md` (PO Token Setup).
+> **Requirements for the executor**
+> - **Deno** (≥ 2.3.0) — required by `yt-dlp` to solve YouTube's BotGuard/PoToken
+>   challenge.
+> - A **bgutil Po-token provider** server (`bgutil-provider` systemd unit) — YouTube
+>   (2026) requires a per-video Proof-of-Origin token. See `maia/README.md`
+>   (PO Token Setup).
 > - Vault writes are persisted to `./data/vault` (mounted into every agent).
-> - For authenticated/POT sessions, mount a cookies file and set
->   `YOUTUBE_COOKIES_PATH` (Atlas config reads that var, not `MAIA_COOKIES_PATH`):
->   ```yaml
->   painter:
->     environment:
->       YOUTUBE_COOKIES_PATH: /cookies/youtube_cookies.txt
->     volumes:
->       - ${MAIA_COOKIES_PATH:-./www.youtube.cookies.txt}:/cookies/youtube_cookies.txt:ro
->   ```
-
+> - For authenticated/PoToken sessions, mount a cookies file and set
+>   `YOUTUBE_COOKIES_PATH` (Atlas reads that var, not `MAIA_COOKIES_PATH`).
 
 ---
 
@@ -385,17 +347,15 @@ git checkout -b feature/your-feature
 # 2. Make changes
 # ...
 
-# 3. Run tests
-pytest --cov=atlas --cov=maia
-
-# 4. Format code (install hooks first: `make pre-commit-install`)
+# 3. Run tests + lint
+make test-unit
 make lint-fix
 
-# 5. Commit and push
+# 4. Commit and push
 git commit -m "feat: add feature description"
 git push origin feature/your-feature
 
-# 6. Create Pull Request
+# 5. Create Pull Request
 ```
 
 ---
@@ -416,14 +376,6 @@ Built with:
 
 ---
 
-## Support
-
-- **Documentation**: [docs/README.md](docs/README.md)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/pleiades/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/pleiades/discussions)
-
----
-
-**Version**: 1.0.0  
-**Maintainer**: Ahmad Saeed Zaidi  
-**Last Updated**: 2026-01-15
+**Version**: 1.0.0
+**Maintainer**: Ahmad Saeed Zaidi
+**Last Updated**: 2026-07-14
