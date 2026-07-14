@@ -52,6 +52,12 @@ class VideoStateMixin(DatabaseAdapter):
 
         The streamer does the network pull; the singer later extracts the audio
         from the stored raw artifact.
+
+        Orders by ``discovered_at DESC`` (newest-first) so fresh videos — far
+        more likely to be available — are fetched before old/buried content.
+        Also skips videos whose ``last_updated_at`` is within the last 15
+        minutes (a retry cooldown), preventing a tight infinite loop on
+        permanently-unavailable videos (removed/private/geo-blocked).
         """
         rows = await self._fetch_all(
             """
@@ -60,7 +66,9 @@ class VideoStateMixin(DatabaseAdapter):
                 SELECT id FROM videos
                 WHERE status IN ('PENDING', 'PROCESSING')
                   AND fetched = FALSE
-                ORDER BY discovered_at ASC
+                  AND (last_updated_at IS NULL
+                       OR last_updated_at < NOW() - INTERVAL '15 minutes')
+                ORDER BY discovered_at DESC
                 LIMIT %s
                 FOR UPDATE SKIP LOCKED
             )
@@ -305,12 +313,18 @@ class VideoStateMixin(DatabaseAdapter):
 
     async def release_to_pending(self, video_id: str) -> None:
         """Release a claimed (PROCESSING) video back to PENDING for retry on
-        transient failures (e.g. rate limiting)."""
+        transient failures (e.g. rate limiting).
+
+        Resets both ``status`` and ``raw_phase`` to ``'PENDING'`` so the
+        next claim cycle can pick it up with a clean state.
+        """
         now = datetime.now(UTC)
         await self._execute(
             """
             UPDATE videos
-            SET status = 'PENDING', last_updated_at = %s
+            SET status = 'PENDING',
+                raw_phase = 'PENDING',
+                last_updated_at = %s
             WHERE id = %s
             """,
             (now, video_id),

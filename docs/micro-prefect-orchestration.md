@@ -51,17 +51,32 @@ via `prefect-server.service`.
 
 ## 3. Concurrency / parallelism architecture (CRITICAL — read before changing)
 
-After the 2026-07-13 incident the orchestration is configured as:
+After the 2026-07-13 incident the orchestration was configured with a global
+`concurrency_limit = 5` and strict queue priorities (heartbeat=1 … streamer=9).
+**This caused priority starvation:** the five cheap-but-frequent agents
+(heartbeat/janitor/archeologist/tracker/hunter) filled the five available slots,
+and the streamer (priority 9 — the *input* to the entire pipeline) never got
+scheduled. Singer and painter (priority 7-8) were also starved. Result: no new
+raw videos were fetched → audio/visual extraction sat idle despite 23,741
+PENDING raw videos.  This was fixed on 2026-07-14.
 
-  - **Work pool `default`** — global `concurrency_limit = 5` (cheap agents run concurrently again; the worker's `CPUQuota=180%` cgroup backstop + per-queue `limit=1` prevent any CPU death-spiral).
+Current configuration:
+
+  - **Work pool `default`** — global `concurrency_limit = 9` (one slot per queue).
+    With per-queue `limit=1` the worst case is 9 concurrent runs, safe under the
+    worker's `CPUQuota=180%` cgroup backstop (most agents are cheap DB queries;
+    the heavy ffmpeg agents are limited to 1 each anyway).
 - **One work queue per deployment**, each `concurrency_limit = 1`:
-  `streamer, singer, painter, scribe, hunter, tracker, archeologist, janitor` (priority 2) and
-  `heartbeat` (priority 1).
-  - All 9 queues live in the `default` pool. Effect: **each agent runs ≤1 instance, but up to 5
-   *different* agents run in parallel.** Cheap agents (heartbeat/janitor/tracker/hunter/archeologist rank priority 1–4/5) sit above the heavy ffmpeg agents (priority 6–9), so they win slots first; the heavy agents stay naturally throttled. The heartbeat (priority 1) is never starved.
+  `streamer, singer, painter, scribe, hunter, tracker, archeologist, janitor`
+  (priority 2) and `heartbeat` (priority 1).
+  - All 9 queues live in the `default` pool. Effect: **each agent runs ≤1
+    instance, all 9 can run concurrently.** Priorities exist only for UI ordering;
+    with `concurrency_limit=9` they do not gate scheduling — there is always a
+    slot available for every queue that has work.
 
-This is the idiomatic Prefect-3 equivalent of the old "9 independent systemd units" — multiple stages
-progress concurrently without any single agent flooding CPU.
+This is the idiomatic Prefect-3 equivalent of the old "9 independent systemd
+units" — multiple stages progress concurrently without any single agent flooding
+CPU.
 
 ### ⚠️ GOTCHA: `max_active_runs` does NOT work in Prefect 3.7.7
 In this build:
@@ -109,7 +124,7 @@ cd /home/ubuntu/code/pleiades
 | Worker status / restart | `systemctl status prefect-worker` / `sudo systemctl restart prefect-worker` |
 | List deployments | `prefect deployment ls` |
 | Pool + limit | `prefect work-pool inspect default` |
-| Set global pool limit | `prefect work-pool set-concurrency-limit default 3` |
+| Set global pool limit | `prefect work-pool set-concurrency-limit default 9` |
 | Re-apply all deployments | `prefect deploy --all` |
 | Re-apply one | `prefect deploy -n <name>` |
 | Trigger heartbeat now | `prefect deployment run heartbeat_cycle/heartbeat` |
@@ -139,8 +154,8 @@ export PREFECT_API_URL=http://10.0.0.22:4200/api
 python tools/setup_orchestration.py
 ```
 
-It sets the pool global `concurrency_limit=3` and creates/updates all 9 queues
-with `limit=1` and the priorities above (heartbeat=1 … streamer=9), idempotently.
+It sets the pool global `concurrency_limit=9` and creates/updates all 9 queues
+with `limit=1`, idempotently.
 
 ---
 
@@ -186,8 +201,17 @@ any `RUNNING`/`CANCELLED`/`CRASHED` orphans.
 
 ### D. CPU saturation (load >> cores)
 - Confirm cgroup backstop: `systemctl cat prefect-worker | grep -E 'CPUQuota|TasksMax'`.
-- Confirm pool `concurrency_limit=3` and per-deployment queues `limit=1` are intact (§3). A redeploy
+- Confirm pool `concurrency_limit=9` and per-deployment queues `limit=1` are intact (§3). A redeploy
   that reverted `work_queue_name` to `default` would let one deployment grab multiple slots.
+
+### E. Priority starvation (all slots full, but some queues never run)
+If one or more queues never get scheduled (e.g. the streamer's raw-fetch stalls
+while heartbeat/janitor/tracker are always active), check that the pool global
+`concurrency_limit` is not below the number of queues that need slots.  With 9
+queues each `limit=1`, the pool limit must be ≥9 to give every queue a fair
+chance.  History: `concurrency_limit=5` caused the 2026-07-13 pipeline stall
+(23,741 videos PENDING because the streamer was starved by priorities 1-5).
+Fix: `prefect work-pool set-concurrency-limit default 9`.
 
 ---
 

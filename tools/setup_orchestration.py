@@ -7,10 +7,11 @@ limits + priorities — so the 2-VPS setup is reproducible after a micro rebuild
 or work-pool recreation.
 
 What it does:
-  * sets the ``default`` work pool global ``concurrency_limit`` to 3 (CPU-safe
-    ceiling for the 2-core executor)
-  * creates/updates one work queue per deployment, each ``concurrency_limit=1``,
-    with ``heartbeat`` at the highest priority (1) so it never starves
+  * sets the ``default`` work pool global ``concurrency_limit`` to 9 (one slot
+    per queue; the worker's ``CPUQuota=180%`` cgroup + per-queue ``limit=1``
+    prevent CPU saturation on the 2-core box)
+  * creates/updates one work queue per deployment, each ``concurrency_limit=1``
+    so every agent type runs at most one instance at a time
 
 It does NOT touch deployment schedules or ``work_queue_name`` bindings — those
 live in ``prefect.yaml`` and are applied by ``prefect deploy``.
@@ -34,15 +35,23 @@ from prefect.client.orchestration import get_client
 from prefect.client.schemas.actions import WorkPoolUpdate
 
 POOL_NAME = "default"
-# Global ceiling for the 2-core executor. Kept above the number of *cheap* agents so
-# trackers/hunters/heartbeat/janitor run concurrently like they used to, while the
-# per-queue `limit=1` (plus the worker's CPUQuota=180% cgroup backstop) still prevents
-# any CPU death-spiral. Cheap agents rank above the heavy ffmpeg agents in queue priority,
-# so they win slots first; heavy agents stay naturally throttled.
-GLOBAL_CONCURRENCY_LIMIT = 5
+# Global ceiling for the 2-core executor. Set to the number of queues (9) so
+# every agent type gets exactly one slot.  With per-queue `limit=1` the worst
+# case is 9 concurrent runs, safe under the worker's CPUQuota=180% cgroup
+# backstop (most agents are cheap DB queries; the heavy ffmpeg agents are
+# limited to 1 each anyway).
+#
+# HISTORY: was 5 with strict priorities 1-9, which caused priority starvation:
+# heartbeat(1)/janitor(2)/archeologist(3)/tracker(4)/hunter(5) filled the pool
+# and streamer(9)/singer(8)/painter(7) never got a slot → no raw videos fetched
+# → pipeline stalled.  With limit=9 every queue gets a slot regardless, matching
+# the old "all agents run concurrently" model.
+GLOBAL_CONCURRENCY_LIMIT = 9
 
-# (queue_name, priority) — heartbeat highest so the Discord heartbeat never starves.
-# Order mirrors docs/micro-prefect-orchestration.md §3.
+# Per-deployment work queues — same order as docs/micro-prefect-orchestration.md §3.
+# Priority is moot when GLOBAL_CONCURRENCY_LIMIT ≥ len(QUEUES) because every
+# queue with pending work gets a slot.  Priorities are kept for a visual ordering
+# in the Prefect UI; they do not gate scheduling.
 QUEUES = [
     ("heartbeat", 1),
     ("janitor", 2),

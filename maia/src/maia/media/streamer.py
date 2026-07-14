@@ -254,7 +254,7 @@ class StealthVideoStreamer:
         return [p.get("start_time", 0.0) for p in sorted_points[:top_n]]
 
     def extract_audio(
-        self, video_id: str, dest_dir: str, player_clients: str = "default,tv"
+        self, video_id: str, dest_dir: str, player_clients: str = "web,tv"
     ) -> Path:
         """Download *video_id*'s audio into *dest_dir* and return the opus path.
 
@@ -293,7 +293,7 @@ class StealthVideoStreamer:
         self,
         video_id: str,
         dest_dir: str,
-        player_clients: str = "default,tv",
+        player_clients: str = "web,tv",
     ) -> tuple[Path, Path | None]:
         """Unified YouTube ingress: download the audio + metadata for *video_id*
         in a SINGLE yt-dlp invocation.
@@ -367,7 +367,7 @@ class StealthVideoStreamer:
         return audio_path, info_path
 
     def download_raw(
-        self, video_id: str, dest_dir: str, player_clients: str = "default,tv"
+        self, video_id: str, dest_dir: str, player_clients: str = "web,tv"
     ) -> Path:
         """Download *video_id*'s best audio stream (no ffmpeg re-encode).
 

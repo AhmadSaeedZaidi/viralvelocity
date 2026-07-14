@@ -19,7 +19,6 @@ deployments:
       COMPLIANCE_MODE: "false"
       HOME: /home/ubuntu
       YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
-      MAIA_PROXY_URL: ""
 
   - name: singer
     entrypoint: maia/src/maia/singer/flow.py:singer_flow
@@ -36,6 +35,7 @@ deployments:
       VAULT_PROVIDER: huggingface
       COMPLIANCE_MODE: "false"
       HOME: /home/ubuntu
+      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
 
   - name: painter
     entrypoint: maia/src/maia/painter/flow.py:painter_flow
@@ -52,6 +52,7 @@ deployments:
       VAULT_PROVIDER: huggingface
       COMPLIANCE_MODE: "false"
       HOME: /home/ubuntu
+      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
 
   - name: scribe
     entrypoint: maia/src/maia/scribe/flow.py:scribe_flow
@@ -68,6 +69,7 @@ deployments:
       VAULT_PROVIDER: huggingface
       COMPLIANCE_MODE: "false"
       HOME: /home/ubuntu
+      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
 
   - name: hunter
     entrypoint: maia/src/maia/hunter/flow.py:run_hunter_cycle
