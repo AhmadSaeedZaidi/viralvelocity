@@ -147,7 +147,7 @@ class StreamerAgent(BaseBatchAgent):
             on_failure=VideoRepository().mark_failed,
             label="videos' raw+meta",
             store=vault_op_with_retry,
-            vault=get_vault,
+            vault=get_vault(),
         )
 
 

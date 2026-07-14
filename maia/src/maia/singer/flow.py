@@ -181,7 +181,7 @@ class SingerAgent(BaseBatchAgent):
             on_failure=VideoRepository().release_to_pending,
             label="audio files",
             store=vault_op_with_retry,
-            vault=get_vault,
+            vault=get_vault(),
         )
         # The raw artifact is shared with the painter (frames). Reclaim it only
         # once BOTH consumers have derived their output, so the painter never

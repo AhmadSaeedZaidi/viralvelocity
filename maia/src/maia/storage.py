@@ -54,6 +54,13 @@ async def commit_artifacts(
         from atlas.vault import get_vault as _get_vault
 
         vault = _get_vault()
+    elif callable(vault):
+        # Callers may pass the ``get_vault`` factory rather than the live
+        # instance. Resolve it so the lambda below can call
+        # ``vault.store_batch(...)`` — otherwise ``get_vault.store_batch`` raises
+        # AttributeError and *every* batch store fails to persist (regression
+        # introduced with ``commit_artifacts`` in P3).
+        vault = vault()
     if store is None:
         from maia.utils import vault_op_with_retry as _store
 

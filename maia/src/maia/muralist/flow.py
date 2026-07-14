@@ -134,7 +134,7 @@ class MuralistAgent(BaseBatchAgent):
             on_failure=VideoRepository().mark_failed,
             label="source clips",
             store=vault_op_with_retry,
-            vault=get_vault,
+            vault=get_vault(),
         )
 
 

@@ -216,6 +216,40 @@ Fix: `prefect work-pool set-concurrency-limit default 9`.
 ---
 
 ## 7. Known open items
+- **Painter/Singer are INPUT-STARVED, not scheduling-starved (diagnosed 2026-07-14).** The
+  `concurrency_limit=9` fix is correct and in place. The real cause is upstream: the **streamer**
+  is ~80% failing YouTube `HTTP 403 Forbidden` on the flagged VPS egress IP (logs show
+  `yt-dlp rate-limited ... HTTP Error 403: Forbidden` on 4–5 of every 5 claimed videos; only
+  ~1 succeeds). Net throughput ≈40 fetched/day vs ~3600/day theoretical. Painter/singer consume
+  `fetched` rows; all 1,255 ever-fetched videos already have visuals+audio, so
+  `claim_painter_batch`/`claim_singer_batch` return **0** — they are idle, not broken. Scribe
+  bypasses this entirely (free YouTube captions, no fetch) and raced to 14,133 transcripts.
+  **Fix is on the streamer/YouTube-access layer, not painter/singer:**
+  - renew `YOUTUBE_COOKIES_PATH` + PoToken; try yt-dlp `player_client` variants
+    (`tv`/`tv_embedded`/`web_silk`/`android`) to dodge the 403;
+  - route the egress through a clean IP/proxy (current one is flagged);
+  - add a real backoff/cooldown on 403 — current `release_to_pending` + 120s re-claim hammers the
+    flagged IP and makes the block worse.
+  - **Secondary defect — FIXED (2026-07-14).** A successful fetch failed to persist:
+    `Batched videos' raw+meta store failed (1 items): RetryError[... raised AttributeError]`
+    (vault `store` path), so even good fetches were lost. **Root cause:** `commit_artifacts`
+    (added in P3) received the `get_vault` *factory function* instead of the live instance
+    (callers passed `vault=get_vault`, and `commit_artifacts` only resolved `vault` when
+    `store is None`; since the agents inject `store=vault_op_with_retry`, `vault` stayed the
+    function and the lambda `vault.store_batch(...)` raised `AttributeError`). Every
+    streamer/singer/muralist batch store failed → no `raw_uri`/`audio`/`clip` ever persisted after
+    the P3 deploy, compounding the painter/singer starvation. **Fix:** `commit_artifacts` now
+    resolves a callable `vault` to its instance, and the 3 callers pass `get_vault()`; a
+    regression test in `maia/tests/test_storage.py` actually executes the store lambda (the
+    `AsyncMock` patch had hidden the bug).
+- **`status` column is misleading (data hygiene).** 12,901 of 12,922 `PROCESSING` rows are
+  *not fetched* — they are scribe'd (caption) videos whose `status` was set to `PROCESSING` by the
+  claim but never reset, because `mark_transcript_safe`/`mark_audio_safe`/`mark_visuals_safe` only
+  latch `PROCESSED` when the *other* artifacts are also present and otherwise leave `status` as-is.
+  So every touched-but-incomplete video reads `PROCESSING` forever. Not a starvation cause (claim
+  queries correctly accept `PENDING`/`PROCESSING`), but it makes the heartbeat "PROCESSING: 12,925"
+  figure terrifying and pollutes ops. Consider resetting `status` to `PENDING` on a non-latching
+  step, or keying the "claimed" concept off a lease/`claimed_at` timestamp instead of `status`.
 - **Muralist** is manual-only (no deployment); ~12 "all-done" videos (audio/transcript/visuals DONE,
   `has_video=FALSE`, `clip_phase=PENDING`) are claimed by muralist and were marked FAILED by a manual
   run. Not blocking; decide separately whether to make the clip stage non-blocking for `PROCESSED`.
