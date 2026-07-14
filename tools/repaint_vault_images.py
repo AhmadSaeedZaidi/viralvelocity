@@ -14,7 +14,9 @@ Requires ``DATABASE_URL`` (from ``.env`` or the environment).
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "atlas" / "src"))
 
 # Load .env manually (mirror of tools/check_quota_exhaustion.py).
 _env_path = Path(__file__).parent.parent / ".env"
-for line in env_path.read_text().splitlines() if env_path.exists() else []:
+for line in _env_path.read_text().splitlines() if _env_path.exists() else []:
     line = line.strip()
     if line and not line.startswith("#") and "=" in line:
         key, _, val = line.partition("=")
@@ -31,8 +33,8 @@ for line in env_path.read_text().splitlines() if env_path.exists() else []:
         if " #" in val:
             val = val.split(" #", 1)[0].strip()
         val = val.strip('"').strip("'")
-        if key and key not in __import__("os").environ:
-            __import__("os").environ[key] = val
+        if key and key not in os.environ:
+            os.environ[key] = val
 
 
 async def main(apply: bool) -> None:

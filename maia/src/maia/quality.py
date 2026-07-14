@@ -400,10 +400,10 @@ async def filter_by_quality(
             if logger and shorts_hits:
                 logger.info(f"Quality gate: rejected {shorts_hits} Shorts via HEAD probe")
 
+    final: list[dict[str, Any]] = []
     if evaluated:
         channel_ids = list({it.get("snippet", {}).get("channelId") for it, _ in evaluated} - {None})
         stats_map = await _load_channel_stats(channel_ids, executor)
-        final: list[dict[str, Any]] = []
         for it, _ in evaluated:
             cid = it.get("snippet", {}).get("channelId")
             ok, reason = evaluate_channel(cid, stats_map.get(cid), thresholds, now)

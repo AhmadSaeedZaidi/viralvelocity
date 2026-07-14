@@ -46,11 +46,8 @@ class YouTubeSearchStrategy:
                 if resp.status in (403, 429):
                     error_text = await resp.text()
                     raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
-                run_logger = __import__("logging").getLogger(
-                    f"maia.strategies.{self.executor.agent_name}"
-                )
                 error_text = await resp.text()
-                run_logger.error(f"HTTP {resp.status} for {url}: {error_text[:200]}")
+                logger.error(f"HTTP {resp.status} for {url}: {error_text[:200]}")
                 raise Exception(f"HTTP {resp.status}: {error_text[:200]}")
 
         result = await self.executor.execute_async(make_request)

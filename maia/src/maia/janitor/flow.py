@@ -51,7 +51,7 @@ async def handoff_phase_task(videos_data: list[dict[str, Any]], dry_run: bool) -
     videos = [Video(**v) for v in videos_data]
 
     run_logger.info(
-        f"Hand-off: archiving {len(videos)} videos (safety_check={dry_run}, dry_run={dry_run})"
+        f"Hand-off: archiving {len(videos)} videos (dry_run={dry_run})"
     )
 
     result = await video_repo.archive_video_batch(videos, dry_run=dry_run)
@@ -409,17 +409,6 @@ async def janitor_cycle(
     """Legacy function wrapper for backward compatibility."""
     agent = JanitorAgent()
     return await agent.run(dry_run=dry_run, archive_stats=archive_stats, batch_size=batch_size)
-
-
-@task(name="archive_cold_stats")
-async def archive_cold_stats(retention_days: int = 7) -> Any:
-    return await archive_cold_stats_task(retention_days)
-
-
-@task(name="run_janitor_cleanup")
-async def run_janitor_cleanup(dry_run: bool = False) -> Any:
-    repo = VideoRepository()
-    return await repo.run_janitor(dry_run)
 
 
 def main() -> None:

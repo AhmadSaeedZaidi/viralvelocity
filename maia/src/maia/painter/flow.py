@@ -366,7 +366,7 @@ async def painter_flow(batch_size: int) -> dict[str, Any]:
     """
     run_logger = get_run_logger()
     run_logger.info(
-        f"=== Starting Painter Cycle (Turbo Mode: {MAX_CONCURRENT_VIDEOS} concurrent) ==="
+        f"=== Starting Painter Cycle ({MAX_CONCURRENT_VIDEOS} concurrent) ==="
     )
 
     targets = await fetch_painter_targets_task(batch_size)

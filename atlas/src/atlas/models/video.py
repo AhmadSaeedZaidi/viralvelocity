@@ -3,8 +3,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-VideoStatus = Literal["PENDING", "PROCESSING", "PROCESSED", "ARCHIVED", "FAILED"]
-
 # Per-step phase for the fan-out/fan-in pipeline (streamer/singer/painter/
 # scribe/muralist); legacy booleans are a transitional seam.
 StepPhase = Literal["PENDING", "PROCESSING", "DONE", "FAILED"]

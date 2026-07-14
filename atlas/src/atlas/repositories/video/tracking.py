@@ -8,6 +8,15 @@ from atlas.models.video import Video, VideoStats
 logger = logging.getLogger("atlas.repositories.video.tracking")
 
 
+def _to_int(v: Any) -> int | None:
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 class VideoTrackingMixin(DatabaseAdapter):
     async def fetch_tracker_targets(self, batch_size: int = 50) -> list[Video]:
         now = datetime.now(UTC)
@@ -84,15 +93,13 @@ class VideoTrackingMixin(DatabaseAdapter):
         """
         now = datetime.now(UTC)
 
-        # Batch both statements into two round-trips (not 2*N) so the server
-        # reuses the prepared plan.
         ts_params = [(now, u["id"]) for u in updates]
         log_params = [
             (
                 u["id"],
-                u.get("statistics", {}).get("viewCount"),
-                u.get("statistics", {}).get("likeCount"),
-                u.get("statistics", {}).get("commentCount"),
+                _to_int(u.get("statistics", {}).get("viewCount")),
+                _to_int(u.get("statistics", {}).get("likeCount")),
+                _to_int(u.get("statistics", {}).get("commentCount")),
                 now,
             )
             for u in updates

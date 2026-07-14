@@ -1,11 +1,8 @@
-import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from atlas.adapters import DatabaseAdapter
 from atlas.models.watchlist import WatchlistItem
-
-logger = logging.getLogger("atlas.repositories.watchlist")
 
 
 class WatchlistRepository(DatabaseAdapter):

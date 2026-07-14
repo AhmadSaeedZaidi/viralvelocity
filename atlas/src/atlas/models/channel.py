@@ -23,14 +23,3 @@ class ChannelStats(BaseModel):  # type: ignore[misc]
     video_count: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class ChannelHistory(BaseModel):  # type: ignore[misc]
-    id: str
-    channel_id: str
-    changed_at: datetime | None = None
-    old_title: str | None = None
-    new_title: str | None = None
-    event_type: str
-
-    model_config = ConfigDict(from_attributes=True)

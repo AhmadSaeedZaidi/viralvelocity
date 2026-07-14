@@ -4,11 +4,9 @@ from atlas.db import db
 from atlas.events import events
 from atlas.models import (
     Channel,
-    ChannelHistory,
     ChannelStats,
     SearchQueueItem,
     SystemEvent,
-    Transcript,
     Video,
     VideoStats,
     WatchlistItem,
@@ -38,11 +36,9 @@ __all__ = [
     "DatabaseAdapter",
     # Domain models
     "Channel",
-    "ChannelHistory",
     "ChannelStats",
     "SearchQueueItem",
     "SystemEvent",
-    "Transcript",
     "Video",
     "VideoStats",
     "WatchlistItem",

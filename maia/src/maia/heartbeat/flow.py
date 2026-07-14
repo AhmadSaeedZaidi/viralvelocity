@@ -159,11 +159,11 @@ async def check_audio_api_health() -> tuple[str, str]:
     settings = get_settings()
     if settings.GROK_API_KEY:
         url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        auth = f"Bearer {settings.GROK_API_KEY.get_secret_value()}"
+        headers = {"Authorization": f"Bearer {settings.GROK_API_KEY.get_secret_value()}"}
         provider = "Groq Whisper"
     elif settings.MISTRAL_API_KEY:
         url = "https://api.mistral.ai/v1/audio/transcriptions"
-        auth = f"{settings.MISTRAL_API_KEY.get_secret_value()}"
+        headers = {"x-api-key": settings.MISTRAL_API_KEY.get_secret_value()}
         provider = "Mistral Voxtral"
     else:
         return ("down", "No transcription API key configured")
@@ -172,10 +172,11 @@ async def check_audio_api_health() -> tuple[str, str]:
         async with httpx.AsyncClient(timeout=10.0) as client:
             # No audio body — we only want to confirm the endpoint is reachable
             # and the credential is accepted (a 4xx/422 is fine; a 401/403 is a
-            # bad key; a connection error is a down endpoint).
+            # bad key; a connection error is a down endpoint). httpx sets the
+            # multipart Content-Type (with boundary) from the files kwarg.
             resp = await client.post(
                 url,
-                headers={"Authorization": auth, "Content-Type": "multipart/form-data"},
+                headers=headers,
                 files={"file": ("healthcheck.ogg", b"", "audio/ogg")},
             )
         if resp.status_code in (200, 201):

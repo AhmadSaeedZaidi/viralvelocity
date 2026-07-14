@@ -1,8 +1,4 @@
-"""Transcript staging + vault-pending repository (Single Responsibility).
-
-Extracted from ``VideoStateMixin`` into its own repository per the DAO pattern: it
-stages transcripts locally and tracks which still need flushing to the vault.
-"""
+"""Stages transcripts locally and tracks which still need flushing to the vault."""
 
 import json
 from datetime import UTC, datetime
@@ -87,7 +83,10 @@ class TranscriptRepository(DatabaseAdapter):
             SET vault_write_pending = FALSE,
                 audio_pending = NULL,
                 last_updated_at = %s,
-                status = CASE WHEN has_visuals THEN 'PROCESSED' ELSE status END
+                status = CASE
+                    WHEN has_transcript AND has_audio AND has_visuals THEN 'PROCESSED'
+                    ELSE status
+                END
             WHERE id = %s
             """,
             (now, video_id),

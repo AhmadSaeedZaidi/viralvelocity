@@ -124,10 +124,10 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
     duration = getattr(video, "duration", None)
     too_long = bool(duration and duration > SCRIBE_MAX_DURATION_SECONDS)
 
-    # This is the ONLY place that hits the `timedtext` endpoint, so the throttle
-    # surface is centralized here. Any loader failure (including live/unavailable
-    # videos that raise non-TranscriptExtractionError types) means "no captions".
-    # Quota exhaustion is a real signal and must propagate to the caller.
+    # Prefer free YouTube captions; the caption throttle surface is centralized
+    # here. Any loader failure (including live/unavailable videos that raise
+    # non-TranscriptExtractionError types) means "no captions". Quota exhaustion
+    # is a real signal and must propagate to the caller.
     try:
         return TranscriptLoader().fetch(vid_id)
     except QuotaExhaustedError:
@@ -152,9 +152,10 @@ async def _transcribe(video: Video) -> list[dict[str, Any]]:
     try:
         audio_buf = await asyncio.to_thread(get_vault().fetch_binary, audio_path(vid_id))
         if audio_buf is not None:
-            tmp = tempfile.mktemp(suffix=".opus")
-            await asyncio.to_thread(Path(tmp).write_bytes, audio_buf.getvalue())
-            segs = (await asyncio.to_thread(transcribe_audio_path, Path(tmp))).segments
+            with tempfile.NamedTemporaryFile(suffix=".opus", delete=False) as tmp:
+                tmp.write(audio_buf.getvalue())
+                tmp_path = Path(tmp.name)
+            segs = (await asyncio.to_thread(transcribe_audio_path, tmp_path)).segments
         else:
             segs = (await asyncio.to_thread(transcribe_audio_download, vid_id)).segments
         record_audio_usage(1)
