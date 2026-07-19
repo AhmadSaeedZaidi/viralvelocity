@@ -16,16 +16,19 @@ install:
 	$(MAKE) -C atlas install
 	$(MAKE) -C maia install
 	$(MAKE) -C alkyone install
+	$(MAKE) -C mcp install
 
 lint-local:
 	$(MAKE) -C atlas lint-local
 	$(MAKE) -C maia lint-local
 	$(MAKE) -C alkyone lint-local
+	$(MAKE) -C mcp lint-local
 
 lint:
 	$(MAKE) -C atlas lint
 	$(MAKE) -C maia lint
 	$(MAKE) -C alkyone lint
+	$(MAKE) -C mcp lint
 
 pre-commit-install:
 	pre-commit install --hook-type pre-commit --hook-type pre-push
@@ -37,12 +40,14 @@ lint-fix:
 	$(MAKE) -C atlas lint-local
 	$(MAKE) -C maia lint-local
 	$(MAKE) -C alkyone lint-local
+	$(MAKE) -C mcp lint-local
 
 test: test-unit test-int
 
 test-unit:
 	$(MAKE) -C atlas test-unit
 	$(MAKE) -C maia test-unit
+	$(MAKE) -C mcp test
 
 test-int:
 	$(MAKE) -C alkyone test-int
@@ -51,3 +56,4 @@ clean:
 	$(MAKE) -C atlas clean
 	$(MAKE) -C maia clean
 	$(MAKE) -C alkyone clean
+	$(MAKE) -C mcp clean

@@ -28,6 +28,7 @@ COPY alkyone/pyproject.toml alkyone/poetry.lock* alkyone/
 COPY atlas/ atlas/
 COPY maia/ maia/
 COPY alkyone/ alkyone/
+COPY mcp/ mcp/
 
 # Install project dependencies system-wide. poetry 2.x `install` always
 # installs from the committed poetry.lock and errors if it is out of date with
@@ -40,6 +41,17 @@ COPY alkyone/ alkyone/
 RUN cd atlas && poetry install --no-interaction && \
     cd ../maia && poetry install --no-interaction && \
     cd ../alkyone && poetry install --no-interaction
+
+# The mcp package is a plain (non-poetry) project. Install its third-party
+# runtime + dev deps system-wide so `make -C mcp lint` and `make -C mcp test`
+# run in per-PR CI. Its own source is imported via pytest pythonpath (see
+# mcp/pyproject.toml), so a lightweight deps install is sufficient.
+RUN pip install --no-cache-dir \
+        "mcp>=1.2.0,<2.0.0" \
+        "openai>=1.30.0,<2.0.0" \
+        "ruff>=0.15.0,<1.0.0" \
+        "pytest>=8.0.0,<9.0.0" \
+        "pytest-asyncio>=0.23.0,<1.0.0"
 
 # Purge yt-dlp cache
 RUN rm -rf ~/.cache/yt-dlp || true

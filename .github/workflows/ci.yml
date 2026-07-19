@@ -70,8 +70,8 @@ jobs:
         uses: actions/checkout@v4
 
       # Dependencies are already in the Docker image.
-      - name: Lint Modules (atlas + maia + alkyone)
-        run: make -C atlas lint && make -C maia lint && make -C alkyone lint
+      - name: Lint Modules (atlas + maia + alkyone + mcp)
+        run: make -C atlas lint && make -C maia lint && make -C alkyone lint && make -C mcp lint
 
   unit-tests:
     name: Unit Tests
