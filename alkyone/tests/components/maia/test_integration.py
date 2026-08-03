@@ -207,9 +207,9 @@ async def test_hunter_empty_queue_returns_idle():
 @pytest.mark.asyncio
 async def test_tracker_no_stale_videos_returns_idle():
     """Test Tracker handles no stale videos gracefully."""
-    with patch("maia.tracker.flow.VideoRepository") as MockVideoRepo:
-        mock_video_repo = MockVideoRepo.return_value
-        mock_video_repo.fetch_tracker_targets = AsyncMock(return_value=[])
+    with patch("maia.tracker.flow.WatchlistRepository") as MockWatchRepo:
+        mock_watch = MockWatchRepo.return_value
+        mock_watch.fetch_batch = AsyncMock(return_value=[])
 
         stats = await run_tracker_cycle(batch_size=50)
 
@@ -220,12 +220,12 @@ async def test_tracker_no_stale_videos_returns_idle():
 @pytest.mark.asyncio
 async def test_tracker_enforces_batch_size_limit():
     """Test Tracker enforces YouTube API batch size limit of 50."""
-    with patch("maia.tracker.flow.VideoRepository") as MockVideoRepo:
-        mock_video_repo = MockVideoRepo.return_value
-        mock_video_repo.fetch_tracker_targets = AsyncMock(return_value=[])
+    with patch("maia.tracker.flow.WatchlistRepository") as MockWatchRepo:
+        mock_watch = MockWatchRepo.return_value
+        mock_watch.fetch_batch = AsyncMock(return_value=[])
 
         # Request 100 but should cap at 50
         await run_tracker_cycle(batch_size=100)
 
         # Verify batch_size was capped at 50
-        mock_video_repo.fetch_tracker_targets.assert_called_once_with(50)
+        mock_watch.fetch_batch.assert_called_once_with(50)

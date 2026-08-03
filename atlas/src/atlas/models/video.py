@@ -20,6 +20,7 @@ class Video(BaseModel):  # type: ignore[misc]
     wiki_topics: list[str] | None = None
     discovered_at: datetime | None = None
     last_updated_at: datetime | None = None
+    last_tracked_at: datetime | None = None
     archived_at: datetime | None = None
     status: str | None = "PENDING"
     has_transcript: bool = False

@@ -91,6 +91,12 @@ ALTER TABLE videos ADD COLUMN IF NOT EXISTS raw_stored_at TIMESTAMPTZ;
 ALTER TABLE videos DROP COLUMN IF EXISTS has_captions;
 ALTER TABLE videos DROP COLUMN IF EXISTS captions_uri;
 
+-- P2 migration: separate the tracker's cooldown timestamp from last_updated_at,
+-- which was overloaded (pipeline agents + tracker both wrote to it). The tracker
+-- now writes to last_tracked_at, while pipeline agents continue writing to
+-- last_updated_at.
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS last_tracked_at TIMESTAMPTZ;
+
 -- Cheap lookup of videos awaiting a vault flush (janitor work queue).
 CREATE INDEX IF NOT EXISTS idx_videos_vault_pending
     ON videos (id) WHERE has_transcript AND vault_write_pending;
@@ -166,7 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_history_channel ON channel_history(channe
 CREATE INDEX IF NOT EXISTS idx_video_publish ON videos(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_video_tags ON videos USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_video_category ON videos(category_id);
-CREATE INDEX IF NOT EXISTS idx_video_tracker_staleness ON videos(last_updated_at ASC NULLS FIRST);
+CREATE INDEX IF NOT EXISTS idx_video_tracker_tracked_at ON videos(last_tracked_at ASC NULLS FIRST);
 CREATE INDEX IF NOT EXISTS idx_video_status ON videos(status, discovered_at);
 CREATE INDEX IF NOT EXISTS idx_video_channel ON videos(channel_id);
 CREATE INDEX IF NOT EXISTS idx_search_queue_fetch ON search_queue(priority DESC, mention_count DESC);

@@ -124,8 +124,13 @@ class VaultStrategy(abc.ABC):
         return self.fetch_json(path)
 
     def fetch_transcript(self, video_id: str) -> dict[Any, Any] | None:
-        path = f"transcripts/{video_id}.json"
-        return self.fetch_json(path)
+        # New transcripts are sharded (transcripts/{prefix}/{id}.json) to stay
+        # under HF's 10k-files-per-directory limit; legacy flat paths still exist.
+        for path in (transcript_path(video_id), f"transcripts/{video_id}.json"):
+            result = self.fetch_json(path)
+            if result is not None:
+                return result
+        return None
 
     @abc.abstractmethod
     def append_metrics(
@@ -612,6 +617,17 @@ def reset_vault() -> None:
 def audio_path(video_id: str) -> str:
     """Return the repo-relative vault path for a video's extracted audio."""
     return f"audio/{video_id}.opus"
+
+
+def transcript_path(video_id: str) -> str:
+    """Return the sharded repo-relative vault path for a video's transcript.
+
+    Transcripts are sharded by the first two chars of the video ID so that no
+    single directory exceeds HuggingFace's 10k-entries-per-directory limit
+    (e.g. ``transcripts/ab/<id>.json``).
+    """
+    prefix = video_id[:2] if len(video_id) >= 2 else video_id
+    return f"transcripts/{prefix}/{video_id}.json"
 
 
 def meta_path(video_id: str) -> str:

@@ -61,6 +61,15 @@ def evaluate_video(
             views=views,
         )
 
+    reupload_hit = _matches_reupload(item, thresholds.reupload_patterns)
+    if reupload_hit:
+        return QualityResult(
+            False,
+            f"re-upload match: {reupload_hit}",
+            duration_seconds=duration,
+            views=views,
+        )
+
     hours_since = _hours_since(snippet.get("publishedAt"), now)
     views_per_hour = views / hours_since if hours_since > 0 else float(views)
     if (
@@ -108,6 +117,22 @@ def _video_text(item: dict[str, Any]) -> str:
 
 def _matches_ai(item: dict[str, Any], patterns: tuple[re.Pattern[str], ...]) -> str | None:
     """Return the matching denylist pattern (or ``None``) for an AI-slop video."""
+    if not patterns:
+        return None
+    text = _video_text(item)
+    for pat in patterns:
+        if pat.search(text):
+            return pat.pattern
+    return None
+
+
+def _matches_reupload(item: dict[str, Any], patterns: tuple[re.Pattern[str], ...]) -> str | None:
+    """Return the matching denylist pattern (or ``None``) for a re-uploaded video.
+
+    Scans title, description, and tags for indicators of copyright-infringing
+    re-uploads (e.g. emojified network names like ``🅼🆂🅽🅱🅲`` for MSNBC).
+    These channels get DMCA'd within hours, so the tracker finds dead videos.
+    """
     if not patterns:
         return None
     text = _video_text(item)

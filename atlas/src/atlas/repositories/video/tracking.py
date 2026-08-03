@@ -20,44 +20,22 @@ def _to_int(v: Any) -> int | None:
 class VideoTrackingMixin(DatabaseAdapter):
     async def fetch_tracker_targets(self, batch_size: int = 50) -> list[Video]:
         now = datetime.now(UTC)
+        cooldown = now - timedelta(hours=1)
 
-        z1_cutoff = now - timedelta(hours=24)
-        z1_thresh = now - timedelta(hours=1)
-        z2_cutoff = now - timedelta(days=7)
-        z2_thresh = now - timedelta(hours=6)
-        z3_thresh = now - timedelta(hours=24)
-
+        # Track the whole eligible corpus, not just today's discoveries: order by
+        # staleness (never-tracked first, then oldest-tracked) so the long tail of
+        # previously-discovered videos is revisited instead of drifting stale
+        # forever. The 1h cooldown makes this a natural rotating queue — after a
+        # video is tracked it falls to the back and comes around again ~once per
+        # corpus-size/batch cycles, spreading YouTube quota evenly.
         query = """
-            WITH candidates AS (
-                SELECT *, 1 as zone FROM videos
-                WHERE published_at >= %s
-                  AND (last_updated_at IS NULL OR last_updated_at < %s)
-                UNION ALL
-                SELECT *, 2 as zone FROM videos
-                WHERE published_at < %s AND published_at >= %s
-                  AND (last_updated_at IS NULL OR last_updated_at < %s)
-                UNION ALL
-                SELECT *, 3 as zone FROM videos
-                WHERE published_at < %s
-                  AND (last_updated_at IS NULL OR last_updated_at < %s)
-            )
-            SELECT * FROM candidates
-            ORDER BY zone ASC, last_updated_at ASC NULLS FIRST
+            SELECT * FROM videos
+            WHERE status NOT IN ('ARCHIVED', 'FAILED')
+              AND (last_tracked_at IS NULL OR last_tracked_at < %s)
+            ORDER BY last_tracked_at ASC NULLS FIRST
             LIMIT %s
         """
-        rows = await self._fetch_all(
-            query,
-            (
-                z1_cutoff,
-                z1_thresh,
-                z1_cutoff,
-                z2_cutoff,
-                z2_thresh,
-                z2_cutoff,
-                z3_thresh,
-                batch_size,
-            ),
-        )
+        rows = await self._fetch_all(query, (cooldown, batch_size))
         return [Video.model_validate(r) for r in rows]
 
     async def log_stats_batch(self, stats_list: list[VideoStats]) -> None:
@@ -82,7 +60,7 @@ class VideoTrackingMixin(DatabaseAdapter):
         if not updates:
             return
 
-        timestamp_statement = "UPDATE videos SET last_updated_at = %s WHERE id = %s"
+        timestamp_statement = "UPDATE videos SET last_tracked_at = %s WHERE id = %s"
         log_statement = """
             INSERT INTO video_stats_log (video_id, views, likes, comment_count, timestamp)
             VALUES (%s, %s, %s, %s, %s)
@@ -110,12 +88,38 @@ class VideoTrackingMixin(DatabaseAdapter):
             await cur.executemany(log_statement, log_params)
             await cur.connection.commit()
 
+    async def mark_tracked(self, video_ids: list[str]) -> int:
+        """Advance ``last_tracked_at`` for videos without logging stats.
+
+        Called when the YouTube API returns no item for an id (deleted,
+        private, or geo-blocked). Bumps ``last_tracked_at`` so a permanently
+        unavailable video rotates out of the tracker queue front instead of
+        being re-queried on every 60s cycle forever (mirrors the streamer's
+        retry cooldown). Returns the number of videos marked.
+        """
+        if not video_ids:
+            return 0
+
+        now = datetime.now(UTC)
+        rows = await self._fetch_all(
+            """
+            UPDATE videos
+            SET last_tracked_at = %s
+            WHERE id = ANY(%s)
+            RETURNING id
+            """,
+            (now, video_ids),
+        )
+        return len(rows)
+
     async def pipeline_snapshot(self) -> dict[str, Any]:
         """Return a point-in-time snapshot of pipeline health for reporting.
 
         Includes lifecycle status counts, total videos, transcript / visual
-        coverage, and the number of videos discovered in the last hour.
+        coverage, tracker metrics, and pipeline velocity.
         """
+        now = datetime.now(UTC)
+
         status_rows = await self._fetch_all(
             "SELECT status, COUNT(*) AS c FROM videos GROUP BY status"
         )
@@ -134,6 +138,23 @@ class VideoTrackingMixin(DatabaseAdapter):
             or 0
         )
 
+        tracked_ever = await self._fetch_scalar(
+            "SELECT COUNT(*) FROM videos WHERE last_tracked_at IS NOT NULL"
+        ) or 0
+        tracked_1h = await self._fetch_scalar(
+            "SELECT COUNT(*) FROM videos WHERE last_tracked_at > %s", (now - timedelta(hours=1),)
+        ) or 0
+        tracked_24h = await self._fetch_scalar(
+            "SELECT COUNT(*) FROM videos WHERE last_tracked_at > %s", (now - timedelta(hours=24),)
+        ) or 0
+
+        stats_log_size = await self._fetch_scalar("SELECT COUNT(*) FROM video_stats_log") or 0
+
+        pipeline_phase_rows = await self._fetch_all(
+            "SELECT COALESCE(pipeline_phase, 'NONE') AS phase, COUNT(*) AS c FROM videos GROUP BY pipeline_phase"
+        )
+        phase_counts = {r["phase"]: r["c"] for r in pipeline_phase_rows}
+
         return {
             "total": total,
             "status_counts": status_counts,
@@ -141,4 +162,9 @@ class VideoTrackingMixin(DatabaseAdapter):
             "with_visuals": with_visuals,
             "audios": audios,
             "ingested_1h": ingested_1h,
+            "tracked_ever": tracked_ever,
+            "tracked_1h": tracked_1h,
+            "tracked_24h": tracked_24h,
+            "stats_log_size": stats_log_size,
+            "phase_counts": phase_counts,
         }

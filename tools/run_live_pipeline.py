@@ -267,10 +267,14 @@ async def _verify(video_id: str, channel_id: Optional[str]) -> List[Tuple[str, b
         )
     )
 
-    transcripts = v.list_files(f"transcripts/{video_id}.json")
+    from atlas.vault import transcript_path
+
+    transcripts = v.list_files(transcript_path(video_id)) or v.list_files(
+        f"transcripts/{video_id}.json"
+    )
     results.append(
         (
-            f"vault transcripts/{video_id}.json exists",
+            f"vault transcript {video_id} exists",
             len(transcripts) > 0,
             f"{len(transcripts)} matches",
         )

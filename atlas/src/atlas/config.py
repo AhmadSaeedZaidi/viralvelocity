@@ -169,6 +169,18 @@ class Settings(BaseSettings):  # type: ignore[misc]
         ),
     )
 
+    # Re-upload detection: matches emojified network names (e.g. 🅼🆂🅽🅱🅲 for
+    # MSNBC, 🅱🅱🅲 for BBC) in video titles — a hallmark of copyright-infringing
+    # re-upload channels that get DMCA'd within hours. The default matches any
+    # 2+ consecutive characters from the Enclosed Alphanumeric Supplement block
+    # (U+1F170-U+1F1FF: Negative Squared / Squared Latin letters).
+    QUALITY_REUPLOAD_DENYLIST: list[str] = Field(
+        default_factory=lambda: [
+            r"[\U0001F170-\U0001F1FF]{2,}",
+        ],
+        description="Regexes (title/description/tags) indicating copyrighted re-uploaded content.",
+    )
+
     SEARCH_QUEUE_MENTION_WEIGHT: float = Field(
         1.5, description="Weight applied to mention_count in the queue score."
     )
@@ -177,6 +189,29 @@ class Settings(BaseSettings):  # type: ignore[misc]
     )
     SEARCH_QUEUE_CULL_BELOW: float = Field(
         0.0, description="Janitor deletes queue terms whose score drops below this."
+    )
+
+    # ── Adaptive scheduling (Tracker decay) ──────────────────────────────────
+    # Tier by age (baseline) then adjust by view velocity (views/hour measured
+    # across the video's two most recent video_stats_log samples).
+    #   * velocity >= HOT  → boosted to HOURLY (stays hourly past the age cutoffs)
+    #   * velocity <= DEAD → dropped one tier faster (dead videos recede sooner)
+    #   * otherwise        → age floor applies unchanged
+    # A video is never tracked more often than hourly and never less than weekly.
+    TRACKER_AGE_HOURLY_HOURS: float = Field(
+        24.0,
+        description="Videos published within this many hours are tracked hourly.",
+    )
+    TRACKER_AGE_DAILY_DAYS: float = Field(
+        7.0,
+        description="Videos published within this many days are tracked daily.",
+    )
+    TRACKER_HOT_VIEWS_PER_HOUR: float = Field(
+        50.0, description="Views/hour above which a video is boosted to HOURLY tracking."
+    )
+    TRACKER_DEAD_VIEWS_PER_HOUR: float = Field(
+        1.0,
+        description="Views/hour at/below which a video drops one tier faster.",
     )
 
     @model_validator(mode="after")

@@ -15,6 +15,7 @@ from maia.quality.duration import parse_iso8601_duration
 from maia.quality.enrich import filter_by_quality
 from maia.quality.gates import (
     _matches_ai,
+    _matches_reupload,
     evaluate_channel,
     evaluate_video,
 )
@@ -31,4 +32,5 @@ __all__ = [
     "parse_iso8601_duration",
     "is_youtube_short",
     "_matches_ai",
+    "_matches_reupload",
 ]

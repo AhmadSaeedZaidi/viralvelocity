@@ -22,6 +22,11 @@ dependencies = [
     "aiohttp>=3.9.3,<4.0.0",
     "orjson>=3.9.15,<4.0.0",
     "sqlparse>=0.4.4,<1.0.0",
+    # Prefect 2.20.x's GatherTaskGroup subclasses anyio's TaskGroup, whose
+    # create_task became an abstract method in anyio 4.5. Any anyio >= 4.5
+    # makes GatherTaskGroup impossible to instantiate and CRASHES every flow
+    # that uses gather (all agents). Pin below 4.5 until Prefect is upgraded.
+    "anyio>=4.4.0,<4.5.0",
 ]
 
 [tool.setuptools.package-data]

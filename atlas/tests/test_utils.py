@@ -87,9 +87,14 @@ def test_resiliency_raises_quota_exhausted_not_sys_exit(fixed_key_rings):
     assert asyncio.run(run()) == "raised"
 
 
-def test_is_quota_error_not_triggered_by_bare_403(fixed_key_rings):
-    """A private/region-blocked 403 is not a quota error (regression test)."""
+def test_is_quota_error_detects_key_and_quota_errors(fixed_key_rings):
+    """403 (revoked key), 429, and quota strings all trigger rotation.
+
+    The KeyRing is used for keyed YouTube Data API calls (search/list), so a
+    403 means the key is dead and must rotate to a live key rather than being
+    raised as a non-retryable "private video" error.
+    """
     ex = ResiliencyExecutor(KeyRing("hunting"), "tester")
     assert ex._is_quota_error(RuntimeError("429 Too Many Requests")) is True
     assert ex._is_quota_error(RuntimeError("quotaExceeded")) is True
-    assert ex._is_quota_error(RuntimeError("403 Forbidden: video is private")) is False
+    assert ex._is_quota_error(RuntimeError("403 Forbidden: key revoked")) is True

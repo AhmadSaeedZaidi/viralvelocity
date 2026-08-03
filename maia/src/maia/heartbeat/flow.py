@@ -234,11 +234,30 @@ def _build_fields(services: dict[str, tuple[str, str]], metrics: dict[str, Any])
         f"Ingested (1h): **{metrics['ingested_1h']}**"
     )
 
+    phases = metrics.get("phase_counts", {})
+    phase_line = (
+        f"RAW: **{phases.get('RAW', 0)}** | "
+        f"AUDIO: **{phases.get('AUDIO', 0)}** | "
+        f"VISUALS: **{phases.get('VISUALS', 0)}** | "
+        f"TRANSCRIPT: **{phases.get('TRANSCRIPT', 0)}** | "
+        f"CLIP: **{phases.get('CLIP', 0)}** | "
+        f"NONE: **{phases.get('NONE', 0)}**"
+    )
+
+    tracker_line = (
+        f"Ever tracked: **{metrics.get('tracked_ever', 0)}**\n"
+        f"Tracked (1h): **{metrics.get('tracked_1h', 0)}**\n"
+        f"Tracked (24h): **{metrics.get('tracked_24h', 0)}**\n"
+        f"Stats log rows: **{metrics.get('stats_log_size', 0)}**"
+    )
+
     return {
         "Executor": executor_line,
         "Deployments": deployments_line,
         "Pipeline": pipeline_line,
         "Content": content_line,
+        "Phases": phase_line,
+        "Tracker": tracker_line,
     }
 
 

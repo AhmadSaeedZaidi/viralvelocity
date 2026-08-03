@@ -60,6 +60,16 @@ scheduled. Singer and painter (priority 7-8) were also starved. Result: no new
 raw videos were fetched → audio/visual extraction sat idle despite 23,741
 PENDING raw videos.  This was fixed on 2026-07-14.
 
+### Why (thread exhaustion)
+The 2026-07-13 incident was about **scheduling** (priority starvation). The
+2026-08-03 change is about **execution cost**: each flow run spawned a full
+`python -m prefect.engine` subprocess (~17 threads, 170-400 MB RSS); 9 slots ×
+17 threads ≈ 153 routinely blew the `TasksMax` ceiling → `can't start new
+thread`. See §8 — an in-process orchestrator now drives the same flows on one
+asyncio loop with no subprocess per cycle.
+
+### Why
+
 Current configuration:
 
   - **Work pool `default`** — global `concurrency_limit = 9` (one slot per queue).
@@ -103,9 +113,9 @@ Never assume a large `limit` is accepted.
 - **Micro** `/etc/systemd/system/prefect-server.service` — key line:
   `Environment=PREFECT_SERVER_DATABASE_CONNECTION_URL=sqlite+aiosqlite:////opt/prefect/prefect.db?timeout=30`
   (the `?timeout=30` raises SQLite `busy_timeout` 5s→30s so writes retry instead of 503-ing).
-- **This VPS** `/etc/systemd/system/prefect-worker.service` — `PREFECT_API_URL=http://10.0.0.22:4200/api`,
-  plus cgroup backstop `CPUQuota=180%` / `TasksMax=120` (so the box can never be fully saturated even
-  if Prefect misconfigures).
+- **This VPS** `/etc/systemd/system/prefect-orchestrator.service` — `PREFECT_API_URL=http://10.0.0.22:4200/api`,
+  cgroup `CPUQuota=180%` / `TasksMax=256` / `MemoryMax=4G`; runs the fleet in-process (see §8).
+  The old `prefect-worker.service` is disabled (rollback path in §8).
 - **Repo** `prefect.yaml` — 9 deployments; each `work_pool.work_queue_name` points to its own queue.
 
 ---
@@ -121,7 +131,9 @@ cd /home/ubuntu/code/pleiades
 
 | Task | Command |
 |------|---------|
-| Worker status / restart | `systemctl status prefect-worker` / `sudo systemctl restart prefect-worker` |
+| Orchestrator status / restart | `systemctl status prefect-orchestrator` / `sudo systemctl restart prefect-orchestrator` |
+| Watch fleet cycles | `sudo journalctl -u prefect-orchestrator -f` |
+| (Rollback) legacy worker | `prefect-worker` is disabled; see §8 rollback |
 | List deployments | `prefect deployment ls` |
 | Pool + limit | `prefect work-pool inspect default` |
 | Set global pool limit | `prefect work-pool set-concurrency-limit default 9` |
@@ -200,7 +212,7 @@ any `RUNNING`/`CANCELLED`/`CRASHED` orphans.
 - If it runs but fails, check the run's state message (Discord webhook/creds).
 
 ### D. CPU saturation (load >> cores)
-- Confirm cgroup backstop: `systemctl cat prefect-worker | grep -E 'CPUQuota|TasksMax'`.
+- Confirm cgroup backstop: `systemctl cat prefect-orchestrator | grep -E 'CPUQuota|TasksMax'`.
 - Confirm pool `concurrency_limit=9` and per-deployment queues `limit=1` are intact (§3). A redeploy
   that reverted `work_queue_name` to `default` would let one deployment grab multiple slots.
 
@@ -260,5 +272,81 @@ Fix: `prefect work-pool set-concurrency-limit default 9`.
   `has_video=FALSE`, `clip_phase=PENDING`) are claimed by muralist and were marked FAILED by a manual
   run. Not blocking; decide separately whether to make the clip stage non-blocking for `PROCESSED`.
 - **Orchestration DB on SQLite** → residual lock-noise under load. Postgres migration is the durable fix.
+- **Janitor archival was shrinking heartbeat values — FIXED (2026-08-03).** The janitor's
+  hand-off phase (atlas `VideoJanitorMixin`) unconditionally ran `UPDATE videos SET has_transcript/
+  has_audio/has_visuals = FALSE` + `DELETE FROM transcripts` + `DELETE FROM video_stats_log` for every
+  swept `PROCESSED` video — **with no check that the transcript content had ever reached the vault**.
+  Two consequences:
+    - **Metrics regression:** the heartbeat's `pipeline_snapshot` counts the hot tier
+      (`transcripts`, `with_visuals`, `audios`, `stats_log_size`). Every cycle that archival ran,
+      these numbers dropped → the fleet status looked like it was losing data.
+    - **Potential data loss:** `vault_flush_task` only flushes transcripts where
+      `vault_write_pending=TRUE OR vault_uri IS NULL`. If the janitor's sweep+hand-off ran *before*
+      the flush for a video, the transcript row was DELETEd with its content never written to the
+      vault — irreversibly. Confirmed live: `SuPwt5XJuRU` had `has_transcript=True` at archive yet
+      `fetch_transcript()` is empty.
+   **Fix (both ships):** the sweep/count queries are now gated by `_VAULT_SAFE_CLAUSE` — a video is
+   only archivable when `vault_write_pending IS NOT TRUE` and no transcript row has
+   `vault_uri IS NULL`. Defense-in-depth: `archive_video_batch` also refuses to purge a video whose
+   transcript still lacks a vault `vault_uri`. `archive_cold_stats_task` already deleted cold-stats
+   only after a successful vault append, so it was left unchanged. Regression tests:
+   `atlas/tests/test_janitor_vault_gate.py`. Verified live: the newest archived video's transcript
+   is present in the vault. Note: this guards *future* archival; it does not retroactively rescue
+   already-deleted unflushed transcripts.
 - Source lives on the `hy3-work` branch (committed + pushed); see `docs/deploy.md` for the reproduce
   script (`tools/setup_orchestration.py`) and `docs/CHALLENGES.md` for the engineering log.
+
+---
+
+## 8. In-process orchestrator (2026-08-03) — replaces the subprocess worker
+
+### Why
+The scheduler + `prefect worker start --type process` model spawned a **full
+`python -m prefect.engine` subprocess per flow run** (~17 threads,
+170-400 MB RSS each). With 9 flow slots that regularly exceeded the worker's
+systemd `TasksMax=120` ceiling → `RuntimeError: can't start new thread`, plus
+~250 MB + ~17 threads of pure interpreter churn on every 60-900s cycle.
+
+### What changed
+- **New** `maia/src/maia/orchestrator.py` — a single long-running asyncio
+  process that calls each deployment's `@flow` entrypoint **in-process**.
+  Because `PREFECT_API_URL` is set, Prefect still creates a real flow run in
+  the micro control plane (so `get_run_logger()`, retries, and run telemetry
+  all keep working) — there is just **no subprocess spawn** per cycle.
+- **New** systemd unit `/etc/systemd/system/prefect-orchestrator.service`
+  (`TasksMax=256`, `MemoryMax=4G`, `CPUQuota=180%`), enabled + active.
+- The old `prefect-worker.service` was **stopped and disabled**. Schedules for
+  all 9 deployments were **paused** (`prefect deployment schedule pause ...`)
+  so the scheduler no longer creates runs — only the orchestrator's in-process
+  loops drive cycles now. Cycle cadence/params mirror `prefect.yaml`.
+
+### Manage
+```bash
+sudo systemctl status/restart prefect-orchestrator   # must be active (running)
+sudo journalctl -u prefect-orchestrator -f            # watch cycles
+```
+Intervals: tracker 60s, streamer/painter/scribe 120s, singer/hunter 300s,
+archeologist 600s, heartbeat/janitor 900s. Agent `kwargs` match `prefect.yaml`.
+
+### ROLLBACK (restore the old subprocess worker)
+1. Delete/disable the orchestrator: `sudo systemctl disable --now prefect-orchestrator`.
+   (Optional: `sudo rm /etc/systemd/system/prefect-orchestrator.service && sudo systemctl daemon-reload`.)
+2. Re-enable the worker: `sudo systemctl enable --now prefect-worker` (it still
+   exists; only stopped/disabled).
+3. Resume the 9 deployment schedules. Each pair is `<flow>/<deployment>`:
+   ```bash
+   export PREFECT_API_URL=http://10.0.0.22:4200/api
+   for d in run_streamer_cycle/streamer run_painter_cycle/painter run_scribe_cycle/scribe \
+            run_hunter_cycle/hunter run_tracker_cycle/tracker run_archeology_campaign/archeologist \
+            janitor_cycle/janitor heartbeat_cycle/heartbeat run_singer_cycle/singer; do
+     prefect deployment schedule resume "$d"
+   done
+   ```
+   If `resume` needs a schedule ID, read it from `prefect deployment schedule ls "$d"`.
+4. Verify the worker starts runs again (`prefect flow-run ls --state RUNNING`).
+
+### Monitoring note
+`pids.current` in the orchestrator cgroup stays ~26-40 (was 120+ thrashing);
+the box idles instead of re-spawning interpreters. hunter/archeologist still
+fail on YouTube API **daily quota** (pre-existing, unrelated) — their loops
+swallow the error and retry on the next interval.

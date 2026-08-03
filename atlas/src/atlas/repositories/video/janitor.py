@@ -15,15 +15,32 @@ logger = logging.getLogger("atlas.repositories.video.janitor")
 
 _ARCHIVAL_BATCH_SIZE = 100
 
+# A video is only safe to archive (drop from the hot tier) once its transcript
+# content is confirmed stored in the vault. Otherwise the hand-off phase would
+# DELETE the transcript row and zero has_* flags with the content never having
+# left the hot DB — silently destroying it (and making the heartbeat report
+# fabricated data loss). This clause excludes any video that:
+#   - still has a vault flush pending (scheduler's vault_flush_task hasn't run), or
+#   - has a transcript row whose content was never written to the vault.
+_VAULT_SAFE_CLAUSE = """
+  AND (vault_write_pending IS NOT TRUE)
+  AND NOT EXISTS (
+      SELECT 1 FROM transcripts t
+      WHERE t.video_id = videos.id
+        AND t.vault_uri IS NULL
+  )
+"""
+
 
 class VideoJanitorMixin(DatabaseAdapter):
     async def sweep_archivable(self, batch_size: int = _ARCHIVAL_BATCH_SIZE) -> list[Video]:
         cutoff = datetime.now(UTC) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
         rows = await self._fetch_all(
-            """
+            f"""
             SELECT * FROM videos
             WHERE status = 'PROCESSED'
               AND last_updated_at < %s
+              {_VAULT_SAFE_CLAUSE}
             ORDER BY last_updated_at ASC
             LIMIT %s
             FOR UPDATE SKIP LOCKED
@@ -35,10 +52,11 @@ class VideoJanitorMixin(DatabaseAdapter):
     async def count_archivable(self) -> int:
         cutoff = datetime.now(UTC) - timedelta(days=settings.JANITOR_RETENTION_DAYS)
         row = await self._fetch_one(
-            """
+            f"""
             SELECT COUNT(*) as total FROM videos
             WHERE status = 'PROCESSED'
               AND last_updated_at < %s
+              {_VAULT_SAFE_CLAUSE}
             """,
             (cutoff,),
         )
@@ -159,13 +177,35 @@ class VideoJanitorMixin(DatabaseAdapter):
                         )
 
                 now = datetime.now(UTC)
+                # Defense-in-depth: never destroy transcript/stats/flag data that
+                # hasn't been confirmed in the vault. The sweep gate normally
+                # prevents these rows from ever being selected, but if a caller
+                # bypasses it we must not silently lose content.
+                unsafe = await self._fetch_one(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM transcripts t
+                        WHERE t.video_id = %s AND t.vault_uri IS NULL
+                    ) AS unvaulted
+                    """,
+                    (video.id,),
+                )
+                if unsafe and unsafe.get("unvaulted"):
+                    raise RuntimeError(
+                        f"Refusing to archive {video.id}: transcript not confirmed "
+                        "in vault (vault_uri IS NULL)"
+                    )
                 async with self._connection() as conn, conn.transaction():
                     await conn.execute(
                         """
                             UPDATE videos
-                            SET status = 'ARCHIVED', archived_at = %s
+                            SET status = 'ARCHIVED',
+                                archived_at = %s,
+                                has_transcript = FALSE,
+                                has_audio = FALSE,
+                                has_visuals = FALSE
                             WHERE id = %s
-                            """,
+                        """,
                         (now, video.id),
                     )
                     await conn.execute(

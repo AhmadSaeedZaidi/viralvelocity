@@ -201,3 +201,38 @@ The `docs/agent-consolidation-proposal.md` is **partially** implemented:
   oversized flow files), P4 doc refresh (`docs/architecture.md` / `docs/testing.md`
   still describe the old CI-runner world).
 - **Open hardening:** migrate the orchestration DB from SQLite to Postgres.
+
+---
+
+## 14. HF 10k-files-per-directory limit killed the vault migration (resolved)
+
+**Symptom:** the vault migration (`tools/migrate_vault.py --apply`) crashed with
+`RuntimeError: Batch commit failed after 8 attempts` and log lines:
+`Your push was rejected because it contains too many files per directory. Each directory
+in your git repo can only contain up to 10000 files. Offending directories: /transcripts/`.
+
+**Root causes (two, distinct):**
+1. **Unreliable diff source.** The script listed files via the HF HTTP `siblings`
+   endpoint, which truncates above ~1k files. It reported 27,724 "missing" (== every
+   source keep-prefix file) and mass re-uploaded files that already existed in the
+   target, silently inflating the transcripts dir toward the limit.
+2. **HF hard limit.** The clean vault's `transcripts/` already held 9,990 flat files
+   (written by the pipeline during the earlier vault mixup), and HF rejects any commit
+   that would put >10k entries in a directory.
+
+**Fix:**
+- **Authoritative listing:** switch to git trees (`git clone --no-checkout --depth 1
+  --filter=blob:none` + `git ls-tree -r --name-only HEAD`). Correct missing set is
+  **10,021** (28 raw + 9,993 transcripts); audio/metadata already complete.
+- **Transcript sharding:** new transcripts are written as
+  `transcripts/{video_id[:2]}/{video_id}.json` via `atlas.vault.transcript_path`.
+  `fetch_transcript` tries the sharded path first, then the legacy flat path.
+  Sharded writes also flow through `janitor/flow.py`, `purge.py`, `run_live_pipeline.py`,
+  and the e2e test.
+- **Verified empirically:** a probe commit confirmed subdirectories do **not** count
+  toward a parent directory's 10k-entry limit, so the 9,990 legacy flat transcripts can
+  stay in place.
+
+**Also fixed on the way:** the earlier `.env` vault-mixup investigation (518 FAILED
+videos) is documented in `docs/vault-migration.md`. The migration is diff-based and
+resumable; post-migration the cookies file must be restored and the worker restarted.

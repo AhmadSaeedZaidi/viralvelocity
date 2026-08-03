@@ -24,6 +24,8 @@ class QualityThresholds:
 
     ai_patterns: tuple[re.Pattern[str], ...] = ()
 
+    reupload_patterns: tuple[re.Pattern[str], ...] = ()
+
     min_subscribers: int = 50
     max_videos_per_day: float = 20.0
     max_videos_per_subscriber: float = 5.0
@@ -40,6 +42,7 @@ class QualityThresholds:
             shorts_head_timeout=s.QUALITY_SHORTS_HEAD_TIMEOUT,
             shorts_head_concurrency=s.QUALITY_SHORTS_HEAD_CONCURRENCY,
             ai_patterns=tuple(re.compile(p, re.IGNORECASE) for p in s.QUALITY_AI_DENYLIST),
+            reupload_patterns=tuple(re.compile(p, re.IGNORECASE) for p in s.QUALITY_REUPLOAD_DENYLIST),
             min_subscribers=s.QUALITY_MIN_SUBSCRIBERS,
             max_videos_per_day=s.QUALITY_MAX_VIDEOS_PER_DAY,
             max_videos_per_subscriber=s.QUALITY_MAX_VIDEOS_PER_SUBSCRIBER,

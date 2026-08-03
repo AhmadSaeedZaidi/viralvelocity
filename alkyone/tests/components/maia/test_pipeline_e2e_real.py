@@ -204,7 +204,7 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
 
     print("[e2e] verifying vault artifacts…")
     from atlas.config import settings
-    from atlas.vault import get_vault
+    from atlas.vault import get_vault, transcript_path
     from huggingface_hub import HfApi
 
     if settings.VAULT_PROVIDER == "huggingface":
@@ -215,7 +215,12 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
         api = HfApi(token=hf_token)
         files = api.list_repo_files(repo_id=hf_dataset, repo_type="dataset")
         frames = [f for f in files if f.startswith(f"frames/{VIDEO_ID}/")]
-        transcripts = [f for f in files if f == f"transcripts/{VIDEO_ID}.json"]
+        transcripts = [
+            f
+            for f in files
+            if f == f"transcripts/{VIDEO_ID}.json"
+            or f.endswith(f"/{VIDEO_ID}.json") and f.startswith("transcripts/")
+        ]
 
         assert len(frames) > 0, (
             f"No frames in vault {hf_dataset!r} for {VIDEO_ID}. Painter ran but did not upload."
@@ -234,7 +239,9 @@ async def test_full_pipeline_real_blender(video_repo, channel_repo):
     else:
         v = get_vault()
         assert len(v.list_files(f"frames/{VIDEO_ID}/")) > 0
-        assert len(v.list_files(f"transcripts/{VIDEO_ID}.json")) == 1
+        sharded = v.list_files(transcript_path(VIDEO_ID))
+        flat = v.list_files(f"transcripts/{VIDEO_ID}.json")
+        assert len(sharded) + len(flat) == 1
 
     print("[e2e] ALL CHECKS PASSED — full pipeline produced real artifacts on real infra.")
 

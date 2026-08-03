@@ -116,6 +116,14 @@ class KeyRing:
 
         self._iterator: itertools.cycle[str] = itertools.cycle(self.keys)
 
+        # Keys observed to fail with an unrecoverable auth/quota error (e.g. a
+        # revoked API key returning 403). Blacklisted keys are never handed out
+        # again within this process so a few dead keys can't wedge the whole
+        # ring. The ring recovers automatically as soon as at least one live key
+        # remains; if *every* key is blacklisted the ring is genuinely exhausted.
+        self._dead_keys: set[str] = set()
+        self._live_keys: list[str] = list(self.keys)
+
         # A monotonic counter guarantees unique session ids so concurrent
         # calls never clobber each other's attempt counts.
         self._session_counter = itertools.count()
@@ -127,6 +135,27 @@ class KeyRing:
         """Get the next key from the infinite cycle."""
         return next(self._iterator)
 
+    def mark_key_dead(self, key: str) -> None:
+        """Permanently exclude ``key`` from this ring for the process lifetime.
+
+        Called when a key fails with an unrecoverable auth/quota error so the
+        ring keeps working with its remaining live keys instead of cycling back
+        onto the same dead key.
+        """
+        if key in self._dead_keys:
+            return
+        self._dead_keys.add(key)
+        self._live_keys = [k for k in self.keys if k not in self._dead_keys]
+        logger.warning(
+            f"KeyRing '{self.pool_name}': blacklisted dead key {key[-6:]} "
+            f"({len(self._live_keys)}/{len(self.keys)} still live)"
+        )
+
+    @property
+    def live_size(self) -> int:
+        """Number of keys still considered usable."""
+        return len(self._live_keys) or len(self.keys)
+
     def start_session(self, session_id: int | None = None) -> int:
         """Start a new exhaustible rotation session; allocates a unique id if
         none given. Returns the session id."""
@@ -137,13 +166,14 @@ class KeyRing:
         return session_id
 
     def get_session_key(self, session_id: int) -> str:
-        """Return the next key for this session (round-robin through the pool)."""
+        """Return the next key for this session, skipping blacklisted keys."""
         attempt = self._current_session_attempts.get(session_id, 0)
-        key_index = attempt % len(self.keys)
-        return self.keys[key_index]
+        pool = self._live_keys if self._live_keys else self.keys
+        key_index = attempt % len(pool)
+        return pool[key_index]
 
     def attempt_rotation(self, session_id: int) -> bool:
-        """Rotate to the next key; return True if more keys remain, False if exhausted."""
+        """Rotate to the next key; return True if more live keys remain, False if exhausted."""
         if session_id not in self._current_session_attempts:
             logger.warning(f"Session {session_id} not found, initializing")
             self._current_session_attempts[session_id] = 0
@@ -151,15 +181,15 @@ class KeyRing:
         self._current_session_attempts[session_id] += 1
         attempts = self._current_session_attempts[session_id]
 
-        has_more = attempts < len(self.keys)
+        has_more = attempts < self.live_size
 
         if has_more:
             logger.info(
-                f"KeyRing '{self.pool_name}': Rotating to key {attempts + 1}/{len(self.keys)}"
+                f"KeyRing '{self.pool_name}': Rotating to key {attempts + 1}/{self.live_size}"
             )
         else:
             logger.critical(
-                f"KeyRing '{self.pool_name}': All {len(self.keys)} keys exhausted"
+                f"KeyRing '{self.pool_name}': All {self.live_size} live keys exhausted"
                 f" for session {session_id}"
             )
 
@@ -215,6 +245,14 @@ class ResiliencyExecutor:
 
                     if is_quota_error:
                         self.logger.warning(f"Quota error with key {key[-6:]}: {e}")
+                        # A 403 (revoked/invalid key) is permanently dead for
+                        # this process; blacklist it so the ring keeps working
+                        # with its remaining live keys. A 429 is a transient
+                        # rate-limit and must NOT be blacklisted — it recovers
+                        # after the quota window resets, and blacklisting it
+                        # would eventually exhaust the whole fleet.
+                        if "http 403" in str(e).lower() or "http 401" in str(e).lower():
+                            self.key_ring.mark_key_dead(key)
 
                         if self.key_ring.attempt_rotation(session_id):
                             continue  # Retry with next key
@@ -241,23 +279,27 @@ class ResiliencyExecutor:
             self.key_ring.end_session(session_id)
 
     def _is_quota_error(self, exception: Exception) -> bool:
-        """Detect quota errors, deliberately excluding bare 403 (private/region-blocked videos)."""
+        """Detect quota/key-exhaustion errors that warrant rotating to the next key.
+
+        ``403`` from the YouTube Data API almost always means the API key is
+        revoked or invalid (a *dead* key) — the ring is used for keyed
+        search/list calls, so a 403 must trigger rotation to a live key rather
+        than being raised as non-retryable. ``429`` is a *transient* rate-limit
+        and also rotates, but the caller must NOT permanently blacklist a 429'd
+        key (it recovers after the quota window resets).
+        """
         error_str = str(exception).lower()
-
-        # Exclude bare 403 (often a private/region-blocked video, and YouTube may
-        # embed "quotaExceeded" in its body); the word-boundary check avoids matching "34038".
-        if "http 403" in error_str:
-            return False
-
-        # Common quota error indicators
+        # HTTP status codes (with or without the "http" prefix) signal key
+        # problems: 401/403 = revoked/dead key, 429 = transient rate-limit.
+        # Both must rotate to the next key.
+        if any(f"{code}" in error_str for code in ("http 401", "http 403", "http 429", "401", "403", "429")):
+            return True
         quota_indicators = [
             "quota",
             "rate limit",
-            "429",
             "quotaexceeded",
             "usagelimit",
         ]
-
         return any(indicator in error_str for indicator in quota_indicators)
 
 

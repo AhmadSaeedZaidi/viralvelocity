@@ -13,12 +13,14 @@ deployments:
       batch_size: 5
     schedule:
       interval: 120
-    env:
-      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
-      VAULT_PROVIDER: huggingface
-      COMPLIANCE_MODE: "false"
-      HOME: /home/ubuntu
-      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+    job_variables:
+      env:
+        PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+        VAULT_PROVIDER: huggingface
+        COMPLIANCE_MODE: "false"
+        HOME: /home/ubuntu
+        YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+        YOUTUBE_PROXY: socks5h://127.0.0.1:1090
 
   - name: singer
     entrypoint: maia/src/maia/singer/flow.py:singer_flow
@@ -30,12 +32,14 @@ deployments:
       batch_size: 10
     schedule:
       interval: 300
-    env:
-      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
-      VAULT_PROVIDER: huggingface
-      COMPLIANCE_MODE: "false"
-      HOME: /home/ubuntu
-      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+    job_variables:
+      env:
+        PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+        VAULT_PROVIDER: huggingface
+        COMPLIANCE_MODE: "false"
+        HOME: /home/ubuntu
+        YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+        YOUTUBE_PROXY: socks5h://127.0.0.1:1090
 
   - name: painter
     entrypoint: maia/src/maia/painter/flow.py:painter_flow
@@ -47,12 +51,14 @@ deployments:
       batch_size: 5
     schedule:
       interval: 120
-    env:
-      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
-      VAULT_PROVIDER: huggingface
-      COMPLIANCE_MODE: "false"
-      HOME: /home/ubuntu
-      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+    job_variables:
+      env:
+        PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+        VAULT_PROVIDER: huggingface
+        COMPLIANCE_MODE: "false"
+        HOME: /home/ubuntu
+        YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+        YOUTUBE_PROXY: socks5h://127.0.0.1:1090
 
   - name: scribe
     entrypoint: maia/src/maia/scribe/flow.py:scribe_flow
@@ -64,12 +70,14 @@ deployments:
       batch_size: 10
     schedule:
       interval: 120
-    env:
-      PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
-      VAULT_PROVIDER: huggingface
-      COMPLIANCE_MODE: "false"
-      HOME: /home/ubuntu
-      YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+    job_variables:
+      env:
+        PYTHONPATH: /home/ubuntu/code/pleiades/atlas/src:maia/src
+        VAULT_PROVIDER: huggingface
+        COMPLIANCE_MODE: "false"
+        HOME: /home/ubuntu
+        YOUTUBE_COOKIES_PATH: /home/ubuntu/code/pleiades/www.youtube.cookies.txt
+        YOUTUBE_PROXY: "socks5h://127.0.0.1:1090,direct"
 
   - name: hunter
     entrypoint: maia/src/maia/hunter/flow.py:run_hunter_cycle

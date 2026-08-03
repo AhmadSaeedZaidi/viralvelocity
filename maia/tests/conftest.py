@@ -124,3 +124,16 @@ def mock_tracker_target() -> dict[str, Any]:
         "published_at": "2023-01-01T00:00:00Z",
         "last_updated_at": None,
     }
+
+
+@pytest.fixture
+def mock_watchlist_item() -> dict[str, Any]:
+    """Mock watchlist item returned by fetch_batch."""
+    return {
+        "video_id": "dQw4w9WgXcQ",
+        "tracking_tier": "HOURLY",
+        "last_tracked_at": None,
+        "next_track_at": "2023-01-01T00:00:00Z",
+        "created_at": "2023-01-01T00:00:00Z",
+        "published_at": "2023-01-01T00:00:00Z",
+    }

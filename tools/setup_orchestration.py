@@ -32,7 +32,7 @@ import os
 import sys
 
 from prefect.client.orchestration import get_client
-from prefect.client.schemas.actions import WorkPoolUpdate
+from prefect.client.schemas.actions import DeploymentUpdate, WorkPoolUpdate
 
 POOL_NAME = "default"
 # Global ceiling for the 2-core executor. Set to the number of queues (9) so
@@ -93,30 +93,59 @@ async def main() -> int:
         print(f"work pool '{POOL_NAME}': concurrency_limit -> {GLOBAL_CONCURRENCY_LIMIT}")
 
         # --- per-deployment work queues ---
+        # NON-DESTRUCTIVE: create a queue only if missing, otherwise UPDATE it in
+        # place. We deliberately do NOT delete+recreate queues.
+        #
+        # WHY (hard-won): deleting a work queue reassigns/orphans the `work_queue_id`
+        # of every already-SCHEDULED run that pointed at it. Recreation mints a NEW
+        # queue id, so those pending runs (and any deployment whose pool binding gets
+        # dropped in the churn) end up with `work_queue_id=None` — the worker polls
+        # the fresh queues but the server never hands it the stranded runs, so every
+        # agent freezes indefinitely. That is far worse than the transient +1h
+        # `expected_start_time` wedge the delete was meant to cure. The correct cure
+        # for a genuine scheduler wedge is to reap the stale non-terminal runs (see
+        # `reap_orphaned_runs` below) and/or restart the worker — never to delete the
+        # queue out from under live runs.
         existing = {q.name: q for q in await client.read_work_queues(work_pool_name=POOL_NAME)}
         for name, priority in QUEUES:
             if name in existing:
-                q = existing[name]
-                changes = []
-                if q.concurrency_limit != 1:
-                    changes.append(f"limit {q.concurrency_limit}->1")
-                if q.priority != priority:
-                    changes.append(f"priority {q.priority}->{priority}")
-                await client.update_work_queue(q.id, concurrency_limit=1, priority=priority)
-                suffix = f" ({', '.join(changes)})" if changes else " (already correct)"
-                print(f"queue '{name}': updated{suffix}")
+                await client.update_work_queue(
+                    existing[name].id,
+                    concurrency_limit=1,
+                    priority=priority,
+                )
+                print(f"queue '{name}': updated in place (limit=1, priority={priority}) id={existing[name].id}")
             else:
-                await client.create_work_queue(
+                q = await client.create_work_queue(
                     name=name,
                     concurrency_limit=1,
                     priority=priority,
                     work_pool_name=POOL_NAME,
                 )
-                print(f"queue '{name}': created (limit=1, priority={priority})")
+                print(f"queue '{name}': created (limit=1, priority={priority}) id={q.id}")
+
+        # --- ensure every deployment is bound to this pool + its queue ---
+        # A run's `work_queue_id` is resolved from the deployment's (work_pool,
+        # work_queue). If a deployment has `work_pool_name=None` (e.g. after a
+        # micro rebuild or a botched queue recreation), its runs get
+        # `work_queue_id=None` and are never picked up. Re-assert the binding so
+        # newly-scheduled runs always resolve to a live queue id.
+        rebound = 0
+        for dep in await client.read_deployments(limit=200):
+            if dep.work_queue_name and dep.work_pool_name != POOL_NAME:
+                await client.update_deployment(
+                    dep.id,
+                    DeploymentUpdate(
+                        work_pool_name=POOL_NAME, work_queue_name=dep.work_queue_name
+                    ),
+                )
+                print(f"deployment '{dep.name}': rebound -> pool={POOL_NAME} queue={dep.work_queue_name}")
+                rebound += 1
+        if rebound == 0:
+            print("all deployments already bound to pool 'default' (no rebind needed)")
 
         # The pre-existing `default` queue is intentionally left as-is (unused;
-        # no deployment binds to it). If you want a safety cap there too, add:
-        #   await client.update_work_queue(existing['default'].id, concurrency_limit=1)
+        # no deployment binds to it).
 
     print("orchestration setup complete")
     return 0

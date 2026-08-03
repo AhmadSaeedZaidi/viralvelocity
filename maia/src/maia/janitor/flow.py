@@ -10,11 +10,13 @@ import argparse
 import asyncio
 import io
 import logging
+import os
 from typing import Any
 
 from atlas.events import events
+from atlas.notifications import AlertChannel, AlertLevel, notifier
 from atlas.repositories import TranscriptRepository, VideoRepository
-from atlas.vault import get_vault
+from atlas.vault import get_vault, transcript_path
 from prefect import flow, get_run_logger, task
 
 from maia.utils import cli_bootstrap, run_agent_main
@@ -161,6 +163,117 @@ async def cull_search_queue_task() -> dict[str, Any]:
     return {"culled": deleted}
 
 
+@task(name="janitor_purge_prefect_runs")
+async def purge_prefect_runs_task(
+    age_days: int = 7,
+    batch_limit: int = 50,
+    max_batches: int = 20,
+) -> dict[str, Any]:
+    """Delete flow runs (and cascaded task runs + logs) older than *age_days*.
+
+    Calls Prefect's ``/flow_runs/bulk_delete`` in batches (max 50 per call).
+    Single-ownership assumption: the Janitor is the *only* agent that purges
+    orchestration history, so there is no TOCTOU concern.
+
+    Returns the total number of flow runs deleted.
+    """
+    import httpx
+    from datetime import datetime, timezone, timedelta
+
+    run_logger = get_run_logger()
+    client = httpx.AsyncClient(
+        base_url=os.environ.get("PREFECT_API_URL", "http://10.0.0.22:4200/api"),
+        headers={"Content-Type": "application/json"},
+        timeout=httpx.Timeout(30.0),
+    )
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    total_deleted = 0
+    for batch_idx in range(max_batches):
+        resp = await client.post(
+            "/flow_runs/bulk_delete",
+            json={
+                "flow_runs": {
+                    "end_time": {"before_": cutoff},
+                },
+                "limit": batch_limit,
+            },
+        )
+        if resp.status_code != 200:
+            run_logger.warning(
+                f"Purge batch {batch_idx}: HTTP {resp.status_code} — {resp.text[:200]}"
+            )
+            break
+        body = resp.json()
+        deleted = body.get("deleted", [])
+        if not deleted:
+            break
+        total_deleted += len(deleted)
+
+    await client.aclose()
+
+    if total_deleted:
+        run_logger.info(f"Purged {total_deleted} completed flow runs older than {age_days}d")
+    return {"purged_flow_runs": total_deleted}
+
+
+@task(name="janitor_reap_zombie_runs")
+async def reap_zombie_runs_task(max_age_minutes: int = 15) -> dict[str, Any]:
+    """Crash flow runs stuck in RUNNING far longer than any legitimate cycle.
+
+    Each agent's work queue has ``concurrency_limit=1``. If a run's process dies
+    without reporting a terminal state (worker restart/SIGKILL, OOM, or a hung
+    yt-dlp download killed by systemd), the server leaves it RUNNING forever and
+    that single slot is never released — freezing the entire queue (the classic
+    "streamer stalled" symptom). Prefect's heartbeat/Foreman zombie detection
+    depends on the events websocket, which is unreliable on this 2-VPS split, so
+    this is a deterministic backstop: any run RUNNING longer than
+    *max_age_minutes* (well beyond the ~1-2min a real cycle takes) is force-set
+    to CRASHED, freeing its slot. Idempotent and safe — all agent cycles are
+    short, so a legitimate run never approaches the threshold.
+    """
+    from datetime import datetime, timezone
+
+    from prefect.client.orchestration import get_client
+    from prefect.client.schemas.filters import FlowRunFilter, FlowRunFilterState
+    from prefect.client.schemas.objects import StateType
+    from prefect.states import Crashed
+
+    run_logger = get_run_logger()
+    reaped = 0
+    async with get_client() as client:
+        running = await client.read_flow_runs(
+            flow_run_filter=FlowRunFilter(
+                state=FlowRunFilterState(type={"any_": [StateType.RUNNING]})
+            ),
+            limit=100,
+        )
+        now = datetime.now(timezone.utc)
+        for r in running:
+            started = r.start_time or now
+            age_min = (now - started).total_seconds() / 60
+            if age_min > max_age_minutes:
+                await client.set_flow_run_state(
+                    r.id,
+                    Crashed(
+                        message=(
+                            f"Reaped by janitor: RUNNING for {age_min:.0f}min "
+                            f"(> {max_age_minutes}min) — process presumed dead, "
+                            f"freeing the '{r.work_queue_name}' queue slot."
+                        )
+                    ),
+                    force=True,
+                )
+                run_logger.warning(
+                    f"Reaped zombie run '{r.name}' (queue={r.work_queue_name}, "
+                    f"age={age_min:.0f}min)"
+                )
+                reaped += 1
+    if reaped:
+        run_logger.warning(f"Janitor reaped {reaped} zombie run(s), freeing queue slots")
+    return {"reaped": reaped}
+
+
 @task(name="janitor_vault_flush")
 async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
     """Flush staged transcripts (+ audio) from the DB to the vault.
@@ -188,7 +301,7 @@ async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
     for row in pending:
         vid = row["id"]
         vids.append(vid)
-        items: list[tuple[str, Any]] = [(f"transcripts/{vid}.json", row["transcript"])]
+        items: list[tuple[str, Any]] = [(transcript_path(vid), row["transcript"])]
         if row.get("audio"):
             items.append((f"audio/{vid}.opus", io.BytesIO(row["audio"])))
         groups.append(items)
@@ -202,7 +315,7 @@ async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
             # and retries 429 internally.
             uris = await loop.run_in_executor(None, v.store_batch, chunk_items)
             for vid in chunk_vids:
-                tpath = f"transcripts/{vid}.json"
+                tpath = transcript_path(vid)
                 uri = next((u for u in uris if u.endswith(tpath)), None)
                 await transcript_repo.clear_vault_pending(vid, uri)
             flushed += len(chunk_vids)
@@ -223,6 +336,7 @@ async def log_summary_task(results: dict[str, Any]) -> None:
     run_logger.info(f"  Stats archived:       {results.get('stats_archived', 0)}")
     run_logger.info(f"  Videos archived:      {results.get('videos_archived', 0)}")
     run_logger.info(f"  Videos failed:        {results.get('videos_failed', 0)}")
+    run_logger.info(f"  Prefect runs purged:  {results.get('purged', 0)}")
     run_logger.info(f"  Dry run:              {results.get('dry_run', False)}")
     run_logger.info("=" * 60)
 
@@ -270,6 +384,13 @@ async def janitor_flow(
     }
 
     try:
+        reap_result = await reap_zombie_runs_task()
+        results["zombie_runs_reaped"] = reap_result.get("reaped", 0)
+    except Exception as e:
+        run_logger.exception(f"Phase 0 (zombie-run reap) failed: {e}")
+        results["zombie_reap_error"] = str(e)
+
+    try:
         pool_result = await refresh_key_pools_task()
         results["key_pool"] = pool_result
     except Exception as e:
@@ -291,6 +412,13 @@ async def janitor_flow(
         run_logger.exception(f"Phase 0c (vault flush) failed: {e}")
         results["vault_flush_error"] = str(e)
 
+    try:
+        purge_result = await purge_prefect_runs_task(age_days=7)
+        results["purged"] = purge_result.get("purged_flow_runs", 0)
+    except Exception as e:
+        run_logger.exception(f"Phase 0d (prefect purge) failed: {e}")
+        results["purge_error"] = str(e)
+
     if archive_stats and not dry_run:
         run_logger.info("Phase 1/3: Archiving cold stats...")
         try:
@@ -303,15 +431,12 @@ async def janitor_flow(
         run_logger.info(f"Phase 1/3: Skipped (archive_stats={archive_stats}, dry_run={dry_run})")
 
     run_logger.info("Phase 2/3: Sweeping for PROCESSED videos...")
-    all_archivable: list[dict[str, Any]] = []
-    page = await sweep_phase_task.fn(batch_size)
-    all_archivable.extend(page)
-
-    remaining = len(page)
-    while remaining == batch_size:
-        page = await sweep_phase_task.fn(batch_size)
-        all_archivable.extend(page)
-        remaining = len(page)
+    # Sweep a single page per cycle. sweep_archivable() has no cursor/offset and
+    # only marks rows ARCHIVED in the hand-off phase below, so re-calling it in a
+    # loop returns the *same* rows forever (infinite loop once the backlog is
+    # >= batch_size). The janitor runs periodically, so any remaining backlog is
+    # drained by subsequent cycles as rows transition PROCESSED -> ARCHIVED.
+    all_archivable: list[dict[str, Any]] = await sweep_phase_task.fn(batch_size)
 
     run_logger.info(f"Phase 2/3: Found {len(all_archivable)} videos to archive")
 
@@ -347,6 +472,31 @@ async def janitor_flow(
     results["videos_failed"] = total_failed
 
     await log_summary_task.fn(results)
+
+    await notifier.send(
+        title="Janitor Cycle Summary",
+        description=(
+            f"Archived: {results.get('videos_archived', 0)} videos | "
+            f"Stats: {results.get('stats_archived', 0)} rows | "
+            f"Vault flushed: {results.get('vault_flushed', 0)} | "
+            f"Vault failed: {results.get('vault_failed', 0)} | "
+            f"Prefect runs purged: {results.get('purged', 0)}"
+        ),
+        channel=AlertChannel.ALERTS,
+        level=AlertLevel.CRITICAL if results.get('videos_failed', 0) > 0 else AlertLevel.INFO,
+        fields={
+            "Videos Archived": str(results.get("videos_archived", 0)),
+            "Videos Failed": str(results.get("videos_failed", 0)),
+            "Stats Archived (rows)": str(results.get("stats_archived", 0)),
+            "Vault Flushed": str(results.get("vault_flushed", 0)),
+            "Vault Failed": str(results.get("vault_failed", 0)),
+            "Search Queue Culled": str(results.get("search_queue_culled", 0)),
+            "Zombie Runs Reaped": str(results.get("zombie_runs_reaped", 0)),
+            "Prefect Runs Purged": str(results.get("purged", 0)),
+            "Dry Run": str(results.get("dry_run", False)),
+        },
+    )
+
     return results
 
 

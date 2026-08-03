@@ -66,8 +66,11 @@ def compute_sizes(
     clamped by safety floors; ``archeology`` is a fixed reserve and ``tracking``
     (the cheap videos.list ring) is never the first to exhaust.
     """
-    # Archeology reserve — never starve it.
-    archeology = max(2, min(archeology_size, max(0, total_keys - 4)))
+    # Archeology reserve — never starve it. Give it at least a meaningful share
+    # (a third of the pool) so a few rate-limited keys can't fully block
+    # historical hunting. archeology_size is a floor, not a ceiling.
+    archeology_floor = max(archeology_size, max(2, total_keys // 3))
+    archeology = min(archeology_floor, max(0, total_keys - 2))
     remaining = total_keys - archeology
 
     # Quota-math daily demand (units) for each ring.
@@ -80,9 +83,11 @@ def compute_sizes(
     hunting = remaining - tracking
 
     # ...then apply safety floors so no ring is starved and the cheap tracker
-    # ring is never the first to exhaust.
-    tracking_floor = max(8, (tracker_u + QUOTA_PER_KEY - 1) // QUOTA_PER_KEY + 4)
-    hunting_floor = max(4, remaining // 3)
+    # ring is never the first to exhaust. Cap the tracker floor so it can't
+    # swallow the whole pool on small key sets — tracking only does cheap
+    # batched videos.list calls, so it needs far fewer keys than searchers.
+    tracking_floor = min(6, max(2, (tracker_u + QUOTA_PER_KEY - 1) // QUOTA_PER_KEY + 4))
+    hunting_floor = max(3, remaining // 3)
     if tracking < tracking_floor:
         tracking = tracking_floor
         hunting = remaining - tracking

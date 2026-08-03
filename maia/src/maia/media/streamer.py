@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import yt_dlp
+from atlas.egress import EgressPool
 from tenacity import (
     before_sleep_log,
     retry,
@@ -25,6 +26,13 @@ from tenacity import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Shared egress-IP pool (rotated across the Scribe, Streamer, Singer, Painter).
+_EGRESS_POOL = EgressPool()
+
+# Sentinel so callers can omit *proxy* but we can still distinguish "not passed"
+# from an explicit ``None`` (direct egress).
+_UNSET = object()
 
 _YOUTUBE_URL = "https://www.youtube.com/watch?v={video_id}"
 
@@ -91,10 +99,22 @@ def _resolve_cookies(cookies_path: str | Path | None) -> list[str]:
 
 
 def yt_dlp_base(
-    cookies_path: str | Path | None = None, extra: list[str] | None = None
+    cookies_path: str | Path | None = None,
+    extra: list[str] | None = None,
+    proxy: str | None = _UNSET,
 ) -> list[str]:
-    """Return the common yt-dlp argument list (module + PoToken + impersonation)."""
+    """Return the common yt-dlp argument list (module + PoToken + impersonation).
+
+    Honours the shared egress-IP pool (``atlas.egress``) so all YouTube-bound
+    agents rotate across the same set of egress IPs. *proxy* may be passed
+    explicitly (e.g. the next IP after a throttle); when left as the sentinel the
+    next IP is taken round-robin from the pool. ``None`` means direct VPS egress.
+    """
     cmd = list(_YTDLP_BASE) + _JS_RUNTIME + _resolve_cookies(cookies_path)
+    if proxy is _UNSET:
+        _, proxy = _EGRESS_POOL.cycle()
+    if proxy:
+        cmd += ["--proxy", proxy]
     if extra:
         cmd += extra
     return cmd
@@ -254,7 +274,7 @@ class StealthVideoStreamer:
         return [p.get("start_time", 0.0) for p in sorted_points[:top_n]]
 
     def extract_audio(
-        self, video_id: str, dest_dir: str, player_clients: str = "web,tv"
+        self, video_id: str, dest_dir: str, player_clients: str = "default,tv"
     ) -> Path:
         """Download *video_id*'s audio into *dest_dir* and return the opus path.
 
@@ -293,7 +313,7 @@ class StealthVideoStreamer:
         self,
         video_id: str,
         dest_dir: str,
-        player_clients: str = "web,tv",
+        player_clients: str = "default,tv",
     ) -> tuple[Path, Path | None]:
         """Unified YouTube ingress: download the audio + metadata for *video_id*
         in a SINGLE yt-dlp invocation.
@@ -367,7 +387,7 @@ class StealthVideoStreamer:
         return audio_path, info_path
 
     def download_raw(
-        self, video_id: str, dest_dir: str, player_clients: str = "web,tv"
+        self, video_id: str, dest_dir: str, player_clients: str = "default,tv"
     ) -> Path:
         """Download *video_id*'s best audio stream (no ffmpeg re-encode).
 

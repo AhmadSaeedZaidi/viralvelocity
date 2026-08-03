@@ -7,6 +7,7 @@ the YouTube rate-limit surface confined to this single agent.
 """
 
 import asyncio
+import json
 import logging
 import shutil
 import tempfile
@@ -95,6 +96,22 @@ async def fetch_source_task(
         meta_bytes = None
         if info_file is not None:
             meta_bytes = await asyncio.to_thread(info_file.read_bytes)
+        else:
+            # Self-healing: the info.json was not written during the main download
+            # (e.g. YouTube rate-limited the metadata endpoint mid-fetch). Fetch it
+            # separately so the painter has stream URLs for frame extraction.
+            try:
+                info = await asyncio.to_thread(
+                    streamer.extract_info, vid_id
+                )
+                meta_bytes = json.dumps(info, ensure_ascii=False).encode()
+                run_logger.info(f"Fetched metadata separately for {vid_id}")
+            except Exception:
+                run_logger.warning(
+                    f"Could not fetch metadata separately for {vid_id} "
+                    f"— painter will fall back to its own fetch",
+                    exc_info=True,
+                )
 
         return (vid_id, raw_uri, raw_bytes, meta_bytes)
     except QuotaExhaustedError:

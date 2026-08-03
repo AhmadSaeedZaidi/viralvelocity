@@ -330,6 +330,30 @@ class VideoStateMixin(DatabaseAdapter):
             (now, video_id),
         )
 
+    async def release_transcript_to_pending(self, video_id: str) -> None:
+        """Release a Scribe-claimed video back to PENDING WITHOUT touching
+        ``raw_phase``.
+
+        The generic :meth:`release_to_pending` also resets ``raw_phase`` to
+        ``'PENDING'``, which for a *scribe* rate-limit would wrongly re-queue the
+        video for a redundant streamer raw re-download. A caption 429 says
+        nothing about the raw audio the streamer already fetched, so only the
+        claim ``status`` is reset here — the video becomes re-claimable by the
+        Scribe on a later cycle while its raw/audio/visuals progress is
+        preserved.
+        """
+        now = datetime.now(UTC)
+        await self._execute(
+            """
+            UPDATE videos
+            SET status = 'PENDING',
+                transcript_phase = 'PENDING',
+                last_updated_at = %s
+            WHERE id = %s
+            """,
+            (now, video_id),
+        )
+
     async def mark_failed(self, video_id: str) -> None:
         now = datetime.now(UTC)
         await self._execute(

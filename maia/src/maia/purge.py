@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from atlas.repositories import VideoRepository
-from atlas.vault import audio_path, get_vault, video_path
+from atlas.vault import audio_path, get_vault, transcript_path, video_path
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +41,12 @@ def collect_artifact_paths(
         v = video_path(vid)
         if v in existing_video:
             paths.append(v)
-        t = f"{TRANSCRIPTS_PREFIX}{vid}.json"
+        t = transcript_path(vid)
         if t in existing_transcripts:
             paths.append(t)
+        legacy_t = f"{TRANSCRIPTS_PREFIX}{vid}.json"
+        if legacy_t in existing_transcripts:
+            paths.append(legacy_t)
 
     frame_prefixes = {f"{FRAMES_PREFIX}{vid}/" for vid in video_ids}
     if frame_prefixes:

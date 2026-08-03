@@ -11,7 +11,13 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from atlas.repositories import ChannelRepository, SearchQueueRepository, VideoRepository
+from atlas.notifications import AlertChannel, AlertLevel, notifier
+from atlas.repositories import (
+    ChannelRepository,
+    SearchQueueRepository,
+    VideoRepository,
+    WatchlistRepository,
+)
 from atlas.state import clear_quota_exhausted
 from atlas.utils import QuotaExhaustedError
 from atlas.vault import get_vault
@@ -200,10 +206,15 @@ async def ingest_results_task(
 
     # 2. Ingest structured metadata to database concurrently
     async def _db_ingest(item: dict[str, Any]) -> None:
+        vid_id = video_id_of(item)
         try:
             await video_repo.ingest_video_metadata(item)
+            if vid_id:
+                # Adaptive Scheduling: every discovered video joins the persistent
+                # watchlist so tracking survives janitor cleanup of the videos row.
+                await WatchlistRepository().add(vid_id, tier="HOURLY")
         except Exception as e:
-            run_logger.exception(f"Failed to ingest video {video_id_of(item)} to database: {e}")
+            run_logger.exception(f"Failed to ingest video {vid_id} to database: {e}")
 
     db_tasks = [_db_ingest(item) for item in items]
 
@@ -307,6 +318,24 @@ async def hunter_flow(batch_size: int, strategy: YouTubeSearchStrategy) -> dict[
             f"Discovered: {stats['videos_discovered']}, "
             f"Success: {stats['searches_successful']}, "
             f"Failed: {stats['searches_failed']}"
+        )
+
+        await notifier.send(
+            title="Hunter Cycle Summary",
+            description=(
+                f"Queries: {stats['queries_processed']} | "
+                f"Discovered: {stats['videos_discovered']} videos | "
+                f"Success: {stats['searches_successful']} | "
+                f"Failed: {stats['searches_failed']}"
+            ),
+            channel=AlertChannel.HUNT,
+            level=AlertLevel.INFO if stats['searches_failed'] == 0 else AlertLevel.WARNING,
+            fields={
+                "Queries Processed": str(stats["queries_processed"]),
+                "Videos Discovered": str(stats["videos_discovered"]),
+                "Searches Successful": str(stats["searches_successful"]),
+                "Searches Failed": str(stats["searches_failed"]),
+            },
         )
 
     except QuotaExhaustedError:
