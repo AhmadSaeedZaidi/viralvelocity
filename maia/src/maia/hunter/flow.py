@@ -375,12 +375,6 @@ class HunterAgent:
         return result
 
 
-@task(name="ingest_results")
-async def ingest_results(topic: dict[str, Any], response: dict[str, Any]) -> None:
-    """Legacy Task wrapper — delegates to :func:`ingest_results_task`."""
-    await ingest_results_task(topic, response)
-
-
 @flow(name="run_hunter_cycle")
 async def run_hunter_cycle(batch_size: int = 10) -> dict[str, Any]:
     """Legacy function wrapper for backward compatibility."""

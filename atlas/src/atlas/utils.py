@@ -1,7 +1,5 @@
 """Utility functions for Atlas infrastructure."""
 
-import asyncio
-import functools
 import itertools
 import logging
 from collections.abc import Callable
@@ -18,60 +16,6 @@ class QuotaExhaustedError(Exception):
     A normal ``Exception`` (not ``SystemExit``) so callers decide the resiliency
     action and it never tears down an unrelated host process importing Atlas.
     """
-
-
-def retry_async(
-    max_attempts: int = 3,
-    delay: float = 1.0,
-    backoff: float = 2.0,
-    exceptions: tuple[type[BaseException], ...] = (Exception,),
-    max_delay: float = 60.0,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Async retry decorator with exponential backoff and capped delay."""
-
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            current_delay = delay
-            last_exception: BaseException | None = None
-
-            for attempt in range(max_attempts):
-                try:
-                    return await func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
-                    if attempt < max_attempts - 1:
-                        logger.warning(
-                            f"{func.__name__} failed (attempt {attempt + 1}/{max_attempts}): {e}"
-                        )
-                        sleep_time = min(current_delay, max_delay)
-                        await asyncio.sleep(sleep_time)
-                        current_delay *= backoff
-                    else:
-                        logger.exception(f"{func.__name__} failed after {max_attempts} attempts")
-
-            if last_exception:
-                raise last_exception
-            return None
-
-        return wrapper
-
-    return decorator
-
-
-async def health_check_all() -> dict[str, bool]:
-    """Health-check all Atlas components; returns a mapping of name to status."""
-    from atlas import db
-
-    results = {}
-
-    try:
-        results["database"] = await db.health_check()
-    except Exception as e:
-        logger.exception(f"Database health check failed: {e}")
-        results["database"] = False
-
-    return results
 
 
 def validate_youtube_id(video_id: str) -> bool:
@@ -301,13 +245,3 @@ class ResiliencyExecutor:
             "usagelimit",
         ]
         return any(indicator in error_str for indicator in quota_indicators)
-
-
-async def execute_youtube_request_async(
-    key_ring: KeyRing,
-    request_func: Callable[[str], Any],
-    agent_name: str = "youtube_api",
-) -> Any | None:
-    """Execute a YouTube API request with key rotation and resiliency termination."""
-    executor = ResiliencyExecutor(key_ring, agent_name)
-    return await executor.execute_async(request_func)

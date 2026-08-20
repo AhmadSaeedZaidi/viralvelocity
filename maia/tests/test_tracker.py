@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from atlas.utils import QuotaExhaustedError
-from maia.tracker.flow import fetch_targets_task, update_stats_task
+from maia.tracker.flow import (
+    fetch_targets_task,
+    tracker_flow,
+    update_stats_task,
+)
 
 
 @pytest.fixture
@@ -170,3 +174,76 @@ async def test_update_stats_propagates_rate_limit(
 
     with pytest.raises(QuotaExhaustedError):
         await update_stats_task.fn([mock_tracker_target], mock_strategy)
+
+
+@patch("maia.tracker.flow.notify_quota_exhausted", new_callable=AsyncMock)
+async def test_update_stats_notifies_on_quota_exhausted(
+    mock_notify, mock_strategy, mock_tracker_target
+):
+    """QuotaExhaustedError triggers the notify path and is not swallowed."""
+    mock_strategy.fetch_videos.side_effect = QuotaExhaustedError("All keys exhausted")
+
+    with pytest.raises(QuotaExhaustedError):
+        await update_stats_task.fn([mock_tracker_target], mock_strategy)
+
+    mock_notify.assert_awaited_once_with("tracker")
+
+
+@patch("maia.tracker.flow.clear_quota_exhausted")
+@patch("maia.tracker.flow.fetch_targets_task", new_callable=AsyncMock)
+async def test_tracker_flow_idle_empty_watchlist(
+    mock_fetch, mock_clear, mock_strategy
+):
+    """Empty watchlist -> idle stats returned and quota marker cleared, no notify."""
+    mock_fetch.return_value = []
+
+    stats = await tracker_flow.fn(batch_size=50, strategy=mock_strategy)
+
+    assert stats == {"videos_fetched": 0, "videos_updated": 0, "updates_failed": 0}
+    mock_fetch.assert_awaited_once_with(batch_size=50)
+    mock_clear.assert_called_once_with("tracker")
+
+
+@patch("maia.tracker.flow.clear_quota_exhausted")
+@patch("maia.tracker.flow.update_stats_task", new_callable=AsyncMock)
+@patch("maia.tracker.flow.fetch_targets_task", new_callable=AsyncMock)
+@patch("maia.tracker.flow.notifier", new_callable=AsyncMock)
+async def test_tracker_flow_caps_batch_size_at_50(
+    mock_notifier, mock_fetch, mock_update, mock_clear, mock_strategy
+):
+    """batch_size > 50 is capped to the YouTube API limit before fetching."""
+    mock_fetch.return_value = [{"video_id": "V1"}]
+    mock_update.return_value = 1
+
+    with patch("maia.tracker.flow.VideoRepository") as MockVideoRepo:
+        MockVideoRepo.return_value.pipeline_snapshot = AsyncMock(
+            return_value={"status_counts": {}, "total": 0}
+        )
+        stats = await tracker_flow.fn(batch_size=500, strategy=mock_strategy)
+
+    mock_fetch.assert_awaited_once_with(batch_size=50)
+    assert stats["videos_fetched"] == 1
+    assert stats["videos_updated"] == 1
+
+
+@patch("maia.tracker.flow.clear_quota_exhausted")
+@patch("maia.tracker.flow.VideoRepository")
+@patch("maia.tracker.flow.notifier", new_callable=AsyncMock)
+@patch("maia.tracker.flow.update_stats_task", new_callable=AsyncMock)
+@patch("maia.tracker.flow.fetch_targets_task", new_callable=AsyncMock)
+async def test_tracker_flow_notify_surveillance_success(
+    mock_fetch, mock_update, mock_notifier, mock_video_repo, mock_clear, mock_strategy
+):
+    """A successful cycle posts a surveillance summary via the notifier."""
+    mock_fetch.return_value = [{"video_id": "V1"}, {"video_id": "V2"}]
+    mock_update.return_value = 2
+    mock_video_repo.return_value.pipeline_snapshot = AsyncMock(
+        return_value={"status_counts": {"PROCESSED": 5}, "total": 10}
+    )
+
+    stats = await tracker_flow.fn(batch_size=50, strategy=mock_strategy)
+
+    assert stats == {"videos_fetched": 2, "videos_updated": 2, "updates_failed": 0}
+    mock_notifier.send.assert_awaited_once()
+    assert mock_notifier.send.call_args.kwargs["level"] is not None
+    mock_clear.assert_called_once_with("tracker")

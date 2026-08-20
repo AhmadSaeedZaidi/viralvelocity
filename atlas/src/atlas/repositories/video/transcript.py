@@ -16,14 +16,17 @@ class TranscriptRepository(DatabaseAdapter):
         vault_uri: str | None,
         language: str = "en",
         content_json: Any | None = None,
-        audio_bytes: bytes | None = None,
     ) -> None:
         """Stage a transcript locally and queue the vault write.
 
-        Inserts the transcript row (and optional audio bytes) and marks
-        ``vault_write_pending`` so the janitor flushes it in batched commits;
-        ``vault_uri`` stays NULL until that flush succeeds. Pass ``vault_uri``
-        only for the janitor's post-flush update.
+        Inserts the transcript row and marks ``vault_write_pending`` so the
+        janitor flushes it in batched commits; ``vault_uri`` stays NULL until
+        that flush succeeds. Pass ``vault_uri`` only for the janitor's
+        post-flush update.
+
+        Audio is NOT staged here — the singer writes ``audio/{id}.opus``
+        straight to the vault, so the legacy ``audio_pending`` staging column
+        is unused.
         """
         content_param: Any = json.dumps(content_json) if content_json is not None else None
         async with self._cursor() as cur:
@@ -38,11 +41,6 @@ class TranscriptRepository(DatabaseAdapter):
                 """,
                 (video_id, language, vault_uri, content_param),
             )
-            if audio_bytes is not None:
-                await cur.execute(
-                    "UPDATE videos SET audio_pending = %s WHERE id = %s",
-                    (audio_bytes, video_id),
-                )
             if vault_uri is None:
                 await cur.execute(
                     "UPDATE videos SET vault_write_pending = TRUE WHERE id = %s",
@@ -51,17 +49,16 @@ class TranscriptRepository(DatabaseAdapter):
             await cur.connection.commit()
 
     async def claim_vault_pending_batch(self, batch_size: int = 50) -> list[dict[str, Any]]:
-        """Claim videos whose transcript/audio still need flushing to the vault.
+        """Claim videos whose transcript still needs flushing to the vault.
 
-        Returns lightweight dicts (id, transcript JSON, audio bytes) for the
-        janitor to batch-write. Idempotent + concurrency-safe via SKIP LOCKED.
+        Returns lightweight dicts (id, transcript JSON) for the janitor to
+        batch-write. Idempotent + concurrency-safe via SKIP LOCKED.
         """
         rows = await self._fetch_all(
             """
             SELECT v.id,
                    t.language,
-                   t.content AS transcript,
-                   v.audio_pending AS audio
+                   t.content AS transcript
             FROM videos v
             JOIN transcripts t ON t.video_id = v.id
             WHERE v.has_transcript
@@ -81,7 +78,6 @@ class TranscriptRepository(DatabaseAdapter):
             """
             UPDATE videos
             SET vault_write_pending = FALSE,
-                audio_pending = NULL,
                 last_updated_at = %s,
                 status = CASE
                     WHEN has_transcript AND has_audio AND has_visuals THEN 'PROCESSED'

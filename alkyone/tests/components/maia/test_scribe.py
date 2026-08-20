@@ -129,7 +129,13 @@ async def test_scribe_empty_queue_returns_idle(video_repo):
     """Test Scribe handles empty queue gracefully."""
     await run_scribe_cycle(batch_size=10)
 
-    assert True
+    # Empty queue must not leave any videos in a processed state.
+    processed = await video_repo._fetch_all(
+        "SELECT * FROM videos WHERE status = 'PROCESSED'"
+    )
+    assert len(processed) == 0, (
+        f"Empty queue should process 0 videos, got {len(processed)}"
+    )
 
 
 @pytest.mark.integration

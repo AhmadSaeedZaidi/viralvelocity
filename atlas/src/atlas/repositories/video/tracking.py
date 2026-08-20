@@ -119,35 +119,35 @@ class VideoTrackingMixin(DatabaseAdapter):
         coverage, tracker metrics, and pipeline velocity.
         """
         now = datetime.now(UTC)
+        cutoff_1h = now - timedelta(hours=1)
+        cutoff_24h = now - timedelta(hours=24)
+
+        # Single aggregate pass over `videos` for all scalar counts (was 9
+        # separate COUNT queries). Status/phase groupings stay separate because
+        # they are different GROUP BY shapes; transcripts/video_stats_log are
+        # different tables.
+        agg = await self._fetch_one(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE has_visuals) AS with_visuals,
+                COUNT(*) FILTER (WHERE has_audio) AS audios,
+                COUNT(*) FILTER (WHERE discovered_at > NOW() - INTERVAL '1 hour') AS ingested_1h,
+                COUNT(*) FILTER (WHERE last_tracked_at IS NOT NULL) AS tracked_ever,
+                COUNT(*) FILTER (WHERE last_tracked_at > %s) AS tracked_1h,
+                COUNT(*) FILTER (WHERE last_tracked_at > %s) AS tracked_24h
+            FROM videos
+            """,
+            (cutoff_1h, cutoff_24h),
+        )
+        agg = agg or {}
 
         status_rows = await self._fetch_all(
             "SELECT status, COUNT(*) AS c FROM videos GROUP BY status"
         )
         status_counts = {r["status"]: r["c"] for r in status_rows}
 
-        total = await self._fetch_scalar("SELECT COUNT(*) FROM videos") or 0
         transcripts = await self._fetch_scalar("SELECT COUNT(*) FROM transcripts") or 0
-        with_visuals = (
-            await self._fetch_scalar("SELECT COUNT(*) FROM videos WHERE has_visuals") or 0
-        )
-        audios = await self._fetch_scalar("SELECT COUNT(*) FROM videos WHERE has_audio") or 0
-        ingested_1h = (
-            await self._fetch_scalar(
-                "SELECT COUNT(*) FROM videos WHERE discovered_at > NOW() - INTERVAL '1 hour'"
-            )
-            or 0
-        )
-
-        tracked_ever = await self._fetch_scalar(
-            "SELECT COUNT(*) FROM videos WHERE last_tracked_at IS NOT NULL"
-        ) or 0
-        tracked_1h = await self._fetch_scalar(
-            "SELECT COUNT(*) FROM videos WHERE last_tracked_at > %s", (now - timedelta(hours=1),)
-        ) or 0
-        tracked_24h = await self._fetch_scalar(
-            "SELECT COUNT(*) FROM videos WHERE last_tracked_at > %s", (now - timedelta(hours=24),)
-        ) or 0
-
         stats_log_size = await self._fetch_scalar("SELECT COUNT(*) FROM video_stats_log") or 0
 
         pipeline_phase_rows = await self._fetch_all(
@@ -156,15 +156,15 @@ class VideoTrackingMixin(DatabaseAdapter):
         phase_counts = {r["phase"]: r["c"] for r in pipeline_phase_rows}
 
         return {
-            "total": total,
+            "total": agg.get("total") or 0,
             "status_counts": status_counts,
             "transcripts": transcripts,
-            "with_visuals": with_visuals,
-            "audios": audios,
-            "ingested_1h": ingested_1h,
-            "tracked_ever": tracked_ever,
-            "tracked_1h": tracked_1h,
-            "tracked_24h": tracked_24h,
+            "with_visuals": agg.get("with_visuals") or 0,
+            "audios": agg.get("audios") or 0,
+            "ingested_1h": agg.get("ingested_1h") or 0,
+            "tracked_ever": agg.get("tracked_ever") or 0,
+            "tracked_1h": agg.get("tracked_1h") or 0,
+            "tracked_24h": agg.get("tracked_24h") or 0,
             "stats_log_size": stats_log_size,
             "phase_counts": phase_counts,
         }

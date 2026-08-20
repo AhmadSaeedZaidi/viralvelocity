@@ -495,16 +495,10 @@ async def test_archeologist_real_api_rate_limit_detection(video_repo):
     }
 
     # Make several requests - if we hit a 429, we should handle it
+    got_success = False
     async with aiohttp.ClientSession() as session:
         for _i in range(3):
             async with session.get(base_url, params=params) as resp:
-                # Should be either 200 (success) or 429 (rate limit)
-                assert resp.status in [
-                    200,
-                    429,
-                    403,
-                ], f"Unexpected status {resp.status}"
-
                 if resp.status == 429:
                     # Rate limit detected - this is what we want to test
                     print("✓ Rate limit (429) detected from real YouTube API")
@@ -512,10 +506,19 @@ async def test_archeologist_real_api_rate_limit_detection(video_repo):
                 elif resp.status == 403:
                     # API key exhausted - rotate to next key
                     params["key"] = keys.next_key()
-                else:
+                elif resp.status == 200:
                     # Success - verify response structure
+                    got_success = True
                     data = await resp.json()
-                    assert "items" in data, f"Missing 'items' in API response: {list(data.keys())}"
+                    assert "items" in data, (
+                        f"Missing 'items' in API response: {list(data.keys())}"
+                    )
+                else:
+                    pytest.fail(f"Unexpected YouTube API status: {resp.status}")
+
+    # The test must have observed a genuine 200 response OR a 429 rate limit;
+    # failing to exercise the API (e.g. all 403) is a failure, not a pass.
+    assert got_success, "No successful (200) API response observed across 3 attempts"
 
 
 @pytest.mark.integration
@@ -533,6 +536,7 @@ async def test_archeologist_real_api_key_rotation(video_repo):
 
     # Track which keys we've used
     used_keys = set()
+    got_success = False
 
     # Try up to the number of keys we have
     for _attempt in range(min(3, keys.size)):
@@ -549,18 +553,20 @@ async def test_archeologist_real_api_key_rotation(video_repo):
 
         async with aiohttp.ClientSession() as session:
             async with session.get(base_url, params=params) as resp:
-                # Any of these responses are acceptable for this test
-                assert resp.status in [
-                    200,
-                    403,
-                    429,
-                ], f"Unexpected status {resp.status}"
-
+                # Rotate on 403/429; succeed on 200; anything else is unexpected.
                 if resp.status == 200:
                     # Key is valid - great!
+                    got_success = True
                     data = await resp.json()
                     assert "items" in data, f"Missing 'items' in API response: {list(data.keys())}"
                     break
+                elif resp.status in (403, 429):
+                    continue
+                else:
+                    pytest.fail(f"Unexpected YouTube API status: {resp.status}")
+
+    # Must have observed at least one genuine 200 response; all-errors is a failure.
+    assert got_success, "No successful (200) YouTube API response across attempted keys"
 
     # Verify key rotation happened if we have multiple keys
     if keys.size > 1:

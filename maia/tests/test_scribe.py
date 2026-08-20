@@ -19,7 +19,11 @@ from maia.scribe.flow import (
     process_transcript_task,
     scribe_flow,
 )
-from maia.scribe.loader import TranscriptExtractionError
+from maia.scribe.loader import (
+    TranscriptExtractionError,
+    TranscriptLoader,
+    TranscriptRateLimitError,
+)
 from maia.scribe.transcription import TranscriptResult
 
 
@@ -302,3 +306,138 @@ async def test_run_scribe_cycle_continues_on_individual_failures():
         await scribe_flow.fn(batch_size=3)
 
         assert call_count["count"] == 3
+
+
+# --- TranscriptLoader client cascade (mocked streamer) ---
+
+
+def _loader() -> TranscriptLoader:
+    return TranscriptLoader()
+
+
+@patch("maia.scribe.loader.StealthVideoStreamer")
+def test_loader_returns_structured_segments(mock_stealth):
+    """Structured segments [{text,start,duration}] from the streamer pass through."""
+    mock_stealth.return_value.extract_captions.return_value = [
+        {"text": "Hello world", "start": 0.0, "duration": 2.5},
+        {"text": "Second line", "start": 2.5, "duration": 1.0},
+    ]
+    loader = _loader()
+    segs = loader.fetch("VIDEO_X")
+    assert segs == [
+        {"text": "Hello world", "start": 0.0, "duration": 2.5},
+        {"text": "Second line", "start": 2.5, "duration": 1.0},
+    ]
+    # First client tried first; a success short-circuits the cascade.
+    mock_stealth.return_value.extract_captions.assert_called_once()
+
+
+@patch("maia.scribe.loader.StealthVideoStreamer")
+def test_loader_empty_transcript_returns_empty_list(mock_stealth):
+    """An empty caption track returns [] (empty transcript), not an error."""
+    mock_stealth.return_value.extract_captions.return_value = []
+    assert _loader().fetch("VIDEO_Y") == []
+
+
+@patch("maia.scribe.loader.StealthVideoStreamer")
+def test_loader_disabled_captions_raise_no_subtitles(mock_stealth):
+    """A 'No subtitles available' error is authoritative and short-circuits the
+    remaining clients (doesn't waste time on the cascade)."""
+    mock_stealth.return_value.extract_captions.side_effect = TranscriptExtractionError(
+        "No subtitles available for VIDEO_Z"
+    )
+    with pytest.raises(TranscriptExtractionError):
+        _loader().fetch("VIDEO_Z")
+    assert mock_stealth.return_value.extract_captions.call_count == 1
+
+
+@patch("maia.scribe.loader.StealthVideoStreamer")
+def test_loader_rate_limit_cascades_to_next_client(mock_stealth):
+    """A per-client rate-limit falls through to the next player client."""
+    def side_effect(video_id, client, tmpdir):
+        if client == "default":
+            raise TranscriptRateLimitError("throttled")
+        return [{"text": "recovered", "start": 0.0, "duration": 1.0}]
+
+    mock_stealth.return_value.extract_captions.side_effect = side_effect
+    segs = _loader().fetch("VIDEO_R")
+    assert segs == [{"text": "recovered", "start": 0.0, "duration": 1.0}]
+    assert mock_stealth.return_value.extract_captions.call_count == 2
+
+
+@patch("maia.scribe.loader.StealthVideoStreamer")
+def test_loader_all_clients_rate_limited_raises(mock_stealth):
+    """When every client is throttled, TranscriptRateLimitError propagates so
+    the flow can re-queue the video (never falls through to STT)."""
+    mock_stealth.return_value.extract_captions.side_effect = TranscriptRateLimitError(
+        "bot check"
+    )
+    with pytest.raises(TranscriptRateLimitError):
+        _loader().fetch("VIDEO_Q")
+    assert mock_stealth.return_value.extract_captions.call_count == 3
+
+
+@patch("maia.scribe.loader.StealthVideoStreamer")
+def test_loader_generic_extraction_error_recorded_and_no_cascade(mock_stealth):
+    """A non-rate-limit, non-no-subtitles error is held until all clients tried,
+    then re-raised (no silent fall-through)."""
+    mock_stealth.return_value.extract_captions.side_effect = TranscriptExtractionError(
+        "corrupt timedtext"
+    )
+    with pytest.raises(TranscriptExtractionError):
+        _loader().fetch("VIDEO_C")
+    assert mock_stealth.return_value.extract_captions.call_count == 3
+
+
+# --- record_transcript JSON shape ---
+
+
+@pytest.mark.asyncio
+async def test_process_transcript_records_empty_segments():
+    """Structured segments from captions are passed verbatim as content_json."""
+    video = Video(id="VIDEO_E", title="Empty")
+    with (
+        patch("maia.scribe.flow.VideoRepository") as MockRepo,
+        patch("maia.scribe.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+    ):
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_transcript_safe = AsyncMock()
+        mock_transcript = MockTranscriptRepo.return_value
+        mock_transcript.record_transcript = AsyncMock()
+        MockLoader.return_value.fetch = MagicMock(return_value=[])
+
+        await process_transcript_task.fn(video)
+
+        mock_transcript.record_transcript.assert_called_once_with(
+            "VIDEO_E",
+            vault_uri=None,
+            language="en",
+            content_json=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_transcript_structured_segments_json():
+    """Structured segments are stored in content_json as-is (no re-wrapping)."""
+    video = Video(id="VIDEO_S", title="Structured")
+    segs = [{"text": "line 1", "start": 0.0, "duration": 1.2}]
+    with (
+        patch("maia.scribe.flow.VideoRepository") as MockRepo,
+        patch("maia.scribe.flow.TranscriptRepository") as MockTranscriptRepo,
+        patch("maia.scribe.flow.TranscriptLoader") as MockLoader,
+    ):
+        mock_repo = MockRepo.return_value
+        mock_repo.mark_transcript_safe = AsyncMock()
+        mock_transcript = MockTranscriptRepo.return_value
+        mock_transcript.record_transcript = AsyncMock()
+        MockLoader.return_value.fetch = MagicMock(return_value=segs)
+
+        await process_transcript_task.fn(video)
+
+        mock_transcript.record_transcript.assert_called_once_with(
+            "VIDEO_S",
+            vault_uri=None,
+            language="en",
+            content_json=segs,
+        )

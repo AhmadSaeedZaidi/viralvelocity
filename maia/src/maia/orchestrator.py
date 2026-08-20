@@ -19,10 +19,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine
-
-logger = logging.getLogger("maia.orchestrator")
+from typing import Any
 
 # In-process flow entrypoints — identical to prefect.yaml deployments.
 from maia.archeologist.flow import run_archeology_campaign  # noqa: F401
@@ -34,6 +33,8 @@ from maia.scribe.flow import scribe_flow  # noqa: F401
 from maia.singer.flow import singer_flow  # noqa: F401
 from maia.streamer.flow import streamer_flow  # noqa: F401
 from maia.tracker.flow import run_tracker_cycle  # noqa: F401
+
+logger = logging.getLogger("maia.orchestrator")
 
 CoroFactory = Callable[..., Any]
 

@@ -221,14 +221,6 @@ class TrackerAgent:
         return result
 
 
-@task(name="update_stats")
-async def update_stats(videos: list[dict[str, Any]]) -> int:
-    """Legacy Task wrapper — creates strategy and delegates."""
-    strategy = YouTubeSearchStrategy("tracking", agent_name="legacy_tracker")
-    result: int = await update_stats_task(videos, strategy)
-    return result
-
-
 @flow(name="run_tracker_cycle")
 async def run_tracker_cycle(batch_size: int = 50) -> dict[str, Any]:
     """

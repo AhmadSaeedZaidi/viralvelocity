@@ -242,14 +242,6 @@ class ScribeAgent:
         return result
 
 
-@task(name="process_transcript")
-async def process_transcript(video: dict[str, Any]) -> None:
-    """Legacy Task wrapper — converts dict to Video and delegates."""
-    from atlas.models import Video as VideoModel
-
-    await process_transcript_task(VideoModel(**video))
-
-
 @flow(name="run_scribe_cycle")
 async def run_scribe_cycle(batch_size: int = 10) -> None:
     """

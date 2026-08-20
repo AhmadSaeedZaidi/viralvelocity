@@ -9,31 +9,6 @@ logger = logging.getLogger("atlas.repositories.channel")
 
 
 class ChannelRepository(DatabaseAdapter):
-    async def save(self, channel: Channel) -> None:
-        query = """INSERT INTO channels
-            (id, title, country, custom_url, created_at, is_verified, last_scraped_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO UPDATE SET
-                title = EXCLUDED.title,
-                country = COALESCE(EXCLUDED.country, channels.country),
-                custom_url = COALESCE(EXCLUDED.custom_url, channels.custom_url),
-                created_at = COALESCE(channels.created_at, EXCLUDED.created_at),
-                is_verified = EXCLUDED.is_verified,
-                last_scraped_at = EXCLUDED.last_scraped_at
-        """
-        await self._execute(
-            query,
-            (
-                channel.id,
-                channel.title,
-                channel.country,
-                channel.custom_url,
-                channel.created_at,
-                channel.is_verified,
-                channel.last_scraped_at or datetime.now(UTC),
-            ),
-        )
-
     async def get_by_id(self, channel_id: str) -> Channel | None:
         row = await self._fetch_one("SELECT * FROM channels WHERE id = %s", (channel_id,))
         return Channel.model_validate(row) if row else None
@@ -63,23 +38,6 @@ class ChannelRepository(DatabaseAdapter):
             (channel_id, cutoff),
         )
         return row is None
-
-    async def log_stats(self, stats: ChannelStats) -> None:
-        query = """INSERT INTO channel_stats_log
-            (channel_id, timestamp, view_count, subscriber_count, video_count)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (channel_id, timestamp) DO NOTHING
-        """
-        await self._execute(
-            query,
-            (
-                stats.channel_id,
-                stats.timestamp,
-                stats.view_count,
-                stats.subscriber_count,
-                stats.video_count,
-            ),
-        )
 
     async def ingest_channel_snapshot(self, channel_data: dict[str, Any]) -> None:
         ch_id = channel_data.get("id")

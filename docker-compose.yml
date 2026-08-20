@@ -29,7 +29,7 @@ services:
     command: python -m maia hunter --batch-size 10
     environment:
       DATABASE_URL: postgresql://postgres:password@db:5432/videodb
-      YOUTUBE_API_KEYS: ${YOUTUBE_API_KEYS}
+      YOUTUBE_API_KEY_POOL_JSON: ${YOUTUBE_API_KEY_POOL_JSON}
       PREFECT_API_KEY: ${PREFECT_API_KEY}
       PREFECT_API_URL: ${PREFECT_API_URL}
       VAULT_PATH: ${VAULT_PATH:-/vault}
@@ -44,7 +44,7 @@ services:
     command: python -m maia tracker --batch-size 50
     environment:
       DATABASE_URL: postgresql://postgres:password@db:5432/videodb
-      YOUTUBE_API_KEYS: ${YOUTUBE_API_KEYS}
+      YOUTUBE_API_KEY_POOL_JSON: ${YOUTUBE_API_KEY_POOL_JSON}
       PREFECT_API_KEY: ${PREFECT_API_KEY}
       PREFECT_API_URL: ${PREFECT_API_URL}
       VAULT_PATH: ${VAULT_PATH:-/vault}
@@ -75,7 +75,7 @@ services:
     command: python -m maia archeologist --start-year 2010 --end-year 2024
     environment:
       DATABASE_URL: postgresql://postgres:password@db:5432/videodb
-      YOUTUBE_API_KEYS: ${YOUTUBE_API_KEYS}
+      YOUTUBE_API_KEY_POOL_JSON: ${YOUTUBE_API_KEY_POOL_JSON}
       PREFECT_API_KEY: ${PREFECT_API_KEY}
       PREFECT_API_URL: ${PREFECT_API_URL}
       VAULT_PATH: ${VAULT_PATH:-/vault}

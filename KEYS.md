@@ -1,4 +1,9 @@
-# Key & Secret Locations (gitignored — never commit this file)
+# Key & Secret Locations
+
+This file is **tracked in the repo** (committed) — as such it must NEVER contain
+secret material. It only records *where* credentials live and what they're for.
+Actual keys, tokens, and passwords live in gitignored files (`.env`, cookies
+files) and never belong in this document.
 
 This document only records **where** credentials live and what they're for.
 It contains no private-key material, tokens, or passwords.

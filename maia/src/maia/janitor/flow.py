@@ -8,7 +8,6 @@ untouched.
 
 import argparse
 import asyncio
-import io
 import logging
 import os
 from typing import Any
@@ -295,16 +294,16 @@ async def vault_flush_task(batch_size: int = 50) -> dict[str, Any]:
     failed = 0
     # Batch MANY videos into a single HF commit (store_batch retries 429
     # internally), keeping us under HuggingFace's 128-commits/hour account cap.
-    CHUNK = 25  # videos per commit (audio is large — stay within commit-size limits)
+    CHUNK = 25  # videos per commit
     groups: list[list[tuple[str, Any]]] = []
     vids: list[str] = []
     for row in pending:
         vid = row["id"]
         vids.append(vid)
-        items: list[tuple[str, Any]] = [(transcript_path(vid), row["transcript"])]
-        if row.get("audio"):
-            items.append((f"audio/{vid}.opus", io.BytesIO(row["audio"])))
-        groups.append(items)
+        # Transcripts only — audio is written straight to the vault by the
+        # singer (audio/{id}.opus), so the legacy audio_pending staging path
+        # is gone.
+        groups.append([(transcript_path(vid), row["transcript"])])
 
     for i in range(0, len(groups), CHUNK):
         chunk_groups = groups[i : i + CHUNK]

@@ -70,8 +70,8 @@ async def test_archive_skips_unvaulted_transcript():
     rather than silently deleting an unflushed transcript.
     """
     s = FakeJanitor()
-    s.get_latest_stats = AsyncMock(return_value=None)
-    # archive_video_batch calls get_latest_stats (a no-op here) and then the
+    s.get_latest_stats_batch = AsyncMock(return_value={})
+    # archive_video_batch calls get_latest_stats_batch (a no-op here) and then the
     # per-video vault safety check; the safety check is the last _fetch_one call.
     s._fetch_one.return_value = {"unvaulted": True}
     with patch("atlas.vault.get_vault") as mock_vault:

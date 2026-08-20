@@ -25,7 +25,6 @@ from __future__ import annotations
 import itertools
 import logging
 import os
-import random
 from collections.abc import Iterable, Iterator
 
 logger = logging.getLogger("atlas.egress")
@@ -77,35 +76,8 @@ class EgressPool:
                 proxy_labels(self._pool),
             )
 
-    @property
-    def size(self) -> int:
-        return len(self._pool)
-
-    @property
-    def has_multiple(self) -> bool:
-        return len(self._pool) > 1
-
-    def labels(self) -> list[str]:
-        return proxy_labels(self._pool)
-
     def cycle(self) -> tuple[str, str | None]:
         """Return the next egress ``(label, spec)`` in round-robin order."""
         idx = next(self._rr)
         spec = self._pool[idx]
         return (spec or DIRECT, spec)
-
-    def next_after(self, current: str | None) -> tuple[str, str | None]:
-        """Return the egress ``(label, spec)`` after *current* (for throttle failover)."""
-        try:
-            idx = self._pool.index(current)
-        except ValueError:
-            idx = -1
-        nxt = (idx + 1) % len(self._pool)
-        spec = self._pool[nxt]
-        return (spec or DIRECT, spec)
-
-    def shuffled_order(self) -> list[tuple[str, str | None]]:
-        """Return all egress specs in a fresh random order (for per-fetch spread)."""
-        order = list(range(len(self._pool)))
-        random.Random().shuffle(order)
-        return [(self._pool[i] or DIRECT, self._pool[i]) for i in order]

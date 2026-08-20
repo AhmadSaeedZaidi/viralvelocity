@@ -112,6 +112,9 @@ class VideoJanitorMixin(DatabaseAdapter):
         # within HuggingFace's 128-commits/hour limit.
         batch_items: list[tuple[str, dict[str, Any]]] = []
         date_keys: dict[str, str] = {}
+        # Fetch the latest stats for the whole batch in ONE query (was one
+        # ``get_latest_stats`` round-trip per video — the N+1 in the archive loop).
+        latest_stats_map = await self.get_latest_stats_batch([v.id for v in videos])
         for video in videos:
             metadata: dict[str, Any] = {
                 "id": video.id,
@@ -129,7 +132,7 @@ class VideoJanitorMixin(DatabaseAdapter):
                 "has_visuals": video.has_visuals,
             }
 
-            latest_stats = await self.get_latest_stats(video.id)
+            latest_stats = latest_stats_map.get(video.id)
             if latest_stats:
                 metadata["stats"] = {
                     "views": latest_stats.views,

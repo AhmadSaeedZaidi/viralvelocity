@@ -215,6 +215,12 @@ async def run_tracker_cycle(batch_size: int = 50):
 **Features**:
 - Adaptive Scheduling (infinite monitoring)
 - Adaptive tiers (HOURLY → DAILY → WEEKLY)
+
+> **Deployed**: Watchlist-driven adaptive scheduling is live and verified
+> (2026-08-03, local `pleiades` DB). Every discovered video joins the persistent
+> `watchlist` at tier `HOURLY`, tiers self-decay to `DAILY`/`WEEKLY` by age via
+> `calculate_next_track_time`, and `update_schedule` advances `next_track_at`.
+> The tracker drives cycles through `fetch_targets_task`/`update_stats_task`.
 - Resiliency Strategy integration
 
 #### 3. Janitor (Cleanup)

@@ -44,10 +44,28 @@ jobs:
               - "**/pyproject.toml"
               - "**/poetry.lock"
 
+  ensure-image:
+    name: Ensure CI image exists
+    runs-on: ubuntu-latest
+    outputs:
+      image-ready: ${{ steps.check.outputs.exists }}
+    steps:
+      # Self-heal: a fresh clone has no ci-env image in GHCR yet. Detect that
+      # and force build-env to build+push it so the container jobs below don't
+      # fail pulling a non-existent image.
+      - name: Check if base CI image exists in registry
+        id: check
+        env:
+          IMAGE: ${{ env.CI_IMAGE }}
+        run: |
+          docker manifest inspect "$IMAGE" >/dev/null 2>&1 \
+            && echo "exists=true" >> "$GITHUB_OUTPUT" \
+            || echo "exists=false" >> "$GITHUB_OUTPUT"
+
   build-env:
     name: Build CI Environment
-    needs: check-changes
-    if: needs.check-changes.outputs.needs-build == "true"
+    needs: [check-changes, ensure-image]
+    if: needs.check-changes.outputs.needs-build == "true" || needs.ensure-image.outputs.image-ready == "false"
     uses: ./.github/workflows/build-env.yml
     secrets: inherit
     permissions:
@@ -56,7 +74,7 @@ jobs:
 
   quality:
     name: Quality (Linting & Type Checking)
-    needs: build-env
+    needs: [build-env, ensure-image]
     if: always() && (needs.build-env.result == "success" || needs.build-env.result == "skipped")
     runs-on: ubuntu-latest
     timeout-minutes: 5

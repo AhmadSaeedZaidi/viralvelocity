@@ -239,15 +239,27 @@ spec:
 
 ### Best Practices
 
-#### 1. Separate Pools per Agent
+#### 1. One Pool, Multiple Key Rings
 
-```bash
-# Hunter keys (high volume)
-HUNTER_KEY_POOL='["key1", "key2", "key3"]'
+All keys come from the single `YOUTUBE_API_KEY_POOL_JSON` env var. At runtime
+`settings.key_rings` splits them into three rings — `hunting`, `tracking`,
+`archeology` (sizes from `KEY_POOL_TRACKING_SIZE` / `KEY_POOL_ARCHEOLOGY_SIZE`):
 
-# Tracker keys (lower volume)
-TRACKER_KEY_POOL='["key4", "key5"]'
+```python
+from atlas.config import settings
+from atlas.utils import KeyRing
+
+rings = settings.key_rings            # {"hunting": [...], "tracking": [...], "archeology": [...]}
+hunter_keys = KeyRing("hunting")      # small, elastic tier (exhausts first)
+tracker_keys = KeyRing("tracking")    # bulk of the pool (protected slice)
 ```
+
+> **Pool invariant**: `hunter` keys MUST rate-limit BEFORE `tracker` keys.
+> `key_rings` prioritises the tracking ring (bulk of keys); `hunting` is the
+> small tiered elastic remainder (2–12) that exhausts first. Don't invert this —
+> a small tracking ring starves the tracker and its stats go stale. If the pool
+> is too small for strict partitioning, all rings share the full list
+> (CHAOS MODE) so no ring is empty.
 
 #### 2. Monitor Quota Usage
 

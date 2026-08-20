@@ -45,15 +45,25 @@ class VideoQualityMixin(DatabaseAdapter):
 
     async def quality_report(self) -> dict[str, Any]:
         """Aggregate ingestion-quality statistics for monitoring."""
-        total = await self._fetch_one("SELECT COUNT(*) AS n FROM videos")
+        # Single aggregate pass over `videos` replaces the previous 4 scalar
+        # COUNT queries; status/duration-bucket groupings stay separate because
+        # they are different GROUP BY shapes.
+        agg = await self._fetch_one(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE duration IS NOT NULL) AS total_with_duration,
+                COUNT(*) FILTER (WHERE duration IS NOT NULL AND duration < 180) AS shorts_under_3m,
+                COUNT(*) FILTER (WHERE has_transcript) AS transcripts,
+                COUNT(*) FILTER (WHERE has_visuals)     AS visuals,
+                COUNT(*) FILTER (WHERE has_audio)       AS audio,
+                COUNT(*) FILTER (WHERE has_video)       AS video
+            FROM videos
+            """
+        )
+        agg = agg or {}
         by_status = await self._fetch_all(
             "SELECT status, COUNT(*) AS n FROM videos GROUP BY status ORDER BY n DESC"
-        )
-        shorts = await self._fetch_one(
-            "SELECT COUNT(*) AS n FROM videos WHERE duration IS NOT NULL AND duration < 180"
-        )
-        total_duration = await self._fetch_one(
-            "SELECT COUNT(*) AS n FROM videos WHERE duration IS NOT NULL"
         )
         buckets = await self._fetch_all(
             """
@@ -72,21 +82,16 @@ class VideoQualityMixin(DatabaseAdapter):
             ORDER BY bucket
             """
         )
-        coverage = await self._fetch_one(
-            """
-            SELECT
-                COUNT(*) FILTER (WHERE has_transcript) AS transcripts,
-                COUNT(*) FILTER (WHERE has_visuals)     AS visuals,
-                COUNT(*) FILTER (WHERE has_audio)        AS audio,
-                COUNT(*) FILTER (WHERE has_video)        AS video
-            FROM videos
-            """
-        )
         return {
-            "total_videos": total["n"] if total else 0,
-            "total_with_duration": total_duration["n"] if total_duration else 0,
-            "shorts_under_3m": shorts["n"] if shorts else 0,
+            "total_videos": agg.get("total") or 0,
+            "total_with_duration": agg.get("total_with_duration") or 0,
+            "shorts_under_3m": agg.get("shorts_under_3m") or 0,
             "by_status": {row["status"]: row["n"] for row in by_status},
             "duration_buckets": {row["bucket"]: row["n"] for row in buckets},
-            "artifact_coverage": dict(coverage) if coverage else {},
+            "artifact_coverage": {
+                "transcripts": agg.get("transcripts") or 0,
+                "visuals": agg.get("visuals") or 0,
+                "audio": agg.get("audio") or 0,
+                "video": agg.get("video") or 0,
+            },
         }

@@ -1,12 +1,15 @@
 name: Build Training Docker Image
 
+# NOTE: manual/dispatch-only. This workflow has no schedule and is only
+# triggered by workflow_dispatch. The path filter below references the real
+# build workflow (build-env.yml), which is the checked-in reusable workflow.
 on:
   push:
     branches: ["main"]
     paths:
       - 'training/Dockerfile'
       - 'training/requirements.txt'
-      - '.github/workflows/build-training-image.yml'
+      - '.github/workflows/build-env.yml'
   workflow_dispatch:
 
 env:

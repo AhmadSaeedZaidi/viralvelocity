@@ -25,6 +25,13 @@ repos:
         types_or: [python, pyi]
         stages: [pre-commit]
 
+      - id: ruff
+        name: ruff check (mcp)
+        args: [--fix, --exit-non-zero-on-fix, --config, pyproject.toml]
+        files: ^mcp/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
       - id: ruff-format
         name: ruff format (atlas)
         args: [--config, pyproject.toml]
@@ -43,6 +50,13 @@ repos:
         name: ruff format (alkyone)
         args: [--config, pyproject.toml]
         files: ^alkyone/
+        types_or: [python, pyi]
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff format (mcp)
+        args: [--config, pyproject.toml]
+        files: ^mcp/
         types_or: [python, pyi]
         stages: [pre-commit]
 

@@ -91,21 +91,12 @@ class VaultStrategy(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def store_binary(self, path: str, data: io.BytesIO) -> str:
-        pass
-
-    @abc.abstractmethod
     def store_batch(self, items: list[tuple[str, Any]]) -> list[str]:
         """Write many files in a single commit (HF) or batched call (GCS)."""
         pass
 
     @abc.abstractmethod
     def fetch_binary(self, path: str) -> io.BytesIO | None:
-        pass
-
-    @abc.abstractmethod
-    def make_uri(self, path: str) -> str:
-        """Return the provider-qualified URI for a stored *path*."""
         pass
 
     @abc.abstractmethod
@@ -254,9 +245,6 @@ class HuggingFaceVault(VaultStrategy):
             logger.exception(f"Failed to archive visual batch to HF: {e}")
             raise
 
-    def make_uri(self, path: str) -> str:
-        return f"hf://datasets/{self.repo_id}/{path}"
-
     def delete_files(self, paths: list[str]) -> int:
         """Delete the given repo-relative ``paths`` in batched commits (chunked
         to stay under HF's 128-commits/hour cap). Returns the number of files
@@ -281,22 +269,6 @@ class HuggingFaceVault(VaultStrategy):
                 logger.exception(f"HF purge failed: {e}")
                 raise
         return total
-
-    def store_binary(self, path: str, data: io.BytesIO) -> str:
-        try:
-            data.seek(0)
-            self.api.upload_file(
-                path_or_fileobj=data,
-                path_in_repo=path,
-                repo_id=self.repo_id,
-                repo_type="dataset",
-                commit_message=f"Vault: Binary {path}",
-            )
-            logger.info(f"Stored binary {path} to HF vault")
-            return f"hf://datasets/{self.repo_id}/{path}"
-        except Exception as e:
-            logger.exception(f"HF binary upload failed for {path}: {e}")
-            raise
 
     def store_batch(
         self, items: list[tuple[str, Any]], max_attempts: int = 8, base_delay: float = 30.0
@@ -476,9 +448,6 @@ class GCSVault(VaultStrategy):
             logger.exception(f"Failed to store visual batch to GCS: {e}")
             raise
 
-    def make_uri(self, path: str) -> str:
-        return f"gs://{self.bucket_name}/{path}"
-
     def delete_files(self, paths: list[str]) -> int:
         if not paths:
             return 0
@@ -490,17 +459,6 @@ class GCSVault(VaultStrategy):
                 count += 1
         logger.info(f"Purged {count} files from GCS vault")
         return count
-
-    def store_binary(self, path: str, data: io.BytesIO) -> str:
-        try:
-            data.seek(0)
-            blob = self.bucket.blob(path)
-            blob.upload_from_file(data)
-            logger.info(f"Stored binary {path} to GCS vault")
-            return f"gs://{self.bucket_name}/{path}"
-        except Exception as e:
-            logger.exception(f"GCS binary upload failed for {path}: {e}")
-            raise
 
     def store_batch(
         self, items: list[tuple[str, Any]], max_attempts: int = 8, base_delay: float = 5.0
@@ -606,12 +564,6 @@ def get_vault() -> VaultStrategy:
     if _vault_instance is None:
         _vault_instance = GCSVault() if settings.VAULT_PROVIDER == "gcs" else HuggingFaceVault()
     return _vault_instance
-
-
-def reset_vault() -> None:
-    """Reset the vault singleton.  Useful for testing."""
-    global _vault_instance
-    _vault_instance = None
 
 
 def audio_path(video_id: str) -> str:

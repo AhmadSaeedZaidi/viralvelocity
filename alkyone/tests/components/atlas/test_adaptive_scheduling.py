@@ -82,8 +82,16 @@ class TestAdaptiveScheduling:
         # Update schedules
         await watchlist_repo.update_schedule(updates)
 
-        # Verify updates (would query DB in real test)
-        assert True  # Placeholder
+        # Verify updates landed in the real watchlist table
+        rows = await watchlist_repo._fetch_all(
+            "SELECT video_id, tracking_tier FROM watchlist WHERE video_id = ANY(%s)",
+            (["VIDEO_001", "VIDEO_002"],),
+        )
+        by_id = {r["video_id"]: r["tracking_tier"] for r in rows}
+        assert by_id == {
+            "VIDEO_001": "DAILY",
+            "VIDEO_002": "WEEKLY",
+        }, f"Watchlist tiers not updated: {by_id}"
 
     @pytest.mark.asyncio
     async def test_calculate_next_track_time(self, watchlist_repo):

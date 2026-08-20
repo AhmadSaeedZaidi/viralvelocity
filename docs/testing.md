@@ -42,25 +42,52 @@ pleiades/
 
 ## CI/CD Testing
 
-### Ephemeral Database Environments
+The CI/CD model (see `.github/workflows/`) is **per-PR unit tests + on-demand
+integration tests** — there are no ephemeral Neon databases.
 
-CI integration tests use **Neon Postgres ephemeral branches**:
-- Each PR gets an isolated temporary database
-- Cloned from production (`main` branch)
-- Automatically cleaned up after tests
+### Per-PR: `ci.yml`
 
-**Required Configuration**:
+Every push (and every PR into `main`) runs `.github/workflows/ci.yml`:
+
+1. **`check-changes` / `build-env`** — detects whether dependencies
+   (`pyproject.toml`/`poetry.lock`, `ci.Dockerfile`, `build-env.yml`) changed;
+   if so it builds the shared `ghcr.io/ahmadsaeedzaidi/pleiades/ci-env:latest`
+   image first.
+2. **`quality`** — `make -C {atlas,maia,alkyone,mcp} lint` (ruff check + ruff
+   format check + mypy per package).
+3. **`unit-tests`** — `make test-unit` (atlas + maia + mcp per-agent unit
+   suites). Fast, no real infra required.
+
+Both jobs run in the pinned `ci-env` Docker container, so no per-job
+dependency installs are needed. `ci.yml` is skipped for pure `docs/**`/`*.md`
+changes.
+
+### On-demand: `alkyone.yml` (integration — NOT per-PR)
+
+Alkyone exercises **real infrastructure** (isolated test DB + test vault), so it
+is deliberately NOT run on every PR. It runs only via **manual dispatch**
+(`workflow_dispatch`) in `.github/workflows/alkyone.yml`, and only against
+isolated test credentials (`ALKONE_TEST_*` secrets). A production-safety guard
+(`alkyone/src/alkyone/guard.py`) hard-refuses the run if `DATABASE_URL` /
+`HF_DATASET_ID` resolve to the production targets.
+
 ```bash
-gh variable set NEON_PROJECT_ID --body "your-project-id"
-gh secret set NEON_API_KEY
+# Alkyone integration (isolated infra, prod-guarded) — manual, on demand
+gh workflow run alkyone.yml
 ```
 
-**Local Testing with Neon**:
+### Deployment: `cd.yml`
+
+On push to `main`, `.github/workflows/cd.yml` SSH-deploys to the executor VPS
+(git pull, install, re-apply orchestration, restart the worker service). See
+[docs/deploy.md](deploy.md).
+
+### Local run of the same gates
+
 ```bash
-neonctl branches create --name test-branch --parent main
-export DATABASE_URL=$(neonctl connection-string --branch test-branch)
-pytest -m integration
-neonctl branches delete test-branch
+make lint        # ruff + mypy across all modules
+make test-unit   # atlas + maia unit tests (the ci.yml unit-tests job)
+make -C alkyone test-int   # integration — only with isolated infra + creds
 ```
 
 ---

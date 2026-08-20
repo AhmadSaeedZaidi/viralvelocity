@@ -1,5 +1,7 @@
 name: Train Models (Daily)
 
+# NOTE: manual/dispatch-only. Schedule is commented out; fires only via
+# workflow_dispatch.
 on:
   # schedule:
   #   - cron: '0 2 * * *'

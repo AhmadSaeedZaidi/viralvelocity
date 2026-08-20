@@ -11,7 +11,7 @@ Keep this in sync if the architecture changes.
 | Role | Host | What runs |
 |------|------|-----------|
 | **Control plane (micro)** | `e2-micro-server`, private `10.0.0.22`, public `141.147.60.138`, AD-3, eu-frankfurt-1 | Prefect **server/API** on `:4200` (SQLite at `/opt/prefect/prefect.db`) |
-| **Executor (this VPS)** | `10.0.0.6` (2-core) | one `prefect-worker` service pulling the `default` pool; runs the actual flows (ffmpeg/yt-dlp) |
+| **Executor (this VPS)** | `10.0.0.6` (2-core) | one `prefect-orchestrator` service running `maia.orchestrator` in-process; drives all fleet flows (ffmpeg/yt-dlp) against the `default` pool |
 
 - The flow code (`maia/`, `atlas/`) lives on **this VPS** and is executed here. The micro only stores
   *orchestration* state (deployments, schedules, flow-run state) — **not** video data.

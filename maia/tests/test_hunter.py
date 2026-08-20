@@ -124,3 +124,67 @@ async def test_ingest_results_handles_vault_failure(
         )
 
         assert mock_video.ingest_video_metadata.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_results_none_response_returns_early(
+    mock_search_queue_item: dict[str, Any],
+):
+    """Test ingest_results returns early on a None response without calling DAOs."""
+    with (
+        patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
+        patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
+        patch("maia.hunter.flow.get_vault") as mock_get_vault,
+    ):
+        mock_video_repo = MockVideoRepo.return_value
+        mock_search_repo = MockSearchRepo.return_value
+        mock_video_repo.ingest_video_metadata = AsyncMock()
+        mock_search_repo.add_terms = AsyncMock()
+
+        await ingest_results_task.fn(mock_search_queue_item, None, MagicMock())
+
+        mock_video_repo.ingest_video_metadata.assert_not_called()
+        mock_search_repo.add_terms.assert_not_called()
+        mock_get_vault.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ingest_results_empty_tags_not_snowballed(
+    mock_strategy: MagicMock,
+    mock_search_queue_item: dict[str, Any],
+):
+    """Test ingest_results strips empty/whitespace tags before snowballing."""
+
+    async def _passthrough_gate(items, *args, **kwargs):
+        return items
+
+    item = {
+        "id": {"videoId": "test123"},
+        "snippet": {
+            "channelId": "UC123",
+            "title": "Test",
+            "tags": ["valid_tag", "", "   ", None, "ok_tag"],
+        },
+    }
+    response = {"items": [item]}
+
+    with (
+        patch("maia.hunter.flow.VideoRepository") as MockVideoRepo,
+        patch("maia.hunter.flow.SearchQueueRepository") as MockSearchRepo,
+        patch("maia.hunter.flow.get_vault"),
+        patch(
+            "maia.hunter.flow.filter_by_quality",
+            new=AsyncMock(side_effect=_passthrough_gate),
+        ),
+    ):
+        mock_video = MockVideoRepo.return_value
+        mock_search = MockSearchRepo.return_value
+        mock_video.ingest_video_metadata = AsyncMock()
+        mock_search.add_terms = AsyncMock(return_value=2)
+        mock_search.update_state = AsyncMock()
+
+        await ingest_results_task.fn(mock_search_queue_item, response, mock_strategy)
+
+        args = mock_search.add_terms.call_args[0][0]
+        assert set(args) == {"valid_tag", "ok_tag"}
+        mock_search.update_state.assert_awaited_once()

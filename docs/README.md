@@ -25,7 +25,7 @@
 ### Development & Ops
 - **[Testing Guide](testing.md)** - Unit, integration, and smoke testing
 - **[Contributing](contributing.md)** - Development workflow and standards
-- **[Challenges Log](challenges.md)** - Problems we hit and how we solved them
+- **[Challenges Log](CHALLENGES.md)** - Problems we hit and how we solved them
 
 ---
 
@@ -45,7 +45,7 @@
 ### For Operators
 1. Read [Deployment](deploy.md) (two-VPS setup)
 2. Read the [Orchestration Runbook](micro-prefect-orchestration.md)
-3. Keep [Challenges](challenges.md) handy for known traps
+3. Keep [Challenges](CHALLENGES.md) handy for known traps
 
 ---
 
@@ -124,7 +124,7 @@ pleiades/
 │   ├── README.md            # This file
 │   ├── deploy.md            # Two-VPS deployment guide
 │   ├── micro-prefect-orchestration.md  # Ops runbook
-│   ├── challenges.md        # Engineering challenges log
+│   ├── CHALLENGES.md        # Engineering challenges log
 │   ├── quickstart.md        # Getting started guide
 │   ├── architecture.md      # System architecture
 │   ├── adaptive-scheduling.md

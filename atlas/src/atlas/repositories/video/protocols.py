@@ -18,11 +18,11 @@ class VideoRepositoryProtocol(DatabaseAdapterProtocol, Protocol):
     ``_execute`` / ``_fetch_*`` helpers are also visible.
     """
 
-    async def save(self, video: Video) -> None: ...
-
     async def get_by_id(self, video_id: str) -> Video | None: ...
 
     async def get_latest_stats(self, video_id: str) -> VideoStats | None: ...
+
+    async def get_latest_stats_batch(self, video_ids: list[str]) -> dict[str, VideoStats]: ...
 
     async def ingest_video_metadata(
         self, video_data: dict[str, Any], priority_override: int | None = None

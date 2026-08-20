@@ -24,47 +24,6 @@ def _parse_iso_duration(value: Any) -> int | None:
 
 
 class VideoIngestionMixin(DatabaseAdapter):
-    async def save(self, video: Video) -> None:
-        query = """
-            INSERT INTO videos (
-                id, channel_id, title, published_at, duration,
-                tags, category_id, default_language, wiki_topics,
-                discovered_at, last_updated_at, status,
-                has_transcript, has_visuals
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO UPDATE SET
-                channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
-                title = EXCLUDED.title,
-                published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
-                tags = COALESCE(EXCLUDED.tags, videos.tags),
-                category_id = COALESCE(EXCLUDED.category_id, videos.category_id),
-                -- PENDING is the model default; treat it as "no explicit status
-                -- change" so a re-save of an already-PROCESSED/ARCHIVED video does
-                -- not regress its lifecycle state. An explicit non-PENDING status
-                -- is always honoured.
-                status = COALESCE(NULLIF(EXCLUDED.status, 'PENDING'), videos.status)
-        """
-        await self._execute(
-            query,
-            (
-                video.id,
-                video.channel_id,
-                video.title,
-                video.published_at,
-                video.duration,
-                video.tags,
-                video.category_id,
-                video.default_language,
-                video.wiki_topics,
-                video.discovered_at,
-                video.last_updated_at,
-                video.status,
-                video.has_transcript,
-                video.has_visuals,
-            ),
-        )
-
     async def get_by_id(self, video_id: str) -> Video | None:
         row = await self._fetch_one("SELECT * FROM videos WHERE id = %s", (video_id,))
         return Video.model_validate(row) if row else None
@@ -81,6 +40,25 @@ class VideoIngestionMixin(DatabaseAdapter):
             (video_id,),
         )
         return VideoStats.model_validate(row) if row else None
+
+    async def get_latest_stats_batch(self, video_ids: list[str]) -> dict[str, VideoStats]:
+        """Return the latest stats row per video id in ONE query (avoids N+1).
+
+        ``DISTINCT ON`` picks the newest ``video_stats_log`` row per video in a
+        single pass; videos with no stats are simply absent from the result.
+        """
+        if not video_ids:
+            return {}
+        rows = await self._fetch_all(
+            """
+            SELECT DISTINCT ON (video_id) video_id, views, likes, comment_count, timestamp
+            FROM video_stats_log
+            WHERE video_id = ANY(%s)
+            ORDER BY video_id, timestamp DESC
+            """,
+            (video_ids,),
+        )
+        return {r["video_id"]: VideoStats.model_validate(r) for r in rows}
 
     async def ingest_video_metadata(
         self, video_data: dict[str, Any], priority_override: int | None = None
